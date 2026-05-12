@@ -15,6 +15,7 @@ export default function Dashboard() {
   const [savedSales, setSavedSales] = useState([]);
   const [uploadStatus, setUploadStatus] = useState('');
 
+  // 1. Fetch data function (reusable)
   const fetchData = async () => {
     const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
     const startDate = `2026-${monthStr}-01`;
@@ -24,15 +25,16 @@ export default function Dashboard() {
     if (expData) setExpenses(expData);
 
     const { data: saleData } = await supabase.from('sales').select('*').gte('sale_date', startDate).lte('sale_date', endDate);
-    if (saleData) setSavedSales(saleData);
+    if (saleData) setSavedSales(saleData || []);
   };
 
   useEffect(() => { fetchData(); }, [selectedMonth]);
 
+  // 2. The Universal Uploader
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Processing labels...');
+    setUploadStatus('Reading file...');
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -42,17 +44,15 @@ export default function Dashboard() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-        // Find header row by checking for common marketplace keywords
         const headerRowIndex = rows.findIndex((row: any) => 
           Array.isArray(row) && row.some(cell => {
             const c = String(cell).toLowerCase().trim();
-            return c.includes('listing title') || c.includes('gross sales') || 
-                   c.includes('period') || c.includes('total sales');
+            return c.includes('listing title') || c.includes('gross sales') || c.includes('period') || c.includes('total sales');
           })
         );
 
         if (headerRowIndex === -1) {
-          setUploadStatus('Error: Column "Listing title" not found.');
+          setUploadStatus('Error: Missing "Listing title" or "Total" headers.');
           return;
         }
 
@@ -64,69 +64,58 @@ export default function Dashboard() {
           const rowObj: any = {};
           headers.forEach((header: string, i: number) => { rowObj[header] = row[i]; });
 
-          // Check every possible "Money" column name from eBay, TCG, and ManaPool
-          const val = rowObj['Total sales (Includes taxes)'] || 
-                      rowObj['Gross Sales'] || 
-                      rowObj['Total'] || 
-                      rowObj['Gross transaction amount'] ||
-                      rowObj['Net Sales'];
+          const val = rowObj['Total sales (Includes taxes)'] || rowObj['Gross Sales'] || rowObj['Total'] || rowObj['Gross transaction amount'] || rowObj['Net Sales'];
           
           if (val !== undefined && val !== null && String(val).trim() !== "") {
-            // Scrub dollar signs, commas, and trailing spaces
-            const cleanVal = String(val).replace(/[$, ]/g, '');
-            const num = parseFloat(cleanVal);
+            const num = parseFloat(String(val).replace(/[$, ]/g, ''));
             if (!isNaN(num)) total += num;
           }
         });
 
-        // Determine Platform
         let platform = 'eBay';
         if (headers.some(h => h.toLowerCase().includes('period'))) platform = 'ManaPool';
         else if (headers.some(h => h.toLowerCase().includes('channel'))) platform = 'TCGplayer';
 
-        const { error } = await supabase.from('sales').insert([
-          { 
-            platform, 
-            amount: total, 
-            sale_date: `2026-${selectedMonth < 10 ? '0' : ''}${selectedMonth}-01` 
-          }
-        ]);
+        const { error } = await supabase.from('sales').insert([{ platform, amount: total, sale_date: `2026-${selectedMonth < 10 ? '0' : ''}${selectedMonth}-01` }]);
 
         if (error) throw error;
-        setUploadStatus(`Success! Added ${platform}: $${total.toLocaleString()}`);
+        setUploadStatus(`Success! Added $${total.toFixed(2)}`);
         fetchData();
       } catch (err) {
-        setUploadStatus('Error: Could not save to database.');
+        setUploadStatus('Upload failed. Try again.');
       }
     };
     reader.readAsBinaryString(file);
   };
 
   const deleteSale = async (id) => {
-    const { error } = await supabase.from('sales').delete().eq('id', id);
-    if (!error) fetchData();
+    await supabase.from('sales').delete().eq('id', id);
+    fetchData();
   };
 
-  const totalSales = savedSales.reduce((s, i) => s + Number(i.amount), 0);
-  const totalExp = expenses.reduce((s, i) => s + Number(i.cost), 0);
+  // Calculations based on current state
+  const totalSalesVal = savedSales.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+  const totalExpVal = expenses.reduce((acc, curr) => acc + Number(curr.cost || 0), 0);
+
   const cardStyle = { backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', marginBottom: '16px' };
 
   return (
     <div style={{ fontFamily: 'Calibri, sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
       
-      {/* Header */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <img src="/logo.png" style={{ width: '45px' }} />
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #ddd' }}>
-            <option value={3}>March</option>
-            <option value={4}>April</option>
-            <option value={5}>May</option>
-          </select>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={fetchData} style={{ background: 'none', border: 'none', fontSize: '18px' }}>🔄</button>
+            <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px' }}>
+              <option value={3}>March</option>
+              <option value={4}>April</option>
+              <option value={5}>May</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Tab Switcher */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '16px' }}>
         {['summary', 'imports', 'manage'].map(t => (
           <button key={t} onClick={() => setActiveTab(t)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', fontSize: '11px', backgroundColor: activeTab === t ? '#2563eb' : '#e5e7eb', color: activeTab === t ? 'white' : '#4b5563' }}>
@@ -135,55 +124,44 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Summary Tab */}
       {activeTab === 'summary' && (
         <div style={cardStyle}>
-          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '15px' }}>Monthly Overview</h3>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Financials</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', margin: '15px 0' }}>
             <span>Total Sales</span>
-            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${totalSales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${totalSalesVal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
             <span>Expenses</span>
-            <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExp.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExpVal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
           <div style={{ padding: '15px', borderRadius: '16px', backgroundColor: '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontWeight: 'bold' }}>Net Profit</span>
-            <span style={{ fontWeight: 'bold', color: '#166534' }}>${(totalSales - totalExp).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span style={{ fontWeight: 'bold', color: '#166534' }}>${(totalSalesVal - totalExpVal).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
         </div>
       )}
 
-      {/* Imports Tab */}
       {activeTab === 'imports' && (
         <div style={cardStyle}>
-          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Import Marketplace Report</h3>
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Universal Importer</h3>
           <input type="file" accept=".csv" onChange={handleFileUpload} style={{ width: '100%', marginBottom: '10px' }} />
-          {uploadStatus && (
-            <div style={{ padding: '12px', borderRadius: '12px', backgroundColor: '#eff6ff', color: '#1d4ed8', fontWeight: 'bold', fontSize: '14px' }}>
-              {uploadStatus}
-            </div>
-          )}
+          {uploadStatus && <div style={{ padding: '12px', borderRadius: '12px', backgroundColor: '#eff6ff', color: '#1d4ed8', fontSize: '14px' }}>{uploadStatus}</div>}
         </div>
       )}
 
-      {/* Manage Tab */}
       {activeTab === 'manage' && (
         <div style={cardStyle}>
-          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Saved Records</h3>
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Records</h3>
           {savedSales.map(sale => (
-            <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f3f4f6' }}>
-              <div>
-                <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{sale.platform}</div>
-                <div style={{ fontSize: '11px', color: '#9ca3af' }}>{new Date(sale.created_at).toLocaleDateString()}</div>
-              </div>
+            <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #eee' }}>
+              <div><b>{sale.platform}</b><br/><small>{new Date(sale.created_at).toLocaleDateString()}</small></div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontWeight: 'bold' }}>${Number(sale.amount).toLocaleString()}</span>
-                <button onClick={() => deleteSale(sale.id)} style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '6px 10px', fontSize: '12px', fontWeight: 'bold' }}>Del</button>
+                <b>${Number(sale.amount).toLocaleString()}</b>
+                <button onClick={() => deleteSale(sale.id)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '5px 10px', borderRadius: '8px' }}>X</button>
               </div>
             </div>
           ))}
-          {savedSales.length === 0 && <p style={{ fontSize: '14px', color: '#6b7280' }}>No sales data found for this month.</p>}
         </div>
       )}
     </div>
