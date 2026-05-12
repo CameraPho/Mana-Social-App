@@ -37,13 +37,13 @@ export default function Dashboard() {
       const text = event.target.result;
       const rows = text.split('\n').map(row => row.split(','));
       
-      // Smart Header Detection: Find where the data actually starts
+      // Finds the header row by searching for key eBay terms
       const headerRowIndex = rows.findIndex(row => 
-        row.some(cell => cell.includes('Gross transaction amount') || cell.includes('Total sales'))
+        row.some(cell => cell.includes('Transaction creation date') || cell.includes('Total sales'))
       );
 
       if (headerRowIndex === -1) {
-        setUploadStatus('Error: Could not find data headers.');
+        setUploadStatus('Error: Header not found.');
         return;
       }
 
@@ -55,7 +55,6 @@ export default function Dashboard() {
         const rowObj = {};
         headers.forEach((header, i) => { rowObj[header] = row[i]; });
 
-        // Targets both "Transaction" and "Sales" report formats
         const val = rowObj['Gross transaction amount'] || rowObj['Total sales (Includes taxes)'];
         const type = rowObj['Type'];
 
@@ -77,7 +76,7 @@ export default function Dashboard() {
     <div style={{ fontFamily: 'sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <img src="/logo.png" style={{ width: '45px' }} />
+          <img src="/logo.png" style={{ width: '45px' }} alt="Logo" />
           <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px' }}>
             <option value={3}>March</option>
             <option value={4}>April</option>
