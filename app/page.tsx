@@ -17,12 +17,9 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
-    const dateQuery = `2026-${monthStr}`;
-
-    const { data: expData } = await supabase.from('expenses').select('*').like('purchase_date', `%${dateQuery}%`);
+    const { data: expData } = await supabase.from('expenses').select('*').like('purchase_date', `%2026-${monthStr}%`);
     if (expData) setExpenses(expData);
-
-    const { data: saleData } = await supabase.from('sales').select('*').like('sale_date', `%${dateQuery}%`);
+    const { data: saleData } = await supabase.from('sales').select('*').like('sale_date', `%2026-${monthStr}%`);
     if (saleData) setSavedSales(saleData);
   };
 
@@ -31,7 +28,7 @@ export default function Dashboard() {
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Reading file...');
+    setUploadStatus('Scanning file...');
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -41,45 +38,45 @@ export default function Dashboard() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-        // 1. FIND THE HEADER ROW (Handles TCGplayer title rows & eBay disclaimers)
+        // 1. ROBUST HEADER SEARCH
         let headerRowIndex = -1;
         let platform = 'eBay';
 
-        for (let i = 0; i < Math.min(rows.length, 15); i++) {
-          const row = rows[i].map(cell => String(cell || '').toLowerCase().trim());
-          if (row.includes('listing title') || row.includes('total sales (includes taxes)')) {
+        for (let i = 0; i < Math.min(rows.length, 20); i++) {
+          const cleanRow = rows[i].map(cell => String(cell || '').toLowerCase().replace(/[^a-z]/g, ''));
+          if (cleanRow.includes('listingtitle') || cleanRow.includes('totalsalesincludestaxes')) {
             headerRowIndex = i; platform = 'eBay'; break;
           }
-          if (row.includes('gross sales') || row.includes('net sales')) {
+          if (cleanRow.includes('grosssales') || cleanRow.includes('netsales')) {
             headerRowIndex = i; platform = 'TCGplayer'; break;
           }
-          if (row.includes('period') && row.includes('total')) {
+          if (cleanRow.includes('period') && cleanRow.includes('total')) {
             headerRowIndex = i; platform = 'ManaPool'; break;
           }
         }
 
         if (headerRowIndex === -1) {
-          setUploadStatus('Error: Platform headers not found. Check top row.');
+          setUploadStatus('Error: Could not find marketplace columns.');
           return;
         }
 
-        const headers = rows[headerRowIndex].map(h => String(h || '').trim());
+        const rawHeaders = rows[headerRowIndex];
         const dataRows = rows.slice(headerRowIndex + 1);
         
-        // 2. EXTRACT THE MONEY
+        // 2. AGGRESSIVE VALUE EXTRACTION
         let totalAmount = 0;
         dataRows.forEach((row: any) => {
-          headers.forEach((header, colIdx) => {
-            const h = header.toLowerCase();
-            // Match the specific "Total" column for each platform
+          rawHeaders.forEach((h, colIdx) => {
+            const head = String(h || '').toLowerCase().replace(/[^a-z]/g, '');
+            const val = row[colIdx];
+            
             if (
-              h === 'total sales (includes taxes)' || 
-              h === 'gross sales' || 
-              (platform === 'ManaPool' && h === 'total')
+              head === 'totalsalesincludestaxes' || 
+              head === 'grosssales' || 
+              (platform === 'ManaPool' && head === 'total')
             ) {
-              const val = row[colIdx];
               if (val !== undefined && val !== null) {
-                const num = parseFloat(String(val).replace(/[$, ]/g, ''));
+                const num = parseFloat(String(val).replace(/[^\d.-]/g, ''));
                 if (!isNaN(num)) totalAmount += num;
               }
             }
@@ -87,12 +84,12 @@ export default function Dashboard() {
         });
 
         if (totalAmount === 0) {
-          setUploadStatus('Warning: Found headers but total was $0.');
+          setUploadStatus('Error: File read successfully but total was $0.00');
           return;
         }
 
-        // 3. SAVE TO SUPABASE (Strictly Awaited)
-        setUploadStatus(`Saving ${platform} data...`);
+        // 3. DATABASE SYNC
+        setUploadStatus(`Uploading ${platform} total...`);
         const { error } = await supabase.from('sales').insert([
           { 
             platform, 
@@ -103,12 +100,11 @@ export default function Dashboard() {
 
         if (error) throw error;
 
-        setUploadStatus(`Success! Added ${platform}: $${totalAmount.toLocaleString()}`);
-        e.target.value = null; // Reset input
-        fetchData(); // Force UI refresh
+        setUploadStatus(`Saved ${platform}: $${totalAmount.toLocaleString()}`);
+        e.target.value = null; 
+        fetchData(); 
       } catch (err) {
-        setUploadStatus('Database Error: Check connection.');
-        console.error(err);
+        setUploadStatus('Database Error: Record failed to save.');
       }
     };
     reader.readAsArrayBuffer(file);
@@ -121,16 +117,15 @@ export default function Dashboard() {
 
   const totalSales = savedSales.reduce((s, i) => s + Number(i.amount), 0);
   const totalExp = expenses.reduce((s, i) => s + Number(i.cost), 0);
-  const cardStyle = { backgroundColor: 'white', borderRadius: '20px', padding: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', marginBottom: '16px' };
+  const cardStyle = { backgroundColor: 'white', borderRadius: '18px', padding: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', marginBottom: '16px' };
 
   return (
-    <div style={{ fontFamily: 'Segoe UI, Tahoma, sans-serif', backgroundColor: '#f1f5f9', minHeight: '100vh', padding: '16px' }}>
+    <div style={{ fontFamily: 'system-ui, sans-serif', backgroundColor: '#f0f4f8', minHeight: '100vh', padding: '16px' }}>
       
-      {/* Top Bar */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontWeight: '800', fontSize: '20px', color: '#0f172a', letterSpacing: '-0.5px' }}>MANA SOCIAL</span>
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px 12px', borderRadius: '10px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '14px', fontWeight: '600' }}>
+          <span style={{ fontWeight: '900', fontSize: '18px', color: '#1e293b' }}>MANA SOCIAL</span>
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
             <option value={3}>March</option>
             <option value={4}>April</option>
             <option value={5}>May</option>
@@ -138,11 +133,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Nav */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
         {['summary', 'imports', 'manage'].map(t => (
-          <button key={t} onClick={() => setActiveTab(t)} style={{ flex: 1, padding: '12px', borderRadius: '14px', border: 'none', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', backgroundColor: activeTab === t ? '#2563eb' : '#fff', color: activeTab === t ? '#fff' : '#64748b', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-            {t}
+          <button key={t} onClick={() => setActiveTab(t)} style={{ flex: 1, padding: '14px', borderRadius: '12px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: activeTab === t ? '#2563eb' : '#fff', color: activeTab === t ? '#fff' : '#64748b' }}>
+            {t.toUpperCase()}
           </button>
         ))}
       </div>
@@ -150,55 +144,47 @@ export default function Dashboard() {
       {activeTab === 'summary' && (
         <div style={cardStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <span style={{ color: '#64748b', fontWeight: '500' }}>Total Revenue</span>
-            <span style={{ fontWeight: '700', color: '#2563eb' }}>${totalSales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span style={{ color: '#64748b' }}>Gross Revenue</span>
+            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${totalSales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-            <span style={{ color: '#64748b', fontWeight: '500' }}>Total Expenses</span>
-            <span style={{ fontWeight: '700', color: '#ef4444' }}>-${totalExp.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span style={{ color: '#64748b' }}>Total Expenses</span>
+            <span style={{ fontWeight: 'bold', color: '#ef4444' }}>-${totalExp.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
-          <div style={{ padding: '18px', borderRadius: '16px', backgroundColor: '#f0fdf4', display: 'flex', justifyContent: 'space-between', border: '1px solid #dcfce7' }}>
-            <span style={{ fontWeight: '800', color: '#166534' }}>Net Profit</span>
-            <span style={{ fontWeight: '800', color: '#166534' }}>${(totalSales - totalExp).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+          <div style={{ padding: '20px', borderRadius: '14px', backgroundColor: '#ecfdf5', display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: 'bold', color: '#065f46' }}>Net Profit</span>
+            <span style={{ fontWeight: 'bold', color: '#065f46' }}>${(totalSales - totalExp).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
         </div>
       )}
 
       {activeTab === 'imports' && (
         <div style={cardStyle}>
-          <h3 style={{ fontSize: '15px', fontWeight: '700', marginBottom: '12px', color: '#1e293b' }}>Upload Reports</h3>
-          <input type="file" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} style={{ width: '100%', marginBottom: '15px', fontSize: '14px' }} />
+          <h3 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '15px' }}>Marketplace Importer</h3>
+          <input type="file" onChange={handleFileUpload} style={{ width: '100%', marginBottom: '15px' }} />
           {uploadStatus && (
-            <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: uploadStatus.includes('Error') ? '#fef2f2' : '#eff6ff', color: uploadStatus.includes('Error') ? '#991b1b' : '#1e40af', fontSize: '13px', fontWeight: '600', border: '1px solid' }}>
+            <div style={{ padding: '12px', borderRadius: '10px', backgroundColor: uploadStatus.includes('Error') ? '#fef2f2' : '#eff6ff', color: uploadStatus.includes('Error') ? '#991b1b' : '#1e40af', fontWeight: 'bold', fontSize: '13px' }}>
               {uploadStatus}
             </div>
           )}
-          <div style={{ marginTop: '20px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '10px', fontSize: '11px', color: '#64748b', lineHeight: '1.5' }}>
-            <b>Supported Formats:</b><br/>
-            • eBay (Manual or Cleaned)<br/>
-            • TCGplayer (Direct export)<br/>
-            • ManaPool (Period total)
-          </div>
         </div>
       )}
 
       {activeTab === 'manage' && (
         <div style={cardStyle}>
-          <h3 style={{ fontSize: '15px', fontWeight: '700', marginBottom: '12px', color: '#1e293b' }}>Transaction History</h3>
-          {savedSales.length > 0 ? savedSales.map(sale => (
+          <h3 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '12px' }}>Monthly Totals</h3>
+          {savedSales.map(sale => (
             <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f1f5f9' }}>
               <div>
-                <div style={{ fontWeight: '700', fontSize: '14px', color: '#334155' }}>{sale.platform}</div>
+                <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{sale.platform}</div>
                 <div style={{ fontSize: '11px', color: '#94a3b8' }}>{new Date(sale.created_at).toLocaleDateString()}</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontWeight: '700', fontSize: '14px', color: '#0f172a' }}>${Number(sale.amount).toLocaleString()}</span>
-                <button onClick={() => deleteSale(sale.id)} style={{ backgroundColor: '#fff', color: '#ef4444', border: '1px solid #fee2e2', borderRadius: '8px', padding: '6px 10px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Delete</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <span style={{ fontWeight: 'bold' }}>${Number(sale.amount).toLocaleString()}</span>
+                <button onClick={() => deleteSale(sale.id)} style={{ color: '#ef4444', border: 'none', background: 'none', fontWeight: 'bold', cursor: 'pointer' }}>Delete</button>
               </div>
             </div>
-          )) : (
-            <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '13px', padding: '20px' }}>No records for this month yet.</p>
-          )}
+          ))}
         </div>
       )}
     </div>
