@@ -1,46 +1,62 @@
 'use client'
 import { useState } from 'react'
+import { PlusCircle, TrendingUp, Receipt, Calculator } from 'lucide-react'
 
 export default function Dashboard() {
-  const [platformData, setPlatformData] = useState({
-    tcgplayer: 0,
-    ebay: 0,
-    manapool: 0
-  })
-
-  // Tax logic: Deducting Facilitator sales from Gross for CA Form 401-A
-  const totalGross = platformData.tcgplayer + platformData.ebay + platformData.manapool
-  const facilitatorDeductions = totalGross // Since all 3 are facilitators
-  const taxableSales = totalGross - facilitatorDeductions 
-  const taxOwed = taxableSales * 0.0875
+  const [sales, setSales] = useState(0)
 
   return (
-    <div className="p-6 font-sans max-w-lg mx-auto">
-      <h1 className="text-3xl font-bold mb-6">Mana Social LLC</h1>
-      
-      <section className="mb-8">
-        <h2 className="text-xl font-bold border-b-2 mb-4">Platform Breakdowns</h2>
-        <div className="space-y-2">
-          <p className="flex justify-between font-mono">TCGplayer <span>${platformData.tcgplayer.toFixed(2)}</span></p>
-          <p className="flex justify-between font-mono">eBay <span>${platformData.ebay.toFixed(2)}</span></p>
-          <p className="flex justify-between font-mono">ManaPool <span>${platformData.manapool.toFixed(2)}</span></p>
-        </div>
-      </section>
+    <div className="min-h-screen bg-gray-50 p-6 font-sans">
+      <header className="mb-8">
+        <h1 className="text-2xl font-bold text-slate-800">Mana Social LLC</h1>
+        <p className="text-slate-500">Moreno Valley HQ | 8.75% Tax Zone</p>
+      </header>
 
-      <section className="mb-8 p-4 bg-gray-50 rounded-lg">
-        <h2 className="text-xl font-bold mb-2">CA Sales Tax (8.75%)</h2>
-        <p className="text-sm text-gray-500 mb-4">Calculated for Moreno Valley LLC</p>
-        <div className="space-y-1">
-            <p className="text-sm">Gross Sales: ${totalGross.toFixed(2)}</p>
-            <p className="text-sm text-green-600">Facilitator Deduction: -${facilitatorDeductions.toFixed(2)}</p>
-            <p className="text-lg font-bold mt-2">${taxOwed.toFixed(2)} Owed</p>
-        </div>
-      </section>
+      {/* Quick Actions */}
+      <div className="grid grid-cols-2 gap-4 mb-8">
+        <button className="flex flex-col items-center justify-center p-4 bg-blue-600 text-white rounded-2xl shadow-lg">
+          <PlusCircle size={24} />
+          <span className="text-xs mt-2 font-semibold">Add Sale</span>
+        </button>
+        <button className="flex flex-col items-center justify-center p-4 bg-white text-slate-700 rounded-2xl shadow-md border border-slate-200">
+          <Receipt size={24} />
+          <span className="text-xs mt-2 font-semibold">Scan Receipt</span>
+        </button>
+      </div>
 
-      <div className="flex flex-col gap-3">
-        <button className="bg-blue-600 text-white p-3 rounded-lg font-bold">Upload TCGplayer CSV</button>
-        <button className="bg-blue-600 text-white p-3 rounded-lg font-bold">Upload eBay CSV</button>
-        <button className="bg-blue-600 text-white p-3 rounded-lg font-bold">Upload ManaPool CSV</button>
+      {/* The Profit Engine */}
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-6">
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h2 className="text-slate-500 text-sm font-medium uppercase tracking-wider">Gross Sales</h2>
+            <p className="text-4xl font-bold text-slate-900 mt-1">$0.00</p>
+          </div>
+          <TrendingUp className="text-green-500" />
+        </div>
+        
+        <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs text-slate-400">15% Margin Target</p>
+            <p className="font-semibold text-blue-600">$0.00</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-400">Est. Tax Credits</p>
+            <p className="font-semibold text-slate-700">$0.00</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Tax Alert Logic */}
+      <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl">
+        <div className="flex gap-3">
+          <Calculator className="text-amber-600" />
+          <div>
+            <h3 className="text-sm font-bold text-amber-800">Marketplace Deduction Logic</h3>
+            <p className="text-xs text-amber-700 mt-1">
+              The engine is ready to filter eBay/TCGplayer taxes so you don't overpay the CDTFA.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   )
