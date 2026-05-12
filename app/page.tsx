@@ -12,49 +12,54 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('summary');
   const [selectedMonth, setSelectedMonth] = useState(4); 
   const [expenses, setExpenses] = useState([]);
-  const [salesTotal, setSalesTotal] = useState(0);
+  const [savedSales, setSavedSales] = useState([]);
   const [uploadStatus, setUploadStatus] = useState('');
 
-  useEffect(() => {
-    async function getExpenses() {
-      const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
-      const { data } = await supabase
-        .from('expenses')
-        .select('*')
-        .gte('purchase_date', `2026-${monthStr}-01`)
-        .lt('purchase_date', `2026-${selectedMonth === 12 ? '01' : monthStr}-31`);
-      if (data) setExpenses(data);
-    }
-    getExpenses();
-  }, [selectedMonth]);
+  // Fetch both Expenses and Sales from Supabase
+  const fetchData = async () => {
+    const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
+    const startDate = `2026-${monthStr}-01`;
+    const endDate = `2026-${monthStr}-31`;
+
+    const { data: expData } = await supabase
+      .from('expenses')
+      .select('*')
+      .gte('purchase_date', startDate)
+      .lte('purchase_date', endDate);
+    if (expData) setExpenses(expData);
+
+    const { data: saleData } = await supabase
+      .from('sales')
+      .select('*')
+      .gte('sale_date', startDate)
+      .lte('sale_date', endDate);
+    if (saleData) setSavedSales(saleData);
+  };
+
+  useEffect(() => { fetchData(); }, [selectedMonth]);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Analyzing file...');
+    setUploadStatus('Saving to Database...');
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const bstr = evt.target.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
+        const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-        // UNIVERSAL HEADER SEARCH
-        // Added 'period' and 'order count' to catch ManaPool files
         const headerRowIndex = rows.findIndex((row: any) => 
           Array.isArray(row) && row.some(cell => {
             const c = String(cell).toLowerCase();
-            return c.includes('gross sales') || c.includes('net sales') || 
-                   c.includes('total sales') || c.includes('transaction creation') ||
-                   c.includes('period') || c.includes('order count');
+            return c.includes('gross sales') || c.includes('total sales') || c.includes('period');
           })
         );
 
         if (headerRowIndex === -1) {
-          setUploadStatus('Error: File format not recognized.');
+          setUploadStatus('Error: Platform format not found.');
           return;
         }
 
@@ -65,45 +70,54 @@ export default function Dashboard() {
         dataRows.forEach((row: any) => {
           const rowObj: any = {};
           headers.forEach((header: string, i: number) => { rowObj[header] = row[i]; });
-
-          // Money Column Detection
-          // Added 'Total' and 'Subtotal' to support ManaPool
-          const val = rowObj['Gross Sales'] || 
-                      rowObj['Net Sales'] ||
-                      rowObj['Gross transaction amount'] || 
-                      rowObj['Total sales (Includes taxes)'] || 
-                      rowObj['Total price'] ||
-                      rowObj['Total'] ||
-                      rowObj['Subtotal'];
-          
-          const type = rowObj['Type'];
-
-          // Filter: Count the row if it has a value and isn't a non-order type (for eBay)
-          if (val && (!type || String(type).toLowerCase().includes('order'))) {
+          const val = rowObj['Gross Sales'] || rowObj['Total sales (Includes taxes)'] || rowObj['Total'] || rowObj['Gross transaction amount'];
+          if (val) {
             const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[$,]/g, ''));
             if (!isNaN(num)) total += num;
           }
         });
 
-        setSalesTotal(total);
-        setUploadStatus(`Success! $${total.toLocaleString(undefined, {minimumFractionDigits: 2})} identified.`);
+        // Determine Platform Name
+        let platform = 'Unknown';
+        if (headers.includes('Period')) platform = 'ManaPool';
+        else if (headers.includes('Channel')) platform = 'TCGplayer';
+        else platform = 'eBay';
+
+        // SAVE TO SUPABASE
+        const { error } = await supabase.from('sales').insert([
+          { 
+            platform, 
+            amount: total, 
+            sale_date: `2026-${selectedMonth < 10 ? '0' : ''}${selectedMonth}-01` 
+          }
+        ]);
+
+        if (error) throw error;
+        
+        setUploadStatus(`Saved ${platform}: $${total.toLocaleString()}`);
+        fetchData(); // Refresh the numbers
       } catch (err) {
-        setUploadStatus('Error processing file.');
+        setUploadStatus('Error saving to database.');
       }
     };
     reader.readAsBinaryString(file);
   };
 
-  const totalExpenses = expenses.reduce((s, i) => s + Number(i.cost), 0);
+  const deleteSale = async (id) => {
+    await supabase.from('sales').delete().eq('id', id);
+    fetchData();
+  };
+
+  const totalSales = savedSales.reduce((s, i) => s + Number(i.amount), 0);
+  const totalExp = expenses.reduce((s, i) => s + Number(i.cost), 0);
   const cardStyle = { backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', marginBottom: '16px' };
 
   return (
     <div style={{ fontFamily: 'Calibri, sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
-      
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <img src="/logo.png" style={{ width: '50px' }} alt="Logo" />
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #ddd' }}>
+          <img src="/logo.png" style={{ width: '45px' }} />
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px' }}>
             <option value={3}>March</option>
             <option value={4}>April</option>
             <option value={5}>May</option>
@@ -111,44 +125,57 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        <button onClick={() => setActiveTab('summary')} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'summary' ? '#2563eb' : '#e5e7eb', color: activeTab === 'summary' ? 'white' : '#4b5563' }}>Summary</button>
-        <button onClick={() => setActiveTab('imports')} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'imports' ? '#2563eb' : '#e5e7eb', color: activeTab === 'imports' ? 'white' : '#4b5563' }}>Imports</button>
+      {/* Tab Navigation */}
+      <div style={{ display: 'flex', gap: '5px', marginBottom: '16px', overflowX: 'auto' }}>
+        {['summary', 'imports', 'manage'].map(tab => (
+          <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '10px', borderRadius: '12px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: activeTab === tab ? '#2563eb' : '#e5e7eb', color: activeTab === tab ? 'white' : '#4b5563' }}>
+            {tab.toUpperCase()}
+          </button>
+        ))}
       </div>
 
-      {activeTab === 'summary' ? (
+      {activeTab === 'summary' && (
         <div style={cardStyle}>
-          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '10px' }}>Dashboard Summary</h3>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <span>Gross Revenue</span>
-            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${salesTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Financials</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', margin: '15px 0' }}>
+            <span>Total Sales</span>
+            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${totalSales.toLocaleString()}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
             <span>Expenses</span>
-            <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExp.toLocaleString()}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', backgroundColor: '#f0fdf4', padding: '15px', borderRadius: '16px' }}>
+          <div style={{ padding: '15px', borderRadius: '16px', backgroundColor: '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontWeight: 'bold' }}>Net Profit</span>
-            <span style={{ fontWeight: 'bold', color: '#166534' }}>${(salesTotal - totalExpenses).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span style={{ fontWeight: 'bold', color: '#166534' }}>${(totalSales - totalExp).toLocaleString()}</span>
           </div>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'imports' && (
         <div style={cardStyle}>
           <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Universal Importer</h3>
-          <input 
-            type="file" 
-            accept=".csv, .xlsx, .xls" 
-            onChange={handleFileUpload} 
-            style={{ width: '100%', marginBottom: '15px' }} 
-          />
-          {uploadStatus && (
-            <div style={{ padding: '12px', borderRadius: '12px', backgroundColor: uploadStatus.includes('Error') ? '#fef2f2' : '#f0fdf4', color: uploadStatus.includes('Error') ? '#991b1b' : '#166534', fontWeight: 'bold', fontSize: '14px' }}>
-              {uploadStatus}
+          <input type="file" accept=".csv, .xlsx" onChange={handleFileUpload} style={{ width: '100%' }} />
+          {uploadStatus && <p style={{ marginTop: '15px', color: '#2563eb', fontWeight: 'bold' }}>{uploadStatus}</p>}
+        </div>
+      )}
+
+      {activeTab === 'manage' && (
+        <div style={cardStyle}>
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Edit Sales Data</h3>
+          {savedSales.map(sale => (
+            <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #eee' }}>
+              <div>
+                <div style={{ fontWeight: 'bold' }}>{sale.platform}</div>
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>{sale.sale_date}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <span style={{ fontWeight: 'bold' }}>${Number(sale.amount).toLocaleString()}</span>
+                <button onClick={() => deleteSale(sale.id)} style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '5px 10px' }}>Delete</button>
+              </div>
             </div>
-          )}
-          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '20px' }}>
-            Supports eBay, TCGplayer, and ManaPool. Upload any CSV or Excel report and the dashboard will calculate your totals.
-          </p>
+          ))}
+          {savedSales.length === 0 && <p style={{ color: '#6b7280', fontSize: '14px' }}>No sales data saved for this month.</p>}
         </div>
       )}
     </div>
