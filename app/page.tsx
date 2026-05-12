@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import * as XLSX from 'xlsx'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,8 +12,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('summary');
   const [selectedMonth, setSelectedMonth] = useState(4); 
   const [expenses, setExpenses] = useState([]);
-  const [expandedCategory, setExpandedCategory] = useState(null);
-  const [ebaySales, setEbaySales] = useState(0);
+  const [salesTotal, setSalesTotal] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
   useEffect(() => {
@@ -28,50 +28,76 @@ export default function Dashboard() {
     getExpenses();
   }, [selectedMonth]);
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Processing...');
-    
+    setUploadStatus('Analyzing file...');
+
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target.result as string;
-      // Split by lines and then by commas, handling potential quotes
-      const rows = text.split('\n').map(row => row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/));
-      
-      const headerRowIndex = rows.findIndex(row => 
-        row.some(cell => cell.includes('Transaction creation date') || cell.includes('Listing title'))
-      );
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        
+        // Convert sheet to a raw array of arrays to find the header anywhere
+        const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-      if (headerRowIndex === -1) {
-        setUploadStatus('Error: Header not found. Use a standard eBay CSV.');
-        return;
-      }
+        // UNIVERSAL HEADER SEARCH
+        // This looks for eBay, TCGplayer, or Mercari keywords
+        const headerRowIndex = rows.findIndex((row: any) => 
+          Array.isArray(row) && row.some(cell => {
+            const c = String(cell).toLowerCase();
+            return c.includes('transaction creation') || 
+                   c.includes('total sales') || 
+                   c.includes('total price') || 
+                   c.includes('price each') ||
+                   c.includes('item price') ||
+                   c.includes('gross amount');
+          })
+        );
 
-      const headers = rows[headerRowIndex].map(h => h.trim().replace(/"/g, ''));
-      const dataRows = rows.slice(headerRowIndex + 1);
-      
-      let total = 0;
-      dataRows.forEach(row => {
-        const rowObj: any = {};
-        headers.forEach((header, i) => { rowObj[header] = row[i]; });
-
-        const val = rowObj['Gross transaction amount'] || rowObj['Total sales (Includes taxes)'];
-        const type = rowObj['Type'];
-
-        // Only count "Order" types to avoid double-counting payouts
-        if (val && (!type || type.includes('Order'))) {
-          const num = parseFloat(val.replace(/[$,"]/g, ''));
-          if (!isNaN(num)) total += num;
+        if (headerRowIndex === -1) {
+          setUploadStatus('Error: No sales data recognized.');
+          return;
         }
-      });
 
-      setEbaySales(total);
-      setUploadStatus(`Success! $${total.toLocaleString(undefined, {minimumFractionDigits: 2})} identified.`);
+        const headers: any = rows[headerRowIndex].map((h: any) => String(h).trim());
+        const dataRows = rows.slice(headerRowIndex + 1);
+        
+        let total = 0;
+        dataRows.forEach((row: any) => {
+          const rowObj: any = {};
+          headers.forEach((header: string, i: number) => { rowObj[header] = row[i]; });
+
+          // Money Column Detection (Checks all known platform variants)
+          const val = rowObj['Gross transaction amount'] || 
+                      rowObj['Total sales (Includes taxes)'] || 
+                      rowObj['Total price'] || 
+                      rowObj['Price Each'] ||
+                      rowObj['Item Price'] ||
+                      rowObj['Net Sales'];
+          
+          const type = rowObj['Type'];
+
+          // Filter logic: ignore payouts/refunds, only count Orders
+          if (val && (!type || String(type).toLowerCase().includes('order'))) {
+            const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[$,]/g, ''));
+            if (!isNaN(num)) total += num;
+          }
+        });
+
+        setSalesTotal(total);
+        setUploadStatus(`Success! $${total.toLocaleString(undefined, {minimumFractionDigits: 2})} identified.`);
+      } catch (err) {
+        setUploadStatus('Error processing file.');
+      }
     };
-    reader.readAsText(file);
+    reader.readAsBinaryString(file);
   };
 
+  const totalExpenses = expenses.reduce((s, i) => s + Number(i.cost), 0);
   const cardStyle = { backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', marginBottom: '16px' };
 
   return (
@@ -96,41 +122,33 @@ export default function Dashboard() {
       {activeTab === 'summary' ? (
         <>
           <div style={cardStyle}>
-            <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '10px' }}>Revenue</h3>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontSize: '14px' }}>eBay Gross</span>
-              <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>${ebaySales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '10px' }}>Revenue & Profit</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <span>Gross Sales</span>
+              <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${salesTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
             </div>
-          </div>
-
-          <div style={cardStyle}>
-            <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '15px' }}>Expense Details</h3>
-            {['Equipment', 'Subscriptions', 'Postage', 'Supplies', 'Inventory'].map(cat => (
-              <div key={cat} style={{ borderBottom: '1px solid #f3f4f6', padding: '12px 0' }}>
-                <div onClick={() => setExpandedCategory(expandedCategory === cat ? null : cat)} style={{ display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }}>
-                  <span>{cat}</span>
-                  <span style={{ fontWeight: 'bold' }}>${expenses.filter(e => e.category === cat).reduce((s, i) => s + Number(i.cost), 0).toFixed(2)}</span>
-                </div>
-                {expandedCategory === cat && (
-                  <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
-                    {expenses.filter(e => e.category === cat).map((item, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                        <span>{item.item_name}</span>
-                        <span>${Number(item.cost).toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: '10px' }}>
+              <span>Total Expenses</span>
+              <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', backgroundColor: '#f0fdf4', padding: '10px', borderRadius: '12px' }}>
+              <span style={{ fontWeight: 'bold' }}>Est. Net Profit</span>
+              <span style={{ fontWeight: 'bold', color: '#166534' }}>${(salesTotal - totalExpenses).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            </div>
           </div>
         </>
       ) : (
         <div style={cardStyle}>
-          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Import Platform Data</h3>
-          <input type="file" accept=".csv" onChange={handleFileUpload} style={{ marginBottom: '10px', width: '100%' }} />
-          {uploadStatus && <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#059669', marginTop: '10px' }}>{uploadStatus}</p>}
-          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '15px' }}>Select an eBay CSV. The app will skip the header notes and calculate the total automatically.</p>
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Universal Importer</h3>
+          <input type="file" accept=".csv, .xlsx, .xls, .txt" onChange={handleFileUpload} style={{ width: '100%', marginBottom: '15px' }} />
+          {uploadStatus && (
+            <div style={{ padding: '12px', borderRadius: '12px', backgroundColor: uploadStatus.includes('Error') ? '#fef2f2' : '#f0fdf4', color: uploadStatus.includes('Error') ? '#991b1b' : '#166534', fontWeight: 'bold' }}>
+              {uploadStatus}
+            </div>
+          )}
+          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '20px' }}>
+            Upload any CSV or Excel report from eBay or TCGplayer. The app will automatically scan for headers, skip notes, and calculate your total sales.
+          </p>
         </div>
       )}
     </div>
