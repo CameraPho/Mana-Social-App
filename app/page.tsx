@@ -16,7 +16,6 @@ export default function Dashboard() {
   const [ebaySales, setEbaySales] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
-  // Fetch real expenses from Supabase
   useEffect(() => {
     async function getExpenses() {
       const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
@@ -41,7 +40,7 @@ export default function Dashboard() {
       const text = event.target.result;
       const lines = text.split('\n');
       
-      // Auto-detect header: Skip eBay notes if present, otherwise start at row 0
+      // Auto-detect header: Skip eBay notes if present
       const ebayNoteIndex = lines.findIndex(line => line.includes('Transaction creation date'));
       const csvData = ebayNoteIndex !== -1 ? lines.slice(ebayNoteIndex).join('\n') : text;
 
@@ -51,11 +50,7 @@ export default function Dashboard() {
         complete: function(results) {
           let totalGross = 0;
           results.data.forEach(row => {
-            // Check for "Gross transaction amount" (Transaction Report) 
-            // OR "Total sales (Includes taxes)" (New Sales Report)
             const amountValue = row['Gross transaction amount'] || row['Total sales (Includes taxes)'] || row['Total price'];
-            
-            // Only count "Order" types if it's the transaction report format
             const isOrder = !row['Type'] || row['Type'] === 'Order';
 
             if (amountValue && isOrder) {
@@ -69,9 +64,7 @@ export default function Dashboard() {
           setEbaySales(totalGross);
           setUploadStatus(`Success! Found $${totalGross.toLocaleString(undefined, {minimumFractionDigits: 2})} in sales.`);
         },
-        error: function() {
-          setUploadStatus('Error parsing CSV file.');
-        }
+        error: () => setUploadStatus('Error parsing CSV.')
       });
     };
     reader.readAsText(file);
@@ -129,7 +122,7 @@ export default function Dashboard() {
                         <span>${Number(item.cost).toFixed(2)}</span>
                       </div>
                     ))}
-                    {expenses.filter(e => e.category === cat).length === 0 && <span style={{ color: '#9ca3af' }}>No entries this month.</span>}
+                    {expenses.filter(e => e.category === cat).length === 0 && <span style={{ color: '#9ca3af' }}>No entries found.</span>}
                   </div>
                 )}
               </div>
@@ -149,7 +142,6 @@ export default function Dashboard() {
               {uploadStatus}
             </div>
           )}
-          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '15px' }}>Works with both Transaction Reports and the new Sales Report format.</p>
         </div>
       )}
 
