@@ -1,7 +1,6 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import Papa from 'papaparse'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,29 +35,38 @@ export default function Dashboard() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target.result;
-      const lines = text.split('\n');
+      const rows = text.split('\n').map(row => row.split(','));
       
-      // Safety check: Skip eBay's 11 lines of notes if they exist
-      const headerIndex = lines.findIndex(l => l.includes('Transaction creation date') || l.includes('Listing title'));
-      const cleanCSV = lines.slice(headerIndex).join('\n');
+      // Smart Header Detection: Find where the data actually starts
+      const headerRowIndex = rows.findIndex(row => 
+        row.some(cell => cell.includes('Gross transaction amount') || cell.includes('Total sales'))
+      );
 
-      Papa.parse(cleanCSV, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          let total = 0;
-          results.data.forEach(row => {
-            // Check for Transaction Report Gross OR Sales Report Total
-            const val = row['Gross transaction amount'] || row['Total sales (Includes taxes)'];
-            if (val && (!row['Type'] || row['Type'] === 'Order')) {
-              const num = parseFloat(val.toString().replace(/[$,]/g, ''));
-              if (!isNaN(num)) total += num;
-            }
-          });
-          setEbaySales(total);
-          setUploadStatus(`Success! $${total.toLocaleString()} found.`);
+      if (headerRowIndex === -1) {
+        setUploadStatus('Error: Could not find data headers.');
+        return;
+      }
+
+      const headers = rows[headerRowIndex].map(h => h.trim().replace(/"/g, ''));
+      const dataRows = rows.slice(headerRowIndex + 1);
+      
+      let total = 0;
+      dataRows.forEach(row => {
+        const rowObj = {};
+        headers.forEach((header, i) => { rowObj[header] = row[i]; });
+
+        // Targets both "Transaction" and "Sales" report formats
+        const val = rowObj['Gross transaction amount'] || rowObj['Total sales (Includes taxes)'];
+        const type = rowObj['Type'];
+
+        if (val && (!type || type.includes('Order'))) {
+          const num = parseFloat(val.replace(/[$,"]/g, ''));
+          if (!isNaN(num)) total += num;
         }
       });
+
+      setEbaySales(total);
+      setUploadStatus(`Success! $${total.toLocaleString(undefined, {minimumFractionDigits: 2})} found.`);
     };
     reader.readAsText(file);
   };
@@ -66,11 +74,11 @@ export default function Dashboard() {
   const cardStyle = { backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', marginBottom: '16px' };
 
   return (
-    <div style={{ fontFamily: 'Segoe UI, sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
+    <div style={{ fontFamily: 'sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <img src="/logo.png" style={{ width: '45px' }} />
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #ddd' }}>
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px' }}>
             <option value={3}>March</option>
             <option value={4}>April</option>
           </select>
@@ -84,8 +92,8 @@ export default function Dashboard() {
 
       {activeTab === 'summary' ? (
         <div style={cardStyle}>
-          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Revenue</h3>
-          <p style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>${ebaySales.toLocaleString()}</p>
+          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>eBay Revenue</h3>
+          <p style={{ fontSize: '28px', fontWeight: 'bold', color: '#2563eb' }}>${ebaySales.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
           <div style={{ marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '15px' }}>
             <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Expenses</h3>
             <p style={{ fontSize: '20px', fontWeight: 'bold' }}>${expenses.reduce((s, i) => s + Number(i.cost), 0).toLocaleString()}</p>
