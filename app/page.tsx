@@ -15,7 +15,6 @@ export default function Dashboard() {
   const [ebaySales, setEbaySales] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
-  // Fetch real expenses from Supabase
   useEffect(() => {
     async function getExpenses() {
       const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
@@ -29,7 +28,6 @@ export default function Dashboard() {
     getExpenses();
   }, [selectedMonth]);
 
-  // THIS IS THE PROCESSOR LOGIC
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -37,16 +35,16 @@ export default function Dashboard() {
     
     const reader = new FileReader();
     reader.onload = (event) => {
-      const text = event.target.result;
-      const rows = text.split('\n').map(row => row.split(','));
+      const text = event.target.result as string;
+      // Split by lines and then by commas, handling potential quotes
+      const rows = text.split('\n').map(row => row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/));
       
-      // Find the header row (skips eBay's 11 lines of notes automatically)
       const headerRowIndex = rows.findIndex(row => 
-        row.some(cell => cell.includes('Transaction creation date') || cell.includes('Total sales'))
+        row.some(cell => cell.includes('Transaction creation date') || cell.includes('Listing title'))
       );
 
       if (headerRowIndex === -1) {
-        setUploadStatus('Error: Could not find eBay data headers.');
+        setUploadStatus('Error: Header not found. Use a standard eBay CSV.');
         return;
       }
 
@@ -55,12 +53,13 @@ export default function Dashboard() {
       
       let total = 0;
       dataRows.forEach(row => {
-        const rowObj = {};
+        const rowObj: any = {};
         headers.forEach((header, i) => { rowObj[header] = row[i]; });
 
         const val = rowObj['Gross transaction amount'] || rowObj['Total sales (Includes taxes)'];
         const type = rowObj['Type'];
 
+        // Only count "Order" types to avoid double-counting payouts
         if (val && (!type || type.includes('Order'))) {
           const num = parseFloat(val.replace(/[$,"]/g, ''));
           if (!isNaN(num)) total += num;
@@ -68,14 +67,10 @@ export default function Dashboard() {
       });
 
       setEbaySales(total);
-      setUploadStatus(`Success! $${total.toLocaleString(undefined, {minimumFractionDigits: 2})} added to Revenue.`);
+      setUploadStatus(`Success! $${total.toLocaleString(undefined, {minimumFractionDigits: 2})} identified.`);
     };
     reader.readAsText(file);
   };
-
-  const categories = ['Equipment', 'Subscriptions', 'Postage', 'Supplies', 'Inventory'];
-  const getCategoryTotal = (cat) => 
-    expenses.filter(e => e.category === cat).reduce((sum, item) => sum + Number(item.cost), 0);
 
   const cardStyle = { backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', marginBottom: '16px' };
 
@@ -94,28 +89,27 @@ export default function Dashboard() {
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        <button onClick={() => setActiveTab('summary')} style={{ flex: 1, padding: '12px', borderRadius: '12px', backgroundColor: activeTab === 'summary' ? '#2563eb' : '#e5e7eb', color: activeTab === 'summary' ? 'white' : '#4b5563', border: 'none', fontWeight: 'bold' }}>Summary</button>
-        <button onClick={() => setActiveTab('imports')} style={{ flex: 1, padding: '12px', borderRadius: '12px', backgroundColor: activeTab === 'imports' ? '#2563eb' : '#e5e7eb', color: activeTab === 'imports' ? 'white' : '#4b5563', border: 'none', fontWeight: 'bold' }}>Imports</button>
+        <button onClick={() => setActiveTab('summary')} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'summary' ? '#2563eb' : '#e5e7eb', color: activeTab === 'summary' ? 'white' : '#4b5563' }}>Summary</button>
+        <button onClick={() => setActiveTab('imports')} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'imports' ? '#2563eb' : '#e5e7eb', color: activeTab === 'imports' ? 'white' : '#4b5563' }}>Imports</button>
       </div>
 
       {activeTab === 'summary' ? (
         <>
-          {/* Revenue Card */}
           <div style={cardStyle}>
             <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '10px' }}>Revenue</h3>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontSize: '14px' }}>eBay Sales</span>
+              <span style={{ fontSize: '14px' }}>eBay Gross</span>
               <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>${ebaySales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
             </div>
           </div>
 
           <div style={cardStyle}>
             <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '15px' }}>Expense Details</h3>
-            {categories.map(cat => (
+            {['Equipment', 'Subscriptions', 'Postage', 'Supplies', 'Inventory'].map(cat => (
               <div key={cat} style={{ borderBottom: '1px solid #f3f4f6', padding: '12px 0' }}>
                 <div onClick={() => setExpandedCategory(expandedCategory === cat ? null : cat)} style={{ display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <span>{cat}</span>
-                  <span style={{ fontWeight: 'bold' }}>${getCategoryTotal(cat).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                  <span style={{ fontWeight: 'bold' }}>${expenses.filter(e => e.category === cat).reduce((s, i) => s + Number(i.cost), 0).toFixed(2)}</span>
                 </div>
                 {expandedCategory === cat && (
                   <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
@@ -134,14 +128,9 @@ export default function Dashboard() {
       ) : (
         <div style={cardStyle}>
           <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Import Platform Data</h3>
-          {/* Added the handleFileUpload here */}
           <input type="file" accept=".csv" onChange={handleFileUpload} style={{ marginBottom: '10px', width: '100%' }} />
-          {uploadStatus && (
-            <div style={{ marginTop: '10px', padding: '12px', borderRadius: '12px', backgroundColor: '#f0fdf4', color: '#166534', fontWeight: 'bold' }}>
-              {uploadStatus}
-            </div>
-          )}
-          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '15px' }}>Selecting a file will automatically calculate and sync your sales data.</p>
+          {uploadStatus && <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#059669', marginTop: '10px' }}>{uploadStatus}</p>}
+          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '15px' }}>Select an eBay CSV. The app will skip the header notes and calculate the total automatically.</p>
         </div>
       )}
     </div>
