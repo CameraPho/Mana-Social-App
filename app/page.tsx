@@ -12,7 +12,6 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('summary');
   const [selectedMonth, setSelectedMonth] = useState(4); 
   const [expenses, setExpenses] = useState([]);
-  const [expandedCategory, setExpandedCategory] = useState(null);
   const [ebaySales, setEbaySales] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
@@ -24,7 +23,6 @@ export default function Dashboard() {
         .select('*')
         .gte('purchase_date', `2026-${monthStr}-01`)
         .lt('purchase_date', `2026-${selectedMonth === 12 ? '01' : monthStr}-31`);
-      
       if (data) setExpenses(data);
     }
     getExpenses();
@@ -40,53 +38,41 @@ export default function Dashboard() {
       const text = event.target.result;
       const lines = text.split('\n');
       
-      // Auto-detect header: Skip eBay notes if present
-      const ebayNoteIndex = lines.findIndex(line => line.includes('Transaction creation date'));
-      const csvData = ebayNoteIndex !== -1 ? lines.slice(ebayNoteIndex).join('\n') : text;
+      // Safety check: Skip eBay's 11 lines of notes if they exist
+      const headerIndex = lines.findIndex(l => l.includes('Transaction creation date') || l.includes('Listing title'));
+      const cleanCSV = lines.slice(headerIndex).join('\n');
 
-      Papa.parse(csvData, {
+      Papa.parse(cleanCSV, {
         header: true,
         skipEmptyLines: true,
-        complete: function(results) {
-          let totalGross = 0;
+        complete: (results) => {
+          let total = 0;
           results.data.forEach(row => {
-            const amountValue = row['Gross transaction amount'] || row['Total sales (Includes taxes)'] || row['Total price'];
-            const isOrder = !row['Type'] || row['Type'] === 'Order';
-
-            if (amountValue && isOrder) {
-              const cleanAmount = parseFloat(amountValue.toString().replace(/[$,]/g, ''));
-              if (!isNaN(cleanAmount)) {
-                totalGross += cleanAmount;
-              }
+            // Check for Transaction Report Gross OR Sales Report Total
+            const val = row['Gross transaction amount'] || row['Total sales (Includes taxes)'];
+            if (val && (!row['Type'] || row['Type'] === 'Order')) {
+              const num = parseFloat(val.toString().replace(/[$,]/g, ''));
+              if (!isNaN(num)) total += num;
             }
           });
-          
-          setEbaySales(totalGross);
-          setUploadStatus(`Success! Found $${totalGross.toLocaleString(undefined, {minimumFractionDigits: 2})} in sales.`);
-        },
-        error: () => setUploadStatus('Error parsing CSV.')
+          setEbaySales(total);
+          setUploadStatus(`Success! $${total.toLocaleString()} found.`);
+        }
       });
     };
     reader.readAsText(file);
   };
 
-  const categories = ['Equipment', 'Subscriptions', 'Postage', 'Supplies', 'Inventory'];
-  const getCategoryTotal = (cat) => 
-    expenses.filter(e => e.category === cat).reduce((sum, item) => sum + Number(item.cost), 0);
-  const totalOut = expenses.reduce((sum, item) => sum + Number(item.cost), 0);
-
   const cardStyle = { backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', marginBottom: '16px' };
 
   return (
-    <div style={{ fontFamily: 'Segoe UI, Roboto, sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
-      
+    <div style={{ fontFamily: 'Segoe UI, sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <img src="/logo.png" alt="Logo" style={{ width: '50px', height: '50px', objectFit: 'contain' }} />
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #ddd', fontWeight: 'bold' }}>
+          <img src="/logo.png" style={{ width: '45px' }} />
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #ddd' }}>
             <option value={3}>March</option>
             <option value={4}>April</option>
-            <option value={5}>May</option>
           </select>
         </div>
       </div>
@@ -97,58 +83,21 @@ export default function Dashboard() {
       </div>
 
       {activeTab === 'summary' ? (
-        <>
-          <div style={cardStyle}>
-            <h3 style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px', textTransform: 'uppercase' }}>Platform Revenue</h3>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>eBay Gross Sales</span>
-              <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${ebaySales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-            </div>
+        <div style={cardStyle}>
+          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Revenue</h3>
+          <p style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>${ebaySales.toLocaleString()}</p>
+          <div style={{ marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '15px' }}>
+            <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Expenses</h3>
+            <p style={{ fontSize: '20px', fontWeight: 'bold' }}>${expenses.reduce((s, i) => s + Number(i.cost), 0).toLocaleString()}</p>
           </div>
-
-          <div style={cardStyle}>
-            <h3 style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px', textTransform: 'uppercase' }}>Expense Breakdown</h3>
-            {categories.map(cat => (
-              <div key={cat} style={{ borderBottom: '1px solid #f3f4f6', padding: '10px 0' }}>
-                <div onClick={() => setExpandedCategory(expandedCategory === cat ? null : cat)} style={{ display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }}>
-                  <span>{cat}</span>
-                  <span style={{ fontWeight: 'bold' }}>${getCategoryTotal(cat).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                </div>
-                {expandedCategory === cat && (
-                  <div style={{ marginTop: '8px', padding: '10px', backgroundColor: '#f9fafb', borderRadius: '10px', fontSize: '13px' }}>
-                    {expenses.filter(e => e.category === cat).map((item, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <span>{item.item_name}</span>
-                        <span>${Number(item.cost).toFixed(2)}</span>
-                      </div>
-                    ))}
-                    {expenses.filter(e => e.category === cat).length === 0 && <span style={{ color: '#9ca3af' }}>No entries found.</span>}
-                  </div>
-                )}
-              </div>
-            ))}
-            <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '2px solid #eee', display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-              <span>Total Expenses</span>
-              <span>${totalOut.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-            </div>
-          </div>
-        </>
+        </div>
       ) : (
         <div style={cardStyle}>
-          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Upload eBay Report</h3>
-          <input type="file" accept=".csv" onChange={handleFileUpload} style={{ marginBottom: '15px', width: '100%' }} />
-          {uploadStatus && (
-            <div style={{ padding: '12px', borderRadius: '12px', backgroundColor: uploadStatus.includes('Success') ? '#f0fdf4' : '#fef2f2', color: uploadStatus.includes('Success') ? '#166534' : '#991b1b', fontWeight: 'bold', fontSize: '14px' }}>
-              {uploadStatus}
-            </div>
-          )}
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>eBay CSV Import</h3>
+          <input type="file" accept=".csv" onChange={handleFileUpload} style={{ width: '100%' }} />
+          {uploadStatus && <p style={{ marginTop: '15px', color: '#059669', fontWeight: 'bold' }}>{uploadStatus}</p>}
         </div>
       )}
-
-      <div style={{ backgroundColor: '#fff1f2', padding: '15px', borderRadius: '24px', border: '1px solid #fecaca' }}>
-        <p style={{ margin: 0, fontSize: '12px', color: '#991b1b', fontWeight: 'bold' }}>LIABILITY: Brett Bruhanski</p>
-        <p style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#991b1b' }}>$1,000.00 Owed</p>
-      </div>
     </div>
   )
 }
