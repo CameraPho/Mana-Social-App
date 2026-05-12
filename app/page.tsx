@@ -1,56 +1,42 @@
 'use client'
-import { useState } from 'react'
-
 export default function Dashboard() {
-  const [revenue, setRevenue] = useState(0)
-  
-  // Moreno Valley Tax Rate
-  const taxRate = 0.0875 
-
   return (
-    <div className="min-h-screen bg-gray-50 p-6 font-sans text-gray-900">
-      <header className="mb-8">
-        <h1 className="text-3xl font-extrabold text-blue-800">Mana Social LLC</h1>
-        <p className="text-sm text-gray-500 uppercase tracking-widest">Business Intelligence Dashboard</p>
-      </header>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Sales Sync Card */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-          <h2 className="text-lg font-bold mb-4">Sync Platform Sales</h2>
-          <div className="border-2 border-dashed border-blue-200 rounded-xl p-8 text-center">
-            <input 
-              type="file" 
-              accept=".csv" 
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700"
-            />
-            <p className="mt-2 text-xs text-gray-400">Upload eBay or TCGPlayer CSV export</p>
+    <div className="p-6 font-sans max-w-lg mx-auto">
+      <h1 className="text-2xl font-bold text-blue-700 mb-6 text-center">Mana Social LLC</h1>
+      
+      <div className="space-y-4">
+        {/* Marketplace Summary */}
+        <div className="p-4 bg-white border rounded-lg shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase">Platform Breakdowns</h2>
+          <div className="mt-3 space-y-2">
+            <div className="flex justify-between border-b pb-1">
+              <span>TCGplayer</span>
+              <span className="font-mono font-bold">$0.00</span>
+            </div>
+            <div className="flex justify-between border-b pb-1">
+              <span>eBay</span>
+              <span className="font-mono font-bold">$0.00</span>
+            </div>
+            <div className="flex justify-between text-blue-600 font-bold">
+              <span>ManaPool</span>
+              <span className="font-mono">$0.00</span>
+            </div>
           </div>
         </div>
 
-        {/* Profit Tracker Card */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-          <h2 className="text-lg font-bold mb-4">LLC Financial Pulse</h2>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center border-b pb-2">
-              <span className="text-gray-600">Gross Marketplace Sales</span>
-              <span className="font-mono font-bold text-lg">$0.00</span>
-            </div>
-            <div className="flex justify-between items-center border-b pb-2 text-green-600 font-medium">
-              <span>Target Profit (15%)</span>
-              <span className="font-mono font-bold text-lg">$0.00</span>
-            </div>
-            <div className="flex justify-between items-center text-blue-600 font-medium">
-              <span>CA Sales Tax Credit (Est)</span>
-              <span className="font-mono font-bold text-lg">$0.00</span>
-            </div>
-          </div>
+        {/* Tax Liability - Moreno Valley Logic */}
+        <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+          <h2 className="text-sm font-bold text-orange-800 uppercase">CA Sales Tax (8.75%)</h2>
+          <p className="text-xs text-orange-700 mt-1 italic">Calculated for Moreno Valley LLC</p>
+          <p className="text-xl font-bold mt-2 text-orange-900">$0.00 Owed</p>
         </div>
       </div>
 
-      <footer className="mt-12 pt-6 border-t text-center text-xs text-gray-400">
-        &copy; 2026 Mana Social LLC • Moreno Valley, CA
-      </footer>
+      <div className="mt-8">
+        <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow-md">
+          Upload ManaPool CSV
+        </button>
+      </div>
     </div>
   )
 }
