@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
 
@@ -15,114 +15,112 @@ export default function Dashboard() {
   const [savedSales, setSavedSales] = useState([]);
   const [uploadStatus, setUploadStatus] = useState('');
 
-  const fetchData = async () => {
+  // Improved Fetch: Uses GTE/LTE to capture the entire month range
+  const fetchData = useCallback(async () => {
     const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
-    const datePattern = `2026-${monthStr}`;
+    const year = 2026;
+    const start = `${year}-${monthStr}-01`;
+    const end = `${year}-${monthStr}-31`;
 
-    const { data: expData } = await supabase.from('expenses').select('*').like('purchase_date', `%${datePattern}%`);
+    const { data: expData } = await supabase.from('expenses').select('*').gte('purchase_date', start).lte('purchase_date', end);
     if (expData) setExpenses(expData);
 
-    const { data: saleData } = await supabase.from('sales').select('*').like('sale_date', `%${datePattern}%`);
+    const { data: saleData } = await supabase.from('sales').select('*').gte('sale_date', start).lte('sale_date', end);
     if (saleData) setSavedSales(saleData);
-  };
+  }, [selectedMonth]);
 
-  useEffect(() => { fetchData(); }, [selectedMonth]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleFileUpload = async (e: any) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Scanning for money columns...');
+    setUploadStatus('Processing labels...');
 
     const reader = new FileReader();
-    reader.onload = async (evt: any) => {
+    reader.onload = async (evt) => {
       try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows: any = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const ab = evt.target.result;
+        const wb = XLSX.read(ab, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-        let foundHeaderIndex = -1;
-        let moneyColIndex = -1;
-        let platform = 'Unknown';
+        let headerRowIndex = -1;
+        let platform = 'eBay';
 
-        // BRUTE FORCE: Scan first 20 rows for ANY keyword related to sales
         for (let i = 0; i < Math.min(rows.length, 20); i++) {
-          const row = rows[i].map((cell: any) => String(cell || '').toLowerCase().trim());
-          
-          const colIndex = row.findIndex((cell: string) => 
-            cell.includes('total sales (includes taxes)') || 
-            cell === 'gross sales' || 
-            (cell === 'total' && row.includes('period')) ||
-            cell === 'net sales'
-          );
-
-          if (colIndex !== -1) {
-            foundHeaderIndex = i;
-            moneyColIndex = colIndex;
-            // Identify platform
-            if (row.includes('listing title')) platform = 'eBay';
-            else if (row.includes('channel')) platform = 'TCGplayer';
-            else if (row.includes('period')) platform = 'ManaPool';
-            break;
+          const row = rows[i].map(cell => String(cell || '').toLowerCase().trim());
+          if (row.includes('listing title') || row.includes('total sales (includes taxes)')) {
+            headerRowIndex = i; platform = 'eBay'; break;
+          }
+          if (row.includes('gross sales')) {
+            headerRowIndex = i; platform = 'TCGplayer'; break;
+          }
+          if (row.includes('period')) {
+            headerRowIndex = i; platform = 'ManaPool'; break;
           }
         }
 
-        if (moneyColIndex === -1) {
-          setUploadStatus('Error: Could not find "Total" or "Gross" column.');
+        if (headerRowIndex === -1) {
+          setUploadStatus('Error: Could not find data headers.');
           return;
         }
 
+        const headers = rows[headerRowIndex].map(h => String(h || '').trim());
+        const dataRows = rows.slice(headerRowIndex + 1);
+        
         let totalAmount = 0;
-        const dataRows = rows.slice(foundHeaderIndex + 1);
-
         dataRows.forEach((row: any) => {
-          const val = row[moneyColIndex];
-          if (val !== undefined && val !== null) {
-            const cleanNum = parseFloat(String(val).replace(/[$, ]/g, ''));
-            if (!isNaN(cleanNum)) totalAmount += cleanNum;
-          }
+          headers.forEach((header, colIdx) => {
+            const h = header.toLowerCase();
+            if (h === 'total sales (includes taxes)' || h === 'gross sales' || (platform === 'ManaPool' && h === 'total')) {
+              const val = row[colIdx];
+              if (val !== undefined && val !== null) {
+                const num = parseFloat(String(val).replace(/[$, ]/g, ''));
+                if (!isNaN(num)) totalAmount += num;
+              }
+            }
+          });
         });
 
-        if (totalAmount === 0) {
-          setUploadStatus('Check file: Found headers but total was $0.');
-          return;
-        }
-
-        // SAVE TO SUPABASE
+        const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
         const { error } = await supabase.from('sales').insert([
           { 
             platform, 
             amount: totalAmount, 
-            sale_date: `2026-${selectedMonth < 10 ? '0' : ''}${selectedMonth}-01` 
+            sale_date: `2026-${monthStr}-01` // Standardized to 1st of month for easy grouping
           }
         ]);
 
         if (error) throw error;
-        setUploadStatus(`Saved ${platform}: $${totalAmount.toLocaleString()}`);
-        fetchData();
-        e.target.value = null; // Clear input for next upload
+
+        setUploadStatus(`Saved $${totalAmount.toLocaleString()} to ${platform}!`);
+        e.target.value = null; 
+        
+        // Wait a beat for Supabase to index, then refresh
+        setTimeout(() => fetchData(), 500);
+        
       } catch (err) {
-        setUploadStatus('Error: Database write failed.');
-        console.error(err);
+        setUploadStatus('Upload failed. Check file content.');
       }
     };
     reader.readAsArrayBuffer(file);
   };
 
-  const deleteSale = async (id: string) => {
+  const deleteSale = async (id) => {
     await supabase.from('sales').delete().eq('id', id);
     fetchData();
   };
 
-  const totalSales = savedSales.reduce((sum, item: any) => sum + Number(item.amount), 0);
-  const totalExp = expenses.reduce((sum, item: any) => sum + Number(item.cost), 0);
+  const totalSales = savedSales.reduce((s, i) => s + Number(i.amount), 0);
+  const totalExp = expenses.reduce((s, i) => s + Number(i.cost), 0);
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', backgroundColor: '#f8fafc', minHeight: '100vh', padding: '16px' }}>
-      <div style={{ backgroundColor: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', marginBottom: '16px' }}>
+    <div style={{ fontFamily: 'system-ui, sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
+      
+      <div style={{ backgroundColor: 'white', borderRadius: '20px', padding: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', marginBottom: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>MANA SOCIAL</h1>
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '6px', borderRadius: '8px' }}>
+          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#1a365d' }}>MANA SOCIAL</h1>
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #ddd' }}>
             <option value={3}>March</option>
             <option value={4}>April</option>
             <option value={5}>May</option>
@@ -131,55 +129,57 @@ export default function Dashboard() {
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        {['summary', 'imports', 'manage'].map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === tab ? '#2563eb' : '#fff', color: activeTab === tab ? '#fff' : '#64748b' }}>
-            {tab.toUpperCase()}
+        {['summary', 'imports', 'manage'].map(t => (
+          <button key={t} onClick={() => setActiveTab(t)} style={{ flex: 1, padding: '14px', borderRadius: '12px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: activeTab === t ? '#2563eb' : 'white', color: activeTab === t ? 'white' : '#64748b' }}>
+            {t.toUpperCase()}
           </button>
         ))}
       </div>
 
       {activeTab === 'summary' && (
-        <div style={{ backgroundColor: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <div style={{ backgroundColor: 'white', borderRadius: '20px', padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <span>Sales</span>
-            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${totalSales.toLocaleString()}</span>
+            <span style={{ color: '#64748b' }}>Gross Revenue</span>
+            <span style={{ fontWeight: 'bold', color: '#2563eb', fontSize: '18px' }}>${totalSales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <span>Expenses</span>
-            <span style={{ fontWeight: 'bold', color: '#ef4444' }}>-${totalExp.toLocaleString()}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+            <span style={{ color: '#64748b' }}>Total Expenses</span>
+            <span style={{ fontWeight: 'bold', color: '#dc2626', fontSize: '18px' }}>-${totalExp.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
-          <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px', display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontWeight: 'bold' }}>Profit</span>
-            <span style={{ fontWeight: 'bold', color: '#166534' }}>${(totalSales - totalExp).toLocaleString()}</span>
+          <div style={{ padding: '20px', borderRadius: '16px', backgroundColor: '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: 'bold', color: '#166534' }}>Estimated Profit</span>
+            <span style={{ fontWeight: '900', color: '#166534', fontSize: '20px' }}>${(totalSales - totalExp).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
         </div>
       )}
 
       {activeTab === 'imports' && (
-        <div style={{ backgroundColor: 'white', borderRadius: '16px', padding: '20px' }}>
-          <h2 style={{ fontSize: '16px', marginBottom: '12px' }}>Marketplace Upload</h2>
-          <input type="file" onChange={handleFileUpload} style={{ width: '100%', marginBottom: '12px' }} />
-          {uploadStatus && <div style={{ padding: '10px', backgroundColor: '#f0f9ff', color: '#0369a1', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold' }}>{uploadStatus}</div>}
+        <div style={{ backgroundColor: 'white', borderRadius: '20px', padding: '20px' }}>
+          <h3 style={{ marginTop: 0 }}>Import Files</h3>
+          <input type="file" onChange={handleFileUpload} style={{ width: '100%', marginBottom: '15px' }} />
+          {uploadStatus && <div style={{ padding: '12px', borderRadius: '10px', backgroundColor: '#eff6ff', color: '#1e40af', fontWeight: 'bold' }}>{uploadStatus}</div>}
         </div>
       )}
 
       {activeTab === 'manage' && (
-        <div style={{ backgroundColor: 'white', borderRadius: '16px', padding: '20px' }}>
-          <h2 style={{ fontSize: '16px', marginBottom: '12px' }}>Records</h2>
-          {savedSales.map((sale: any) => (
-            <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
+        <div style={{ backgroundColor: 'white', borderRadius: '20px', padding: '20px' }}>
+          <h3 style={{ marginTop: 0 }}>Monthly Records</h3>
+          {savedSales.map(sale => (
+            <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f1f5f9' }}>
               <div>
                 <div style={{ fontWeight: 'bold' }}>{sale.platform}</div>
                 <div style={{ fontSize: '12px', color: '#94a3b8' }}>{new Date(sale.created_at).toLocaleDateString()}</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                 <span style={{ fontWeight: 'bold' }}>${Number(sale.amount).toLocaleString()}</span>
-                <button onClick={() => deleteSale(sale.id)} style={{ color: '#ef4444', background: 'none', border: 'none', fontWeight: 'bold' }}>Del</button>
+                <button onClick={() => deleteSale(sale.id)} style={{ color: '#ef4444', border: 'none', background: 'none', fontWeight: 'bold' }}>Delete</button>
               </div>
             </div>
           ))}
+          {savedSales.length === 0 && <p style={{ color: '#94a3b8', textAlign: 'center' }}>No sales found for this month.</p>}
         </div>
       )}
+
     </div>
   )
 }
