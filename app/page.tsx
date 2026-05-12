@@ -1,7 +1,6 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import * as XLSX from 'xlsx'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,70 +30,50 @@ export default function Dashboard() {
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Analyzing file...');
+    setUploadStatus('Processing...');
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        
-        // Convert sheet to a raw array of arrays to find the header anywhere
-        const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    reader.onload = async (evt) => {
+      const text = evt.target.result as string;
+      
+      // Smart CSV Parsing (Works for eBay and TCGplayer CSVs)
+      const rows = text.split('\n').map(row => row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/));
+      
+      const headerRowIndex = rows.findIndex(row => 
+        row.some(cell => {
+          const c = cell.toLowerCase();
+          return c.includes('transaction creation') || c.includes('total sales') || c.includes('total price');
+        })
+      );
 
-        // UNIVERSAL HEADER SEARCH
-        // This looks for eBay, TCGplayer, or Mercari keywords
-        const headerRowIndex = rows.findIndex((row: any) => 
-          Array.isArray(row) && row.some(cell => {
-            const c = String(cell).toLowerCase();
-            return c.includes('transaction creation') || 
-                   c.includes('total sales') || 
-                   c.includes('total price') || 
-                   c.includes('price each') ||
-                   c.includes('item price') ||
-                   c.includes('gross amount');
-          })
-        );
-
-        if (headerRowIndex === -1) {
-          setUploadStatus('Error: No sales data recognized.');
-          return;
-        }
-
-        const headers: any = rows[headerRowIndex].map((h: any) => String(h).trim());
-        const dataRows = rows.slice(headerRowIndex + 1);
-        
-        let total = 0;
-        dataRows.forEach((row: any) => {
-          const rowObj: any = {};
-          headers.forEach((header: string, i: number) => { rowObj[header] = row[i]; });
-
-          // Money Column Detection (Checks all known platform variants)
-          const val = rowObj['Gross transaction amount'] || 
-                      rowObj['Total sales (Includes taxes)'] || 
-                      rowObj['Total price'] || 
-                      rowObj['Price Each'] ||
-                      rowObj['Item Price'] ||
-                      rowObj['Net Sales'];
-          
-          const type = rowObj['Type'];
-
-          // Filter logic: ignore payouts/refunds, only count Orders
-          if (val && (!type || String(type).toLowerCase().includes('order'))) {
-            const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[$,]/g, ''));
-            if (!isNaN(num)) total += num;
-          }
-        });
-
-        setSalesTotal(total);
-        setUploadStatus(`Success! $${total.toLocaleString(undefined, {minimumFractionDigits: 2})} identified.`);
-      } catch (err) {
-        setUploadStatus('Error processing file.');
+      if (headerRowIndex === -1) {
+        setUploadStatus('Error: File format not recognized.');
+        return;
       }
+
+      const headers = rows[headerRowIndex].map(h => h.trim().replace(/"/g, ''));
+      const dataRows = rows.slice(headerRowIndex + 1);
+      
+      let total = 0;
+      dataRows.forEach(row => {
+        const rowObj: any = {};
+        headers.forEach((header, i) => { rowObj[header] = row[i]; });
+
+        const val = rowObj['Gross transaction amount'] || 
+                    rowObj['Total sales (Includes taxes)'] || 
+                    rowObj['Total price'] || 
+                    rowObj['Price Each'];
+
+        if (val && (!rowObj['Type'] || rowObj['Type'].includes('Order'))) {
+          const num = parseFloat(val.replace(/[$,"]/g, ''));
+          if (!isNaN(num)) total += num;
+        }
+      });
+
+      setSalesTotal(total);
+      setUploadStatus(`Success! $${total.toLocaleString()} found.`);
     };
-    reader.readAsBinaryString(file);
+    reader.readAsText(file);
   };
 
   const totalExpenses = expenses.reduce((s, i) => s + Number(i.cost), 0);
@@ -102,14 +81,12 @@ export default function Dashboard() {
 
   return (
     <div style={{ fontFamily: 'Calibri, sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
-      
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <img src="/logo.png" style={{ width: '50px' }} alt="Logo" />
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #ddd' }}>
+          <img src="/logo.png" style={{ width: '45px' }} />
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px' }}>
             <option value={3}>March</option>
             <option value={4}>April</option>
-            <option value={5}>May</option>
           </select>
         </div>
       </div>
@@ -120,35 +97,26 @@ export default function Dashboard() {
       </div>
 
       {activeTab === 'summary' ? (
-        <>
-          <div style={cardStyle}>
-            <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '10px' }}>Revenue & Profit</h3>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <span>Gross Sales</span>
-              <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${salesTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: '10px' }}>
-              <span>Total Expenses</span>
-              <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExpenses.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', backgroundColor: '#f0fdf4', padding: '10px', borderRadius: '12px' }}>
-              <span style={{ fontWeight: 'bold' }}>Est. Net Profit</span>
-              <span style={{ fontWeight: 'bold', color: '#166534' }}>${(salesTotal - totalExpenses).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-            </div>
+        <div style={cardStyle}>
+          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Financials</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', margin: '10px 0' }}>
+            <span>Revenue</span>
+            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${salesTotal.toLocaleString()}</span>
           </div>
-        </>
+          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: '10px' }}>
+            <span>Expenses</span>
+            <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExpenses.toLocaleString()}</span>
+          </div>
+          <div style={{ marginTop: '10px', padding: '10px', borderRadius: '12px', backgroundColor: '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: 'bold' }}>Net Profit</span>
+            <span style={{ fontWeight: 'bold', color: '#166534' }}>${(salesTotal - totalExpenses).toLocaleString()}</span>
+          </div>
+        </div>
       ) : (
         <div style={cardStyle}>
           <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Universal Importer</h3>
-          <input type="file" accept=".csv, .xlsx, .xls, .txt" onChange={handleFileUpload} style={{ width: '100%', marginBottom: '15px' }} />
-          {uploadStatus && (
-            <div style={{ padding: '12px', borderRadius: '12px', backgroundColor: uploadStatus.includes('Error') ? '#fef2f2' : '#f0fdf4', color: uploadStatus.includes('Error') ? '#991b1b' : '#166534', fontWeight: 'bold' }}>
-              {uploadStatus}
-            </div>
-          )}
-          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '20px' }}>
-            Upload any CSV or Excel report from eBay or TCGplayer. The app will automatically scan for headers, skip notes, and calculate your total sales.
-          </p>
+          <input type="file" accept=".csv" onChange={handleFileUpload} style={{ width: '100%' }} />
+          {uploadStatus && <p style={{ marginTop: '15px', color: '#059669', fontWeight: 'bold' }}>{uploadStatus}</p>}
         </div>
       )}
     </div>
