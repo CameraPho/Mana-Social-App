@@ -32,7 +32,7 @@ export default function Dashboard() {
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Syncing with Supabase...');
+    setUploadStatus('Processing labels...');
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -42,7 +42,7 @@ export default function Dashboard() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-        // Robust Header Search - specifically looking for your eBay "Listing title"
+        // Find header row by checking for common marketplace keywords
         const headerRowIndex = rows.findIndex((row: any) => 
           Array.isArray(row) && row.some(cell => {
             const c = String(cell).toLowerCase().trim();
@@ -52,12 +52,11 @@ export default function Dashboard() {
         );
 
         if (headerRowIndex === -1) {
-          setUploadStatus('Error: Header not found. Ensure "Listing title" is in the top row.');
+          setUploadStatus('Error: Column "Listing title" not found.');
           return;
         }
 
-        const rawHeaders: any = rows[headerRowIndex];
-        const headers = rawHeaders.map((h: any) => String(h || '').trim());
+        const headers = rows[headerRowIndex].map((h: any) => String(h || '').trim());
         const dataRows = rows.slice(headerRowIndex + 1);
         
         let total = 0;
@@ -65,21 +64,25 @@ export default function Dashboard() {
           const rowObj: any = {};
           headers.forEach((header: string, i: number) => { rowObj[header] = row[i]; });
 
-          // Priority matching for your specific eBay file headers
+          // Check every possible "Money" column name from eBay, TCG, and ManaPool
           const val = rowObj['Total sales (Includes taxes)'] || 
                       rowObj['Gross Sales'] || 
                       rowObj['Total'] || 
-                      rowObj['Gross transaction amount'];
+                      rowObj['Gross transaction amount'] ||
+                      rowObj['Net Sales'];
           
-          if (val !== undefined && val !== null) {
-            const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[$, ]/g, ''));
+          if (val !== undefined && val !== null && String(val).trim() !== "") {
+            // Scrub dollar signs, commas, and trailing spaces
+            const cleanVal = String(val).replace(/[$, ]/g, '');
+            const num = parseFloat(cleanVal);
             if (!isNaN(num)) total += num;
           }
         });
 
+        // Determine Platform
         let platform = 'eBay';
-        if (headers.some(h => h.includes('Period'))) platform = 'ManaPool';
-        else if (headers.some(h => h.includes('Channel'))) platform = 'TCGplayer';
+        if (headers.some(h => h.toLowerCase().includes('period'))) platform = 'ManaPool';
+        else if (headers.some(h => h.toLowerCase().includes('channel'))) platform = 'TCGplayer';
 
         const { error } = await supabase.from('sales').insert([
           { 
@@ -90,10 +93,10 @@ export default function Dashboard() {
         ]);
 
         if (error) throw error;
-        setUploadStatus(`Success! Saved ${platform} total: $${total.toFixed(2)}`);
+        setUploadStatus(`Success! Added ${platform}: $${total.toLocaleString()}`);
         fetchData();
       } catch (err) {
-        setUploadStatus('Error: File format mismatch or database error.');
+        setUploadStatus('Error: Could not save to database.');
       }
     };
     reader.readAsBinaryString(file);
@@ -110,10 +113,12 @@ export default function Dashboard() {
 
   return (
     <div style={{ fontFamily: 'Calibri, sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px' }}>
+      
+      {/* Header */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <img src="/logo.png" style={{ width: '45px' }} />
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px' }}>
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px', border: '1px solid #ddd' }}>
             <option value={3}>March</option>
             <option value={4}>April</option>
             <option value={5}>May</option>
@@ -121,6 +126,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Tab Switcher */}
       <div style={{ display: 'flex', gap: '5px', marginBottom: '16px' }}>
         {['summary', 'imports', 'manage'].map(t => (
           <button key={t} onClick={() => setActiveTab(t)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', fontSize: '11px', backgroundColor: activeTab === t ? '#2563eb' : '#e5e7eb', color: activeTab === t ? 'white' : '#4b5563' }}>
@@ -129,44 +135,55 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* Summary Tab */}
       {activeTab === 'summary' && (
         <div style={cardStyle}>
-          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Profit & Loss</h3>
-          <div style={{ display: 'flex', justifyContent: 'space-between', margin: '15px 0' }}>
-            <span>Revenue</span>
-            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${totalSales.toLocaleString()}</span>
+          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '15px' }}>Monthly Overview</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <span>Total Sales</span>
+            <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${totalSales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
             <span>Expenses</span>
-            <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExp.toLocaleString()}</span>
+            <span style={{ fontWeight: 'bold', color: '#dc2626' }}>-${totalExp.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
           <div style={{ padding: '15px', borderRadius: '16px', backgroundColor: '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontWeight: 'bold' }}>Net Profit</span>
-            <span style={{ fontWeight: 'bold', color: '#166534' }}>${(totalSales - totalExp).toLocaleString()}</span>
+            <span style={{ fontWeight: 'bold', color: '#166534' }}>${(totalSales - totalExp).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
         </div>
       )}
 
+      {/* Imports Tab */}
       {activeTab === 'imports' && (
         <div style={cardStyle}>
-          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Upload Report</h3>
-          <input type="file" accept=".csv" onChange={handleFileUpload} style={{ width: '100%' }} />
-          {uploadStatus && <p style={{ marginTop: '15px', color: '#2563eb', fontWeight: 'bold', fontSize: '14px' }}>{uploadStatus}</p>}
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Import Marketplace Report</h3>
+          <input type="file" accept=".csv" onChange={handleFileUpload} style={{ width: '100%', marginBottom: '10px' }} />
+          {uploadStatus && (
+            <div style={{ padding: '12px', borderRadius: '12px', backgroundColor: '#eff6ff', color: '#1d4ed8', fontWeight: 'bold', fontSize: '14px' }}>
+              {uploadStatus}
+            </div>
+          )}
         </div>
       )}
 
+      {/* Manage Tab */}
       {activeTab === 'manage' && (
         <div style={cardStyle}>
-          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Records</h3>
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Saved Records</h3>
           {savedSales.map(sale => (
-            <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #eee' }}>
-              <div style={{ fontSize: '14px' }}><b>{sale.platform}</b></div>
+            <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f3f4f6' }}>
+              <div>
+                <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{sale.platform}</div>
+                <div style={{ fontSize: '11px', color: '#9ca3af' }}>{new Date(sale.created_at).toLocaleDateString()}</div>
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ fontWeight: 'bold' }}>${Number(sale.amount).toLocaleString()}</span>
-                <button onClick={() => deleteSale(sale.id)} style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '5px 8px' }}>X</button>
+                <button onClick={() => deleteSale(sale.id)} style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '6px 10px', fontSize: '12px', fontWeight: 'bold' }}>Del</button>
               </div>
             </div>
           ))}
+          {savedSales.length === 0 && <p style={{ fontSize: '14px', color: '#6b7280' }}>No sales data found for this month.</p>}
         </div>
       )}
     </div>
