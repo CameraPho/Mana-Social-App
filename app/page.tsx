@@ -15,24 +15,11 @@ export default function Dashboard() {
   const [savedSales, setSavedSales] = useState([]);
   const [uploadStatus, setUploadStatus] = useState('');
 
-  // Fetch both Expenses and Sales from Supabase
   const fetchData = async () => {
     const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : selectedMonth;
-    const startDate = `2026-${monthStr}-01`;
-    const endDate = `2026-${monthStr}-31`;
-
-    const { data: expData } = await supabase
-      .from('expenses')
-      .select('*')
-      .gte('purchase_date', startDate)
-      .lte('purchase_date', endDate);
+    const { data: expData } = await supabase.from('expenses').select('*').gte('purchase_date', `2026-${monthStr}-01`).lte('purchase_date', `2026-${monthStr}-31`);
     if (expData) setExpenses(expData);
-
-    const { data: saleData } = await supabase
-      .from('sales')
-      .select('*')
-      .gte('sale_date', startDate)
-      .lte('sale_date', endDate);
+    const { data: saleData } = await supabase.from('sales').select('*').gte('sale_date', `2026-${monthStr}-01`).lte('sale_date', `2026-${monthStr}-31`);
     if (saleData) setSavedSales(saleData);
   };
 
@@ -41,7 +28,7 @@ export default function Dashboard() {
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Saving to Database...');
+    setUploadStatus('Reading File...');
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -51,53 +38,53 @@ export default function Dashboard() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
+        // UNIVERSAL DETECTOR
         const headerRowIndex = rows.findIndex((row: any) => 
           Array.isArray(row) && row.some(cell => {
             const c = String(cell).toLowerCase();
-            return c.includes('gross sales') || c.includes('total sales') || c.includes('period');
+            return c === 'total' || c.includes('gross sales') || c.includes('period') || c.includes('transaction creation');
           })
         );
 
         if (headerRowIndex === -1) {
-          setUploadStatus('Error: Platform format not found.');
+          setUploadStatus('Error: Could not find data headers.');
           return;
         }
 
-        const headers: any = rows[headerRowIndex].map((h: any) => String(h).trim());
+        const headers = rows[headerRowIndex].map((h: any) => String(h).trim());
         const dataRows = rows.slice(headerRowIndex + 1);
         
         let total = 0;
         dataRows.forEach((row: any) => {
           const rowObj: any = {};
-          headers.forEach((header: string, i: number) => { rowObj[header] = row[i]; });
-          const val = rowObj['Gross Sales'] || rowObj['Total sales (Includes taxes)'] || rowObj['Total'] || rowObj['Gross transaction amount'];
+          headers.forEach((header, i) => { rowObj[header] = row[i]; });
+
+          // Priority order for money columns
+          const val = rowObj['Total'] || rowObj['Gross Sales'] || rowObj['Gross transaction amount'] || rowObj['Net Sales'];
+          
           if (val) {
             const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[$,]/g, ''));
             if (!isNaN(num)) total += num;
           }
         });
 
-        // Determine Platform Name
-        let platform = 'Unknown';
-        if (headers.includes('Period')) platform = 'ManaPool';
-        else if (headers.includes('Channel')) platform = 'TCGplayer';
-        else platform = 'eBay';
+        if (total === 0) {
+          setUploadStatus('Error: Total calculated as $0. Check file.');
+          return;
+        }
 
-        // SAVE TO SUPABASE
-        const { error } = await supabase.from('sales').insert([
-          { 
-            platform, 
-            amount: total, 
-            sale_date: `2026-${selectedMonth < 10 ? '0' : ''}${selectedMonth}-01` 
-          }
-        ]);
+        let platform = headers.includes('Period') ? 'ManaPool' : headers.includes('Channel') ? 'TCGplayer' : 'eBay';
 
-        if (error) throw error;
-        
-        setUploadStatus(`Saved ${platform}: $${total.toLocaleString()}`);
-        fetchData(); // Refresh the numbers
+        await supabase.from('sales').insert([{ 
+          platform, 
+          amount: total, 
+          sale_date: `2026-${selectedMonth < 10 ? '0' : ''}${selectedMonth}-01` 
+        }]);
+
+        setUploadStatus(`Success! Saved ${platform}: $${total.toFixed(2)}`);
+        fetchData();
       } catch (err) {
-        setUploadStatus('Error saving to database.');
+        setUploadStatus('System Error.');
       }
     };
     reader.readAsBinaryString(file);
@@ -125,10 +112,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Tab Navigation */}
-      <div style={{ display: 'flex', gap: '5px', marginBottom: '16px', overflowX: 'auto' }}>
+      <div style={{ display: 'flex', gap: '5px', marginBottom: '16px' }}>
         {['summary', 'imports', 'manage'].map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '10px', borderRadius: '12px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: activeTab === tab ? '#2563eb' : '#e5e7eb', color: activeTab === tab ? 'white' : '#4b5563' }}>
+          <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '10px', borderRadius: '12px', border: 'none', fontWeight: 'bold', fontSize: '11px', backgroundColor: activeTab === tab ? '#2563eb' : '#e5e7eb', color: activeTab === tab ? 'white' : '#4b5563' }}>
             {tab.toUpperCase()}
           </button>
         ))}
@@ -136,9 +122,9 @@ export default function Dashboard() {
 
       {activeTab === 'summary' && (
         <div style={cardStyle}>
-          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Financials</h3>
+          <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase' }}>Profit & Loss</h3>
           <div style={{ display: 'flex', justifyContent: 'space-between', margin: '15px 0' }}>
-            <span>Total Sales</span>
+            <span>Revenue</span>
             <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${totalSales.toLocaleString()}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
@@ -154,28 +140,27 @@ export default function Dashboard() {
 
       {activeTab === 'imports' && (
         <div style={cardStyle}>
-          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Universal Importer</h3>
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Import Sales</h3>
           <input type="file" accept=".csv, .xlsx" onChange={handleFileUpload} style={{ width: '100%' }} />
-          {uploadStatus && <p style={{ marginTop: '15px', color: '#2563eb', fontWeight: 'bold' }}>{uploadStatus}</p>}
+          {uploadStatus && <div style={{ marginTop: '15px', padding: '10px', borderRadius: '10px', backgroundColor: '#eff6ff', color: '#2563eb', fontWeight: 'bold' }}>{uploadStatus}</div>}
         </div>
       )}
 
       {activeTab === 'manage' && (
         <div style={cardStyle}>
-          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Edit Sales Data</h3>
+          <h3 style={{ fontWeight: 'bold', marginBottom: '15px' }}>Database Records</h3>
           {savedSales.map(sale => (
             <div key={sale.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #eee' }}>
               <div>
                 <div style={{ fontWeight: 'bold' }}>{sale.platform}</div>
-                <div style={{ fontSize: '12px', color: '#6b7280' }}>{sale.sale_date}</div>
+                <div style={{ fontSize: '11px', color: '#6b7280' }}>ID: {sale.id.slice(0,8)}</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                <span style={{ fontWeight: 'bold' }}>${Number(sale.amount).toLocaleString()}</span>
-                <button onClick={() => deleteSale(sale.id)} style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '5px 10px' }}>Delete</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontWeight: 'bold' }}>${Number(sale.amount).toFixed(2)}</span>
+                <button onClick={() => deleteSale(sale.id)} style={{ color: '#dc2626', border: 'none', background: 'none', fontSize: '12px' }}>Delete</button>
               </div>
             </div>
           ))}
-          {savedSales.length === 0 && <p style={{ color: '#6b7280', fontSize: '14px' }}>No sales data saved for this month.</p>}
         </div>
       )}
     </div>
