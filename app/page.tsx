@@ -10,44 +10,62 @@ const supabase = createClient(
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('summary');
-  // Initialize to current month (1-12)
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); 
   const [expenses, setExpenses] = useState([]);
   const [savedSales, setSavedSales] = useState([]);
+  const [buyouts, setBuyouts] = useState([]);
   const [uploadStatus, setUploadStatus] = useState('');
 
-  // 1. DYNAMIC DATA BRIDGE
+  // New Buyout Form State
+  const [newBuyout, setNewBuyout] = useState({ name: '', total_cost: '', notes: '' });
+
   const fetchData = useCallback(async () => {
     const { data: expData } = await supabase.from('expenses').select('*');
     const { data: saleData } = await supabase.from('sales').select('*');
+    const { data: buyoutData } = await supabase.from('buyouts').select('*');
 
     const currentYear = new Date().getFullYear();
     const monthStr = selectedMonth < 10 ? `0${selectedMonth}` : `${selectedMonth}`;
     const yearMonth = `${currentYear}-${monthStr}`;
 
-    // Filters locally to handle various date formats (YYYY-MM-DD and MM/DD/YYYY)
-    const filteredExpenses = (expData || []).filter(e => 
-      e.purchase_date.includes(yearMonth) || e.purchase_date.includes(`${selectedMonth}/`)
-    );
-    
+    // Filter Sales
     const filteredSales = (saleData || []).filter(s => {
       const dbDate = s.sale_date || '';
       const createdAt = s.created_at ? new Date(s.created_at).getMonth() + 1 : null;
       return dbDate.includes(yearMonth) || createdAt === selectedMonth;
     });
 
-    setExpenses(filteredExpenses);
+    // Filter Buyouts (added this month)
+    const filteredBuyouts = (buyoutData || []).filter(b => b.created_at.includes(yearMonth));
+
+    // Combine standard expenses + buyout costs for the month
+    const combinedExpenses = [
+      ...(expData || []).filter(e => e.purchase_date.includes(yearMonth) || e.purchase_date.startsWith(`${selectedMonth}/`)),
+      ...filteredBuyouts.map(b => ({ id: `b-${b.id}`, item_name: `BUYOUT: ${b.name}`, cost: b.total_cost, purchase_date: b.created_at }))
+    ];
+
+    setExpenses(combinedExpenses);
     setSavedSales(filteredSales);
+    setBuyouts(filteredBuyouts);
   }, [selectedMonth]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // 2. UNIVERSAL UPLOAD LOGIC
+  const handleAddBuyout = async (e) => {
+    e.preventDefault();
+    const { error } = await supabase.from('buyouts').insert([
+      { name: newBuyout.name, total_cost: parseFloat(newBuyout.total_cost), notes: newBuyout.notes }
+    ]);
+    if (!error) {
+      setNewBuyout({ name: '', total_cost: '', notes: '' });
+      fetchData();
+    }
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setUploadStatus('Syncing...');
-
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
@@ -55,149 +73,131 @@ export default function Dashboard() {
         const wb = XLSX.read(ab, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
-
         let headerIdx = -1;
-        let platform = 'eBay';
-
-        for (let i = 0; i < Math.min(rows.length, 20); i++) {
+        let platform = 'Marketplace';
+        for (let i = 0; i < Math.min(rows.length, 25); i++) {
           const r = rows[i].map(c => String(c || '').toLowerCase().trim());
           if (r.includes('listing title')) { headerIdx = i; platform = 'eBay'; break; }
           if (r.includes('gross sales')) { headerIdx = i; platform = 'TCGplayer'; break; }
-          if (r.includes('period')) { headerIdx = i; platform = 'ManaPool'; break; }
         }
-
         const headers = rows[headerIdx].map(h => String(h || '').trim().toLowerCase());
         let total = 0;
         rows.slice(headerIdx + 1).forEach(row => {
           headers.forEach((h, idx) => {
-            if (['total sales (includes taxes)', 'gross sales', 'total'].includes(h)) {
+            if (['total sales (includes taxes)', 'gross sales', 'total', 'payout amount'].includes(h)) {
               const val = parseFloat(String(row[idx] || 0).replace(/[$, ]/g, ''));
               if (!isNaN(val)) total += val;
             }
           });
         });
-
-        const currentYear = new Date().getFullYear();
-        await supabase.from('sales').insert([{ 
-          platform, 
-          amount: total, 
-          sale_date: `${currentYear}-${selectedMonth < 10 ? '0' : ''}${selectedMonth}-01` 
-        }]);
-
-        setUploadStatus(`Success: $${total.toFixed(2)} Added`);
-        fetchData(); 
-      } catch (err) { 
-        setUploadStatus('Error processing report.'); 
-      }
+        await supabase.from('sales').insert([{ platform, amount: total, sale_date: `2026-${selectedMonth < 10 ? '0' : ''}${selectedMonth}-01` }]);
+        setUploadStatus('Success!');
+        fetchData();
+      } catch (err) { setUploadStatus('Upload Error'); }
     };
     reader.readAsArrayBuffer(file);
   };
 
   const deleteItem = async (id, table) => {
-    await supabase.from(table).delete().eq('id', id);
+    const cleanId = String(id).replace('b-', '');
+    await supabase.from(table).delete().eq('id', cleanId);
     fetchData();
   };
 
-  // 3. AUTO-CALCULATION AGGREGATES
   const totalSales = savedSales.reduce((sum, s) => sum + Number(s.amount), 0);
   const totalExp = expenses.reduce((sum, e) => sum + Number(e.cost), 0);
   const netProfit = totalSales - totalExp;
 
-  // 4. DYNAMIC STYLES
   const cardStyle = { backgroundColor: 'white', borderRadius: '24px', padding: '24px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', marginBottom: '16px' };
-  const navBtnStyle = (t) => ({ 
-    flex: '1 1 auto', padding: '12px', borderRadius: '14px', border: 'none', fontWeight: '800', fontSize: '11px', 
-    textTransform: 'uppercase', backgroundColor: activeTab === t ? '#2563eb' : '#fff', 
-    color: activeTab === t ? '#fff' : '#64748b', boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
-  });
+  const inputStyle = { width: '100%', padding: '12px', marginBottom: '10px', borderRadius: '12px', border: '1px solid #e2e8f0' };
 
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', backgroundColor: '#f8fafc', minHeight: '100vh', padding: '16px', color: '#1e293b' }}>
       
-      {/* Dynamic Header */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: '900', letterSpacing: '-1px' }}>MANA SOCIAL</h1>
-          <select 
-            value={selectedMonth} 
-            onChange={(e) => setSelectedMonth(Number(e.target.value))} 
-            style={{ padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0', fontWeight: '600', backgroundColor: '#fff' }}
-          >
+          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '900' }}>MANA SOCIAL</h1>
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} style={{ padding: '8px', borderRadius: '10px' }}>
             {Array.from({ length: 12 }, (_, i) => (
-              <option key={i + 1} value={i + 1}>
-                {new Date(0, i).toLocaleString('default', { month: 'long' })}
-              </option>
+              <option key={i+1} value={i+1}>{new Date(0, i).toLocaleString('default', { month: 'long' })}</option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '20px' }}>
-        {['summary', 'upload', 'income', 'expense', 'taxes'].map(t => (
-          <button key={t} onClick={() => setActiveTab(t)} style={navBtnStyle(t)}>{t}</button>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '20px' }}>
+        {['summary', 'buyouts', 'upload', 'income', 'expense'].map(t => (
+          <button key={t} onClick={() => setActiveTab(t)} style={{ flex: '1', padding: '12px 6px', borderRadius: '12px', border: 'none', fontWeight: '800', fontSize: '10px', textTransform: 'uppercase', backgroundColor: activeTab === t ? '#2563eb' : '#fff', color: activeTab === t ? '#fff' : '#64748b' }}>
+            {t}
+          </button>
         ))}
       </div>
 
-      {/* Content Rendering */}
-      <div style={{ minHeight: '350px' }}>
-        {activeTab === 'summary' && (
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <span style={{ fontWeight: '600' }}>Marketplace Revenue</span>
-              <span style={{ fontWeight: '800', color: '#2563eb' }}>${totalSales.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <span style={{ fontWeight: '600' }}>Operating Expenses</span>
-              <span style={{ fontWeight: '800', color: '#ef4444' }}>-${totalExp.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-            </div>
-            <div style={{ padding: '20px', borderRadius: '18px', backgroundColor: '#f0fdf4', border: '1px solid #dcfce7', display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontWeight: '900', color: '#166534' }}>NET PROFIT</span>
-              <span style={{ fontWeight: '900', color: '#166534' }}>${netProfit.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-            </div>
+      {activeTab === 'summary' && (
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}><span>Revenue</span><span style={{ fontWeight: '800', color: '#2563eb' }}>${totalSales.toFixed(2)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span>Expenses (Incl. Buyouts)</span><span style={{ fontWeight: '800', color: '#ef4444' }}>-${totalExp.toFixed(2)}</span></div>
+          <div style={{ padding: '20px', borderRadius: '18px', backgroundColor: '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: '900' }}>NET PROFIT</span><span style={{ fontWeight: '900' }}>${netProfit.toFixed(2)}</span>
           </div>
-        )}
+        </div>
+      )}
 
-        {activeTab === 'upload' && (
-          <div style={cardStyle}>
-            <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '16px' }}>Input Records</h2>
-            <input type="file" onChange={handleFileUpload} style={{ width: '100%', padding: '20px', border: '2px dashed #cbd5e1', borderRadius: '16px' }} />
-            {uploadStatus && <div style={{ marginTop: '16px', padding: '12px', borderRadius: '12px', backgroundColor: '#eff6ff', color: '#1e40af', fontWeight: '700', textAlign: 'center' }}>{uploadStatus}</div>}
-          </div>
-        )}
-
-        {activeTab === 'income' && (
-          <div style={cardStyle}>
-            <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '16px' }}>Income Ledger</h2>
-            {savedSales.length > 0 ? savedSales.map(s => (
-              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f1f5f9' }}>
-                <div><div style={{ fontWeight: '700' }}>{s.platform}</div><div style={{ fontSize: '10px', color: '#94a3b8' }}>{new Date(s.created_at).toLocaleDateString()}</div></div>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}><span style={{ fontWeight: '800' }}>${Number(s.amount).toFixed(2)}</span><button onClick={() => deleteItem(s.id, 'sales')} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '6px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: '800' }}>DEL</button></div>
+      {activeTab === 'buyouts' && (
+        <div style={cardStyle}>
+          <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '15px' }}>New Collection Buyout</h2>
+          <form onSubmit={handleAddBuyout}>
+            <input placeholder="Collection Name" style={inputStyle} value={newBuyout.name} onChange={e => setNewBuyout({...newBuyout, name: e.target.value})} required />
+            <input placeholder="Total Cost ($)" type="number" style={inputStyle} value={newBuyout.total_cost} onChange={e => setNewBuyout({...newBuyout, total_cost: e.target.value})} required />
+            <textarea placeholder="Payment Plan Details / Notes" style={inputStyle} value={newBuyout.notes} onChange={e => setNewBuyout({...newBuyout, notes: e.target.value})} />
+            <button type="submit" style={{ width: '100%', padding: '14px', borderRadius: '12px', border: 'none', backgroundColor: '#2563eb', color: '#fff', fontWeight: '800' }}>LOG BUYOUT</button>
+          </form>
+          
+          <h3 style={{ fontSize: '14px', fontWeight: '800', marginTop: '25px', marginBottom: '10px' }}>Active Buyouts (This Month)</h3>
+          {buyouts.map(b => (
+            <div key={b.id} style={{ padding: '12px', borderBottom: '1px solid #f1f5f9' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: '700' }}>{b.name}</span>
+                <span style={{ fontWeight: '800' }}>${Number(b.total_cost).toFixed(2)}</span>
               </div>
-            )) : <p style={{ textAlign: 'center', color: '#94a3b8' }}>No data for this month.</p>}
-          </div>
-        )}
+              <p style={{ fontSize: '11px', color: '#64748b', margin: '4px 0' }}>{b.notes}</p>
+              <button onClick={() => deleteItem(b.id, 'buyouts')} style={{ color: '#ef4444', border: 'none', background: 'none', fontSize: '10px', padding: 0 }}>Delete Buyout</button>
+            </div>
+          ))}
+        </div>
+      )}
 
-        {activeTab === 'expense' && (
-          <div style={cardStyle}>
-            <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '16px' }}>Expense Ledger</h2>
-            {expenses.length > 0 ? expenses.map(e => (
-              <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f1f5f9' }}>
-                <div><div style={{ fontWeight: '700' }}>{e.item_name}</div><div style={{ fontSize: '10px', color: '#94a3b8' }}>{e.purchase_date}</div></div>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}><span style={{ fontWeight: '800', color: '#ef4444' }}>-${Number(e.cost).toFixed(2)}</span><button onClick={() => deleteItem(e.id, 'expenses')} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '6px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: '800' }}>DEL</button></div>
-              </div>
-            )) : <p style={{ textAlign: 'center', color: '#94a3b8' }}>No expenses found.</p>}
-          </div>
-        )}
+      {activeTab === 'upload' && (
+        <div style={cardStyle}>
+          <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '15px' }}>Marketplace Upload</h2>
+          <input type="file" onChange={handleFileUpload} style={{ width: '100%', padding: '20px', border: '2px dashed #cbd5e1', borderRadius: '16px' }} />
+          {uploadStatus && <p style={{ textAlign: 'center', marginTop: '10px', fontWeight: '700' }}>{uploadStatus}</p>}
+        </div>
+      )}
 
-        {activeTab === 'taxes' && (
-          <div style={cardStyle}>
-            <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '16px' }}>Estimated Liabilities</h2>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}><span>Federal Self-Employment (15.3%)</span><span style={{ fontWeight: '800' }}>${(netProfit * 0.153).toFixed(2)}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>CA State (1%)</span><span style={{ fontWeight: '800' }}>${(netProfit * 0.01).toFixed(2)}</span></div>
-          </div>
-        )}
-      </div>
+      {activeTab === 'income' && (
+        <div style={cardStyle}>
+          <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '15px' }}>Income Ledger</h2>
+          {savedSales.map(s => (
+            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f1f5f9' }}>
+              <span>{s.platform}</span>
+              <span style={{ fontWeight: '800' }}>${Number(s.amount).toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'expense' && (
+        <div style={cardStyle}>
+          <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '15px' }}>Expense Ledger</h2>
+          {expenses.map(e => (
+            <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f1f5f9' }}>
+              <span style={{ fontSize: '13px' }}>{e.item_name}</span>
+              <span style={{ fontWeight: '800', color: '#ef4444' }}>-${Number(e.cost).toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
