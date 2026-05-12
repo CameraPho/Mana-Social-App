@@ -2,68 +2,76 @@
 import React, { useState } from 'react'
 
 export default function Dashboard() {
-  // Simple state for a quick buyout calculation
+  const [activeTab, setActiveTab] = useState('buyouts');
   const [cost, setCost] = useState(0);
   const [qty, setQty] = useState(0);
+  
   const avgCost = qty > 0 ? (cost / qty).toFixed(2) : "0.00";
 
   return (
     <div style={{ 
       fontFamily: 'Calibri, Candara, Segoe, "Segoe UI", Optima, Arial, sans-serif',
-      backgroundColor: '#f9fafb',
-      minHeight: '100vh',
-      padding: '16px'
+      backgroundColor: '#f4f7f6', minHeight: '100vh', padding: '16px'
     }}>
       
-      {/* Branded Header */}
-      <div style={{ backgroundColor: 'white', borderRadius: '24px', padding: '20px', marginBottom: '16px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <img src="/logo.png" alt="Logo" style={{ width: '80px', height: '80px', objectFit: 'contain', margin: '0 auto 12px' }} />
-        <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0' }}>Mana Social LLC</h1>
+      {/* Header */}
+      <div style={{ backgroundColor: 'white', borderRadius: '24px', padding: '15px', marginBottom: '16px', textAlign: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+        <img src="/logo.png" alt="Logo" style={{ width: '60px', height: '60px', objectFit: 'contain', margin: '0 auto' }} />
+        <h1 style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '8px' }}>Mana Social LLC</h1>
       </div>
 
-      {/* Collection Buyout Tracker */}
-      <div style={{ backgroundColor: 'white', borderRadius: '24px', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', marginBottom: '16px' }}>
-        <div style={{ backgroundColor: '#059669', padding: '16px' }}>
-          <h2 style={{ color: 'white', fontWeight: '600', fontSize: '18px', margin: '0' }}>Collection Buyout Tools</h2>
-        </div>
-        
-        <div style={{ padding: '20px' }}>
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Total Buyout Price ($)</label>
-            <input 
-              type="number" 
-              onChange={(e) => setCost(Number(e.target.value))}
-              style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #e5e7eb' }} 
-              placeholder="e.g. 1463"
-            />
-          </div>
-
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Total Card Quantity</label>
-            <input 
-              type="number" 
-              onChange={(e) => setQty(Number(e.target.value))}
-              style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #e5e7eb' }} 
-              placeholder="e.g. 7500"
-            />
-          </div>
-
-          <div style={{ backgroundColor: '#f0fdf4', borderRadius: '16px', padding: '16px', textAlign: 'center' }}>
-            <span style={{ color: '#166534', fontSize: '14px', fontWeight: '600' }}>Average Cost Per Card: </span>
-            <span style={{ color: '#166534', fontSize: '24px', fontWeight: 'bold' }}>${avgCost}</span>
-          </div>
-        </div>
+      {/* Navigation Toggles */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+        <button 
+          onClick={() => setActiveTab('buyouts')}
+          style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'buyouts' ? '#059669' : '#e5e7eb', color: activeTab === 'buyouts' ? 'white' : '#4b5563' }}>
+          Buyouts
+        </button>
+        <button 
+          onClick={() => setActiveTab('expenses')}
+          style={{ flex: 1, padding: '12px', borderRadius: '12px', border: 'none', fontWeight: 'bold', backgroundColor: activeTab === 'expenses' ? '#2563eb' : '#e5e7eb', color: activeTab === 'expenses' ? 'white' : '#4b5563' }}>
+          Supplies/SaaS
+        </button>
       </div>
 
-      {/* Active Payment Plans (Based on Spreadsheet) */}
-      <div style={{ backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
-        <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '12px' }}>Active Liabilities</h3>
-        <div style={{ fontSize: '14px', borderLeft: '4px solid #ef4444', paddingLeft: '12px' }}>
-          <p style={{ margin: '0', fontWeight: 'bold' }}>Brett Bruhanski</p>
-          <p style={{ margin: '0', color: '#6b7280' }}>Left Over Owed: $1,000.00</p>
+      {activeTab === 'buyouts' ? (
+        <div style={{ backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#059669', marginBottom: '15px' }}>Collection Tracker</h2>
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ fontSize: '12px', color: '#6b7280' }}>Acquisition Cost ($)</label>
+            <input type="number" onChange={(e) => setCost(Number(e.target.value))} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #ddd', marginTop: '4px' }} />
+          </div>
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ fontSize: '12px', color: '#6b7280' }}>Card Count</label>
+            <input type="number" onChange={(e) => setQty(Number(e.target.value))} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #ddd', marginTop: '4px' }} />
+          </div>
+          <div style={{ backgroundColor: '#f0fdf4', padding: '15px', borderRadius: '15px', textAlign: 'center' }}>
+            <p style={{ margin: 0, fontSize: '14px', color: '#166534' }}>Avg Cost Per Card</p>
+            <p style={{ margin: 0, fontSize: '28px', fontWeight: 'bold', color: '#166534' }}>${avgCost}</p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div style={{ backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#2563eb', marginBottom: '15px' }}>Business Expenses</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* Example of items from your Financial file */}
+            <div style={{ padding: '12px', borderBottom: '1px solid #eee' }}>
+              <p style={{ margin: 0, fontWeight: 'bold' }}>TCG Automate / SortSwift</p>
+              <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>Monthly SaaS Subscription</p>
+            </div>
+            <div style={{ padding: '12px', borderBottom: '1px solid #eee' }}>
+              <p style={{ margin: 0, fontWeight: 'bold' }}>BCW Supplies</p>
+              <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>Toploaders / Team Bags</p>
+            </div>
+          </div>
+        </div>
+      )}
 
+      {/* Liability Watch */}
+      <div style={{ marginTop: '16px', backgroundColor: '#fff1f2', padding: '15px', borderRadius: '24px', border: '1px solid #fecaca' }}>
+        <h3 style={{ fontSize: '14px', color: '#991b1b', margin: '0 0 8px 0' }}>Outstanding Liability</h3>
+        <p style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', color: '#991b1b' }}>Brett Bruhanski: $1,000.00</p>
+      </div>
     </div>
   )
 }
