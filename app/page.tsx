@@ -1,83 +1,69 @@
 'use client'
-import React from 'react'
+import React, { useState } from 'react'
 
 export default function Dashboard() {
+  // Simple state for a quick buyout calculation
+  const [cost, setCost] = useState(0);
+  const [qty, setQty] = useState(0);
+  const avgCost = qty > 0 ? (cost / qty).toFixed(2) : "0.00";
+
   return (
     <div style={{ 
       fontFamily: 'Calibri, Candara, Segoe, "Segoe UI", Optima, Arial, sans-serif',
       backgroundColor: '#f9fafb',
-      minHeight: '100-screen',
-      padding: '20px'
+      minHeight: '100vh',
+      padding: '16px'
     }}>
       
-      {/* Branded Header Card */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '24px',
-        padding: '24px',
-        marginBottom: '16px',
-        textAlign: 'center',
-        border: '1px solid #f3f4f6',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-      }}>
-        <div style={{ marginBottom: '16px' }}>
-           <img 
-            src="/logo.png" 
-            alt="Mana Social Logo" 
-            style={{ 
-              width: '120px', 
-              height: '120px', 
-              objectFit: 'contain',
-              display: 'block',
-              margin: '0 auto'
-            }}
-          />
-        </div>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#111827', margin: '0' }}>Mana Social LLC</h1>
-        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-          Culture • Community • Games
-        </p>
+      {/* Branded Header */}
+      <div style={{ backgroundColor: 'white', borderRadius: '24px', padding: '20px', marginBottom: '16px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <img src="/logo.png" alt="Logo" style={{ width: '80px', height: '80px', objectFit: 'contain', margin: '0 auto 12px' }} />
+        <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0' }}>Mana Social LLC</h1>
       </div>
 
-      {/* Main Stats Card */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '24px',
-        overflow: 'hidden',
-        border: '1px solid #f3f4f6',
-        boxShadow: '0 4px 6px rgba(0,0,0,0.05)'
-      }}>
-        <div style={{ backgroundColor: '#2563eb', padding: '16px' }}>
-          <h2 style={{ color: 'white', fontWeight: '600', fontSize: '18px', margin: '0' }}>LLC Financial Hub</h2>
+      {/* Collection Buyout Tracker */}
+      <div style={{ backgroundColor: 'white', borderRadius: '24px', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', marginBottom: '16px' }}>
+        <div style={{ backgroundColor: '#059669', padding: '16px' }}>
+          <h2 style={{ color: 'white', fontWeight: '600', fontSize: '18px', margin: '0' }}>Collection Buyout Tools</h2>
         </div>
         
-        <div style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', paddingBottom: '12px', marginBottom: '20px' }}>
-            <span style={{ color: '#6b7280', fontSize: '14px' }}>Operator</span>
-            <span style={{ color: '#1f2937', fontWeight: 'bold' }}>Camera Pho</span>
+        <div style={{ padding: '20px' }}>
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Total Buyout Price ($)</label>
+            <input 
+              type="number" 
+              onChange={(e) => setCost(Number(e.target.value))}
+              style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #e5e7eb' }} 
+              placeholder="e.g. 1463"
+            />
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', paddingBottom: '12px', marginBottom: '20px' }}>
-            <span style={{ color: '#6b7280', fontSize: '14px' }}>Supabase Status</span>
-            <span style={{ color: '#059669', fontWeight: 'bold' }}>● Connected</span>
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Total Card Quantity</label>
+            <input 
+              type="number" 
+              onChange={(e) => setQty(Number(e.target.value))}
+              style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #e5e7eb' }} 
+              placeholder="e.g. 7500"
+            />
           </div>
 
-          <div style={{ backgroundColor: '#eff6ff', borderRadius: '16px', padding: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: '#1d4ed8', fontSize: '14px', fontWeight: '600' }}>Moreno Valley Sales Tax</span>
-              <span style={{ backgroundColor: '#dbeafe', color: '#1e40af', fontSize: '12px', padding: '4px 8px', borderRadius: '99px', fontWeight: 'bold' }}>
-                8.75%
-              </span>
-            </div>
+          <div style={{ backgroundColor: '#f0fdf4', borderRadius: '16px', padding: '16px', textAlign: 'center' }}>
+            <span style={{ color: '#166534', fontSize: '14px', fontWeight: '600' }}>Average Cost Per Card: </span>
+            <span style={{ color: '#166534', fontSize: '24px', fontWeight: 'bold' }}>${avgCost}</span>
           </div>
-        </div>
-
-        <div style={{ padding: '16px', backgroundColor: '#f9fafb', borderTop: '1px solid #f3f4f6' }}>
-          <p style={{ fontSize: '10px', textAlign: 'center', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 'bold', margin: '0' }}>
-            Secure LLC Management Portal
-          </p>
         </div>
       </div>
+
+      {/* Active Payment Plans (Based on Spreadsheet) */}
+      <div style={{ backgroundColor: 'white', borderRadius: '24px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '12px' }}>Active Liabilities</h3>
+        <div style={{ fontSize: '14px', borderLeft: '4px solid #ef4444', paddingLeft: '12px' }}>
+          <p style={{ margin: '0', fontWeight: 'bold' }}>Brett Bruhanski</p>
+          <p style={{ margin: '0', color: '#6b7280' }}>Left Over Owed: $1,000.00</p>
+        </div>
+      </div>
+
     </div>
   )
 }
