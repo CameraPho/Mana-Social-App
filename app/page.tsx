@@ -31,7 +31,7 @@ export default function Dashboard() {
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploadStatus('Scanning TCG/eBay data...');
+    setUploadStatus('Analyzing file...');
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -42,23 +42,19 @@ export default function Dashboard() {
         const ws = wb.Sheets[wsname];
         const rows: any = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-        // Expanded detection list for TCGplayer and eBay
+        // UNIVERSAL HEADER SEARCH
+        // Added 'period' and 'order count' to catch ManaPool files
         const headerRowIndex = rows.findIndex((row: any) => 
           Array.isArray(row) && row.some(cell => {
             const c = String(cell).toLowerCase();
-            return c.includes('transaction creation') || 
-                   c.includes('total sales') || 
-                   c.includes('total price') || 
-                   c.includes('price each') ||
-                   c.includes('market price') ||
-                   c.includes('order total');
+            return c.includes('gross sales') || c.includes('net sales') || 
+                   c.includes('total sales') || c.includes('transaction creation') ||
+                   c.includes('period') || c.includes('order count');
           })
         );
 
         if (headerRowIndex === -1) {
-          // Debugging info if it fails
-          const firstRow = rows[0] ? rows[0].join(', ') : 'Empty file';
-          setUploadStatus(`Error: Unknown format. Found: ${firstRow.substring(0, 30)}...`);
+          setUploadStatus('Error: File format not recognized.');
           return;
         }
 
@@ -71,16 +67,19 @@ export default function Dashboard() {
           headers.forEach((header: string, i: number) => { rowObj[header] = row[i]; });
 
           // Money Column Detection
-          const val = rowObj['Gross transaction amount'] || 
+          // Added 'Total' and 'Subtotal' to support ManaPool
+          const val = rowObj['Gross Sales'] || 
+                      rowObj['Net Sales'] ||
+                      rowObj['Gross transaction amount'] || 
                       rowObj['Total sales (Includes taxes)'] || 
-                      rowObj['Total price'] || 
-                      rowObj['Price Each'] ||
-                      rowObj['Market Price'] ||
-                      rowObj['Order Total'];
+                      rowObj['Total price'] ||
+                      rowObj['Total'] ||
+                      rowObj['Subtotal'];
           
-          // Only count valid sales (ignore refunds/payouts)
-          const type = String(rowObj['Type'] || '').toLowerCase();
-          if (val && (type === '' || type.includes('order') || type.includes('sale'))) {
+          const type = rowObj['Type'];
+
+          // Filter: Count the row if it has a value and isn't a non-order type (for eBay)
+          if (val && (!type || String(type).toLowerCase().includes('order'))) {
             const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[$,]/g, ''));
             if (!isNaN(num)) total += num;
           }
@@ -89,7 +88,7 @@ export default function Dashboard() {
         setSalesTotal(total);
         setUploadStatus(`Success! $${total.toLocaleString(undefined, {minimumFractionDigits: 2})} identified.`);
       } catch (err) {
-        setUploadStatus('Error: Could not read this file.');
+        setUploadStatus('Error processing file.');
       }
     };
     reader.readAsBinaryString(file);
@@ -121,7 +120,7 @@ export default function Dashboard() {
         <div style={cardStyle}>
           <h3 style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', marginBottom: '10px' }}>Dashboard Summary</h3>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <span>Revenue</span>
+            <span>Gross Revenue</span>
             <span style={{ fontWeight: 'bold', color: '#2563eb' }}>${salesTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: '10px' }}>
@@ -148,7 +147,7 @@ export default function Dashboard() {
             </div>
           )}
           <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '20px' }}>
-            Works for eBay and TCGplayer files. If it fails, check the error message for the header name it found.
+            Supports eBay, TCGplayer, and ManaPool. Upload any CSV or Excel report and the dashboard will calculate your totals.
           </p>
         </div>
       )}
