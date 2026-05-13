@@ -14,7 +14,6 @@ export default function ManaSocialMasterApp() {
   const [selectedMonth, setSelectedMonth] = useState(0)
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false)
   const [editingItem, setEditingItem] = useState(null) 
-  const [isSyncing, setIsSyncing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
 
   const [formData, setFormData] = useState({ 
@@ -27,19 +26,19 @@ export default function ManaSocialMasterApp() {
   const [expenses, setExpenses] = useState([])
   const [buyouts, setBuyouts] = useState([])
   const [payroll, setPayroll] = useState([])
-  const [payments, setPayments] = useState([])
+  const [disbursements, setDisbursements] = useState([])
 
   const fetchData = useCallback(async () => {
-    const [sRes, eRes, bRes, payRes, pRes] = await Promise.all([
+    const [sRes, eRes, bRes, payRes, dRes] = await Promise.all([
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
       supabase.from('buyouts').select('*').order('due_date', { ascending: false }),
       supabase.from('payroll').select('*'),
-      supabase.from('payments').select('*') 
+      supabase.from('disbursements').select('*')
     ]);
 
     const filterByDate = (data, key) => data?.filter(i => {
-      const d = new Date(i[key] || i.sale_date || i.purchase_date || i.due_date || i.pay_date);
+      const d = new Date(i[key] || i.sale_date || i.purchase_date || i.due_date || i.pay_date || i.disbursement_date);
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth);
     }) || [];
 
@@ -47,12 +46,12 @@ export default function ManaSocialMasterApp() {
     setExpenses(filterByDate(eRes.data, 'purchase_date'));
     setBuyouts(filterByDate(bRes.data, 'due_date'));
     setPayroll(filterByDate(payRes.data, 'pay_date'));
-    setPayments(pRes.data || []);
+    setDisbursements(filterByDate(dRes.data, 'disbursement_date'));
   }, [selectedYear, selectedMonth]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // --- 3. CORE ACTIONS (Fixed for TypeScript Compliance) ---
+  // --- 3. CORE ACTIONS ---
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -71,7 +70,8 @@ export default function ManaSocialMasterApp() {
       sales: { platform: formData.label, amount: parseFloat(formData.amount || '0'), fees: parseFloat(formData.fees || '0'), shipping: parseFloat(formData.shipping || '0'), sale_date: formData.date, attachment_url: formData.file },
       buyouts: { seller_name: formData.label, total_cost: parseFloat(formData.amount || '0'), notes: `Count: ${formData.itemCount} | ${formData.notes}`, due_date: formData.date, attachment_url: formData.file },
       expenses: { category: formData.label, cost: parseFloat(formData.amount || '0'), purchase_date: formData.date, attachment_url: formData.file },
-      payroll: { employee_name: formData.label, amount: parseFloat(formData.amount || '0'), pay_date: formData.date, status: 'paid' }
+      payroll: { employee_name: formData.label, amount: parseFloat(formData.amount || '0'), pay_date: formData.date, status: 'paid' },
+      disbursements: { recipient: formData.label, amount: parseFloat(formData.amount || '0'), notes: formData.notes, disbursement_date: formData.date }
     }[table];
 
     const { error } = await supabase.from(table).insert([payload]);
@@ -84,7 +84,9 @@ export default function ManaSocialMasterApp() {
   const totalFees = sales.reduce((sum, s) => sum + Number(s.fees || 0) + Number(s.shipping || 0), 0);
   const directExpenses = expenses.reduce((sum, e) => sum + Number(e.cost), 0);
   const totalPayroll = payroll.reduce((sum, p) => sum + Number(p.amount), 0);
-  const netCashFlow = grossRevenue - (directExpenses + totalPayroll + totalFees);
+  
+  const totalExpenses = directExpenses + totalPayroll + totalFees;
+  const netRevenue = grossRevenue - totalExpenses;
   
   const fontStack = 'Calibri, Candara, Segoe, "Segoe UI", Optima, Arial, sans-serif';
 
@@ -92,7 +94,6 @@ export default function ManaSocialMasterApp() {
     <div style={{ fontFamily: fontStack, backgroundColor: '#f8fafc', minHeight: '100vh', paddingBottom: '140px' }}>
       <div style={{ maxWidth: '500px', margin: '0 auto', padding: '20px' }}>
         
-        {/* RESTORED LOCKED HEADER */}
         <header style={{ marginBottom: '25px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '24px', fontWeight: '900', color: '#0f172a' }}>MANA SOCIAL LLC</h1>
           <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
@@ -106,7 +107,7 @@ export default function ManaSocialMasterApp() {
             <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
                <h2 style={{ fontWeight: '900', marginBottom: '20px', color: '#1e293b' }}>ADD {editingItem.table.toUpperCase()}</h2>
                <div style={{ display: 'grid', gap: '15px' }}>
-                  <input type="text" placeholder="Source / Platform" value={formData.label} onChange={(e) => setFormData({...formData, label: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid #cbd5e1', fontFamily: fontStack }} />
+                  <input type="text" placeholder={editingItem.table === 'disbursements' ? 'Recipient Name' : 'Source / Platform / Entity'} value={formData.label} onChange={(e) => setFormData({...formData, label: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid #cbd5e1', fontFamily: fontStack }} />
                   <input type="number" placeholder="Total Amount ($)" value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid #cbd5e1', fontFamily: fontStack }} />
                   
                   {editingItem.table === 'sales' && (
@@ -116,12 +117,22 @@ export default function ManaSocialMasterApp() {
                     </div>
                   )}
 
+                  {editingItem.table === 'buyouts' && (
+                    <input type="number" placeholder="Item Count (Total Cards)" value={formData.itemCount} onChange={(e) => setFormData({...formData, itemCount: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid #cbd5e1', fontFamily: fontStack }} />
+                  )}
+
                   <input type="date" value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid #cbd5e1', fontFamily: fontStack }} />
                   
-                  <div style={{ border: '2px dashed #cbd5e1', padding: '15px', borderRadius: '12px', textAlign: 'center', position: 'relative' }}>
-                    <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>{isUploading ? 'UPLOADING...' : formData.file ? '✅ ATTACHED' : '📷 UPLOAD FILE / PHOTO'}</span>
-                    <input type="file" accept="image/*,application/pdf" capture="environment" onChange={handleFileUpload} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} />
-                  </div>
+                  {['buyouts', 'disbursements'].includes(editingItem.table) && (
+                    <textarea placeholder="Internal Notes" value={formData.notes} onChange={(e) => setFormData({...formData, notes: e.target.value})} style={{ width: '100%', padding: '15px', borderRadius: '10px', border: '1px solid #cbd5e1', fontFamily: fontStack, height: '80px' }} />
+                  )}
+
+                  {editingItem.table !== 'disbursements' && editingItem.table !== 'payroll' && (
+                    <div style={{ border: '2px dashed #cbd5e1', padding: '15px', borderRadius: '12px', textAlign: 'center', position: 'relative' }}>
+                      <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>{isUploading ? 'UPLOADING...' : formData.file ? '✅ ATTACHED' : '📷 UPLOAD FILE / PHOTO'}</span>
+                      <input type="file" accept="image/*,application/pdf" capture="environment" onChange={handleFileUpload} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} />
+                    </div>
+                  )}
 
                   <button onClick={handleSave} style={{ backgroundColor: '#4f46e5', color: '#fff', padding: '18px', borderRadius: '12px', border: 'none', fontWeight: '900', fontSize: '16px', fontFamily: fontStack }}>SAVE RECORD</button>
                   <button onClick={() => setEditingItem(null)} style={{ background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', fontFamily: fontStack }}>CANCEL</button>
@@ -136,15 +147,63 @@ export default function ManaSocialMasterApp() {
                         <div style={{ fontSize: '11px', fontWeight: '900', opacity: 0.6 }}>GROSS REVENUE</div>
                         <div style={{ fontSize: '26px', fontWeight: 'bold' }}>+${grossRevenue.toLocaleString()}</div>
                     </div>
+                    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '12px', marginBottom: '12px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: '900', opacity: 0.6 }}>EXPENSES</div>
+                        <div style={{ fontSize: '26px', fontWeight: 'bold', color: '#fda4af' }}>-${totalExpenses.toLocaleString()}</div>
+                    </div>
                     <div>
-                        <div style={{ fontSize: '11px', fontWeight: '900', opacity: 0.6 }}>NET CASH FLOW</div>
-                        <div style={{ fontSize: '38px', fontWeight: '900', color: '#4ade80' }}>${netCashFlow.toLocaleString()}</div>
+                        <div style={{ fontSize: '11px', fontWeight: '900', opacity: 0.6 }}>NET REVENUE</div>
+                        <div style={{ fontSize: '38px', fontWeight: '900', color: '#4ade80' }}>${netRevenue.toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* INCOME, EXPENSE, TAX, PAYROLL RENDERED WITH CALIBRI / BOLD STYLING */}
+              {activeTab === 'income' && (
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px' }}>REVENUE LEDGER</h3>
+                  {sales.map(s => (
+                    <div key={s.id} style={{ backgroundColor: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '10px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
+                      <div><strong>{s.platform}</strong> {s.attachment_url && '📎'}</div>
+                      <div style={{ fontWeight: '900', color: '#10b981' }}>+${Number(s.amount).toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'expense' && (
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px' }}>EXPENSE & BUYOUT LEDGER</h3>
+                  {expenses.map(e => (
+                    <div key={e.id} style={{ backgroundColor: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '10px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
+                      <div><strong>{e.category}</strong> {e.attachment_url && '📎'}</div>
+                      <div style={{ fontWeight: '900', color: '#fda4af' }}>-${Number(e.cost).toLocaleString()}</div>
+                    </div>
+                  ))}
+                  {buyouts.map(b => (
+                    <div key={b.id} style={{ backgroundColor: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '10px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
+                      <div><strong>{b.seller_name}</strong> (Buyout) {b.attachment_url && '📎'}</div>
+                      <div style={{ fontWeight: '900', color: '#fda4af' }}>-${Number(b.total_cost).toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'disburse' && (
+                <div>
+                   <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px' }}>OWNER & EQUITY DISBURSEMENTS</h3>
+                   {disbursements.map(d => (
+                    <div key={d.id} style={{ backgroundColor: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '10px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: '900' }}>{d.recipient}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>{d.disbursement_date}</div>
+                      </div>
+                      <span style={{ fontWeight: '900', color: '#0f172a' }}>${Number(d.amount).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {activeTab === 'payroll' && (
                 <div>
                    <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px' }}>STAFF & PAYROLL LEDGER</h3>
@@ -170,16 +229,16 @@ export default function ManaSocialMasterApp() {
                 <button onClick={() => { setEditingItem({ table: 'buyouts' }); setIsQuickAddOpen(false); }} style={{ padding: '20px', borderRadius: '15px', border: '2px solid #e2e8f0', backgroundColor: '#f8fafc', fontWeight: '900', fontFamily: fontStack }}>+ BUYOUT</button>
                 <button onClick={() => { setEditingItem({ table: 'expenses' }); setIsQuickAddOpen(false); }} style={{ padding: '20px', borderRadius: '15px', border: '2px solid #e2e8f0', backgroundColor: '#f8fafc', fontWeight: '900', fontFamily: fontStack }}>+ EXPENSE</button>
                 <button onClick={() => { setEditingItem({ table: 'payroll' }); setIsQuickAddOpen(false); }} style={{ padding: '20px', borderRadius: '15px', border: '2px solid #e2e8f0', backgroundColor: '#f8fafc', fontWeight: '900', fontFamily: fontStack }}>+ PAYROLL</button>
+                <button onClick={() => { setEditingItem({ table: 'disbursements' }); setIsQuickAddOpen(false); }} style={{ padding: '20px', borderRadius: '15px', border: '2px solid #e2e8f0', backgroundColor: '#f0fdf4', color: '#166534', fontWeight: '900', fontFamily: fontStack, gridColumn: 'span 2' }}>+ DISBURSEMENT</button>
               </div>
               <button onClick={() => setIsQuickAddOpen(false)} style={{ width: '100%', marginTop: '20px', padding: '10px', border: 'none', background: 'none', color: '#64748b', fontWeight: 'bold', fontFamily: fontStack }}>CANCEL</button>
             </div>
           </div>
         )}
 
-        {/* RESTORED LOCKED NAVIGATION (110px Height) */}
         <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTop: '3px solid #e2e8f0', display: 'flex', height: '110px', zIndex: 400 }}>
-          {['summary', 'income', 'expense', 'tax', 'payroll'].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, border: 'none', backgroundColor: activeTab === tab ? '#f0f4ff' : 'white', borderTop: activeTab === tab ? '8px solid #4f46e5' : '8px solid white', color: activeTab === tab ? '#4f46e5' : '#94a3b8', fontWeight: '900', fontSize: '12px', letterSpacing: '0.05em', fontFamily: fontStack }}>{tab.toUpperCase()}</button>
+          {['summary', 'income', 'expense', 'disburse', 'payroll'].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, border: 'none', backgroundColor: activeTab === tab ? '#f0f4ff' : 'white', borderTop: activeTab === tab ? '8px solid #4f46e5' : '8px solid white', color: activeTab === tab ? '#4f46e5' : '#94a3b8', fontWeight: '900', fontSize: '10px', letterSpacing: '0.05em', fontFamily: fontStack }}>{tab.toUpperCase()}</button>
           ))}
         </nav>
       </div>
