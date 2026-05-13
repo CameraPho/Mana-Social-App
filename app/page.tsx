@@ -8,12 +8,14 @@ const supabase = createClient(
 )
 
 export default function ManaSocialMasterApp() {
+  // --- 1. CORE SYSTEM STATE (Locked) ---
   const [activeTab, setActiveTab] = useState('summary')
   const [selectedYear, setSelectedYear] = useState(2026)
   const [selectedMonth, setSelectedMonth] = useState(0)
-  const [editingItem, setEditingItem] = useState(null)
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState(null)
 
+  // --- 2. DATA ARCHITECTURE ---
   const [sales, setSales] = useState([])
   const [expenses, setExpenses] = useState([])
   const [buyouts, setBuyouts] = useState([])
@@ -40,9 +42,14 @@ export default function ManaSocialMasterApp() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // --- 3. ACCOUNTING ENGINE (Protected Logic) ---
   const buyoutsWithStatus = buyouts.map(b => {
     const totalPaidAllTime = payments.filter(p => p.parent_id === b.id).reduce((sum, p) => sum + Number(p.amount), 0);
-    return { ...b, remaining: Number(b.total_cost) - totalPaidAllTime, percentPaid: (totalPaidAllTime / Number(b.total_cost)) * 100 };
+    return { 
+      ...b, 
+      remaining: Number(b.total_cost) - totalPaidAllTime, 
+      percentPaid: (totalPaidAllTime / Number(b.total_cost)) * 100 
+    };
   });
 
   const monthlyPaymentsOut = payments.filter(p => {
@@ -55,72 +62,97 @@ export default function ManaSocialMasterApp() {
   const totalLiabilities = buyoutsWithStatus.reduce((sum, b) => sum + b.remaining, 0);
   const totalTaxCollected = sales.reduce((sum, s) => sum + (Number(s.tax) || 0), 0);
 
+  // --- 4. MASTER RENDERER ---
   return (
     <div style={{ fontFamily: 'system-ui', backgroundColor: '#f8fafc', minHeight: '100vh', paddingBottom: '120px' }}>
       <div style={{ maxWidth: '500px', margin: '0 auto', padding: '20px' }}>
+        
+        {/* HEADER BLOCK */}
         <header style={{ marginBottom: '25px', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: '900' }}>MANA SOCIAL LLC</h1>
+          <h1 style={{ fontSize: '24px', fontWeight: '900', color: '#0f172a' }}>MANA SOCIAL LLC</h1>
           <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
-            <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: '2px solid #cbd5e1', fontWeight: '900' }}><option value={2026}>2026</option></select>
-            <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} style={{ flex: 2, padding: '12px', borderRadius: '12px', border: '2px solid #cbd5e1' }}><option value={0}>Full Year</option>{Array.from({length: 12}, (_, i) => <option key={i} value={i+1}>{new Date(0, i).toLocaleString('default', {month: 'long'})}</option>)}</select>
+            <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: '2px solid #cbd5e1', fontWeight: '900', backgroundColor: '#fff' }}>
+              <option value={2026}>2026</option>
+            </select>
+            <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} style={{ flex: 2, padding: '12px', borderRadius: '12px', border: '2px solid #cbd5e1', backgroundColor: '#fff' }}>
+              <option value={0}>Full Year Ledger</option>
+              {Array.from({length: 12}, (_, i) => <option key={i} value={i+1}>{new Date(0, i).toLocaleString('default', {month: 'long'})}</option>)}
+            </select>
           </div>
         </header>
 
-        {activeTab === 'summary' && (
-          <div style={{ display: 'grid', gap: '12px' }}>
-            <div style={{ backgroundColor: '#1e293b', padding: '25px', borderRadius: '20px', color: '#fff' }}>
-              <div style={{ fontSize: '11px', fontWeight: '900', opacity: 0.7 }}>NET CASH FLOW</div>
-              <div style={{ fontSize: '36px', fontWeight: '900' }}>${(revenue - directExp - monthlyPaymentsOut).toLocaleString()}</div>
+        {/* DYNAMIC VIEWPORT */}
+        <main>
+          {activeTab === 'summary' && (
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <div style={{ backgroundColor: '#1e293b', padding: '25px', borderRadius: '20px', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}>
+                <div style={{ fontSize: '11px', fontWeight: '900', opacity: 0.7, letterSpacing: '0.05em' }}>NET CASH FLOW</div>
+                <div style={{ fontSize: '36px', fontWeight: '900' }}>${(revenue - directExp - monthlyPaymentsOut).toLocaleString()}</div>
+              </div>
+              <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '20px', borderLeft: '8px solid #f59e0b', border: '1px solid #e2e8f0' }}>
+                <div style={{ fontSize: '11px', color: '#92400e', fontWeight: 'bold' }}>OUTSTANDING DEBT (LIABILITIES)</div>
+                <div style={{ fontSize: '28px', fontWeight: '900', color: '#92400e' }}>${totalLiabilities.toLocaleString()}</div>
+              </div>
             </div>
-            <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '20px', borderLeft: '8px solid #f59e0b', border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: '11px', color: '#92400e', fontWeight: 'bold' }}>OUTSTANDING DEBT</div>
-              <div style={{ fontSize: '28px', fontWeight: '900', color: '#92400e' }}>${totalLiabilities.toLocaleString()}</div>
+          )}
+
+          {activeTab === 'income' && (
+            <div>
+              <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px', color: '#334155' }}>REVENUE LEDGER</h3>
+              {sales.map(s => (
+                <div key={s.id} onClick={() => setEditingItem({table: 'sales', ...s})} style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '15px', marginBottom: '10px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div><div style={{ fontWeight: '900', fontSize: '15px' }}>{s.platform}</div><div style={{ fontSize: '10px', color: '#64748b' }}>{s.sale_date}</div></div>
+                  <span style={{ color: '#10b981', fontWeight: '900', fontSize: '18px' }}>+${Number(s.amount).toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'expense' && (
+            <div>
+              <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px', color: '#334155' }}>VENDOR & COLLECTION LEDGER</h3>
+              {buyoutsWithStatus.map(b => (
+                <div key={b.id} onClick={() => setEditingItem({table: 'buyouts', ...b})} style={{ backgroundColor: '#fff', padding: '18px', borderRadius: '18px', marginBottom: '12px', border: '1px solid #e2e8f0', borderLeft: b.remaining > 0 ? '6px solid #f59e0b' : '6px solid #10b981' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <div><div style={{ fontSize: '10px', color: '#64748b', fontWeight: 'bold' }}>REF: BO-{b.id.toString().slice(-4)}</div><div style={{ fontWeight: '900', fontSize: '16px' }}>{b.seller_name}</div></div>
+                    <div style={{ textAlign: 'right' }}><div style={{ fontWeight: '900', color: b.remaining > 0 ? '#b45309' : '#10b981', fontSize: '16px' }}>${b.remaining.toLocaleString()}</div><div style={{ fontSize: '10px', fontWeight: 'bold' }}>OWED</div></div>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', backgroundColor: '#f1f5f9', borderRadius: '4px', marginTop: '12px', overflow: 'hidden' }}><div style={{ width: `${b.percentPaid}%`, height: '100%', backgroundColor: b.remaining > 0 ? '#f59e0b' : '#10b981', transition: 'width 0.5s ease' }}></div></div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'tax' && (
+            <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '20px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', fontWeight: '900', color: '#64748b', marginBottom: '10px' }}>ESTIMATED SALES TAX LIABILITY</div>
+              <div style={{ fontSize: '42px', fontWeight: '900', color: '#4f46e5' }}>${totalTaxCollected.toLocaleString()}</div>
+            </div>
+          )}
+        </main>
+
+        {/* GLOBAL PLUS BUTTON (Locked) */}
+        <button style={{ position: 'fixed', bottom: '110px', right: '25px', width: '65px', height: '65px', borderRadius: '35px', backgroundColor: '#4f46e5', color: '#fff', border: '4px solid #fff', fontSize: '36px', fontWeight: 'bold', boxShadow: '0 8px 16px rgba(0,0,0,0.2)', zIndex: 500 }} onClick={() => setIsQuickAddOpen(true)}>+</button>
+
+        {/* QUICK ADD MODAL */}
+        {isQuickAddOpen && (
+          <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.9)', zIndex: 1000, display: 'flex', alignItems: 'center', padding: '20px' }}>
+            <div style={{ backgroundColor: '#fff', width: '100%', borderRadius: '24px', padding: '30px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: '900', marginBottom: '20px', color: '#0f172a' }}>ADD RECORD</h2>
+              <div style={{ display: 'grid', gap: '10px' }}>
+                <button style={{ width: '100%', padding: '16px', borderRadius: '14px', border: 'none', backgroundColor: '#f1f5f9', fontWeight: '900', color: '#0f172a' }}>New Sale</button>
+                <button style={{ width: '100%', padding: '16px', borderRadius: '14px', border: 'none', backgroundColor: '#f1f5f9', fontWeight: '900', color: '#0f172a' }}>New Buyout</button>
+                <button style={{ width: '100%', padding: '16px', borderRadius: '14px', border: 'none', backgroundColor: '#f1f5f9', fontWeight: '900', color: '#0f172a' }}>New Expense</button>
+              </div>
+              <button onClick={() => setIsQuickAddOpen(false)} style={{ width: '100%', marginTop: '15px', padding: '10px', border: 'none', background: 'none', color: '#64748b', fontWeight: 'bold' }}>CLOSE</button>
             </div>
           </div>
         )}
 
-        {activeTab === 'income' && (
-           <div>
-             <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px' }}>REVENUE LEDGER</h3>
-             {sales.map(s => (
-               <div key={s.id} onClick={() => setEditingItem({table: 'sales', ...s})} style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '12px', marginBottom: '8px', border: '1px solid #e2e8f0' }}>
-                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                   <strong>{s.platform}</strong><span style={{ color: '#10b981', fontWeight: '900' }}>+${Number(s.amount).toLocaleString()}</span>
-                 </div>
-               </div>
-             ))}
-           </div>
-        )}
-
-        {activeTab === 'expense' && (
-          <div>
-             <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px' }}>VENDOR LEDGER</h3>
-             {buyoutsWithStatus.map(b => (
-               <div key={b.id} onClick={() => setEditingItem({table: 'buyouts', ...b})} style={{ backgroundColor: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '12px', border: '1px solid #e2e8f0', borderLeft: b.remaining > 0 ? '6px solid #f59e0b' : '6px solid #10b981' }}>
-                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                   <div><div style={{ fontSize: '10px', color: '#64748b' }}>ID: BO-{b.id.toString().slice(-4)}</div><div style={{ fontWeight: '900' }}>{b.seller_name}</div></div>
-                   <div style={{ textAlign: 'right' }}><div style={{ fontWeight: '900', color: b.remaining > 0 ? '#b45309' : '#10b981' }}>${b.remaining.toLocaleString()}</div><div style={{ fontSize: '10px' }}>{b.remaining > 0 ? 'OWED' : 'PAID'}</div></div>
-                 </div>
-                 <div style={{ width: '100%', height: '8px', backgroundColor: '#f1f5f9', borderRadius: '4px', marginTop: '12px', overflow: 'hidden' }}><div style={{ width: `${b.percentPaid}%`, height: '100%', backgroundColor: b.remaining > 0 ? '#f59e0b' : '#10b981' }}></div></div>
-               </div>
-             ))}
-          </div>
-        )}
-
-        {activeTab === 'tax' && (
-          <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '20px', border: '1px solid #e2e8f0' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: '900' }}>SALES TAX LIABILITY</h3>
-            <div style={{ fontSize: '32px', fontWeight: '900', color: '#4f46e5', marginTop: '10px' }}>${totalTaxCollected.toLocaleString()}</div>
-            <p style={{ fontSize: '12px', color: '#64748b', marginTop: '5px' }}>Collected from all platforms for the selected period.</p>
-          </div>
-        )}
-
-        {/* PLUS BUTTON - FIXED VISIBILITY */}
-        <button style={{ position: 'fixed', bottom: '110px', right: '25px', width: '65px', height: '65px', borderRadius: '35px', backgroundColor: '#4f46e5', color: '#fff', border: '4px solid #fff', fontSize: '36px', fontWeight: 'bold', boxShadow: '0 8px 16px rgba(0,0,0,0.2)', zIndex: 200, cursor: 'pointer' }} onClick={() => setIsQuickAddOpen(true)}>+</button>
-
-        <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTop: '2px solid #e2e8f0', display: 'flex', height: '90px', zIndex: 100 }}>
+        {/* MASTER NAVIGATION (Locked) */}
+        <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTop: '2px solid #e2e8f0', display: 'flex', height: '90px', zIndex: 400 }}>
           {['summary', 'income', 'expense', 'tax', 'payroll'].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, border: activeTab === tab ? '4px solid #4f46e5' : '1px solid #fff', backgroundColor: activeTab === tab ? '#f0f4ff' : 'white', color: activeTab === tab ? '#4f46e5' : '#94a3b8', fontWeight: '900', fontSize: '11px' }}>{tab.toUpperCase()}</button>
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, border: activeTab === tab ? '4px solid #4f46e5' : '1px solid #fff', backgroundColor: activeTab === tab ? '#f0f4ff' : 'white', color: activeTab === tab ? '#4f46e5' : '#94a3b8', fontWeight: '900', fontSize: '10px', letterSpacing: '0.02em' }}>{tab.toUpperCase()}</button>
           ))}
         </nav>
       </div>
