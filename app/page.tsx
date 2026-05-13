@@ -25,7 +25,7 @@ export default function ManaSocialMasterApp() {
 
   const fetchData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    if (user?.email === 'your-email@example.com') { setUserRole('owner') } // UPDATE THIS EMAIL
+    if (user?.email === 'camerapho@gmail.com') { setUserRole('owner') } // UPDATE THIS EMAIL
 
     const [sRes, eRes, pRes, bRes] = await Promise.all([
       supabase.from('sales').select('*'),
