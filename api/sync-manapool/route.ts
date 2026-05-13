@@ -119,17 +119,22 @@ export default function ManaSocialApp() {
       supabase.from('mileage_log').select('*').order('date', {ascending:false}),
       supabase.from('cogs_inventory').select('*').order('date', {ascending:false}),
     ])
+    
     const fd = (data: any[], key: string) => (data||[]).filter(i => {
       const d = new Date(i[key])
       return d.getFullYear()===selectedYear && (selectedMonth===0||(d.getMonth()+1)===selectedMonth)
     })
+
     setSales(fd(s.data||[],'sale_date'))
     setExpenses(fd(e.data||[],'purchase_date'))
     setBuyouts(fd(b.data||[],'due_date'))
     setPayroll(fd(p.data||[],'pay_date'))
     setDisbursements(fd(d.data||[],'disbursement_date'))
-    setMileageLog(ml.data||[])
-    setCogsInventory(ci.data||[])
+    
+    // FIX: Filtering these as well to ensure the UI updates correctly
+    setMileageLog((ml.data||[]).filter(i => new Date(i.date).getFullYear() === selectedYear))
+    setCogsInventory((ci.data||[]).filter(i => new Date(i.date).getFullYear() === selectedYear))
+    
   }, [authed, selectedYear, selectedMonth])
 
   useEffect(() => { fetchData() }, [fetchData])
