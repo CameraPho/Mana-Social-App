@@ -13,20 +13,20 @@ export default function ManaSocialMasterApp() {
   const [selectedYear, setSelectedYear] = useState(2026)
   const [selectedMonth, setSelectedMonth] = useState(0)
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false)
-  const [editingItem, setEditingItem] = useState(null) 
+  const [editingItem, setEditingItem] = useState<{table: string} | null>(null) 
   const [isUploading, setIsUploading] = useState(false)
 
   const [formData, setFormData] = useState({ 
     label: '', amount: '', date: new Date().toISOString().split('T')[0],
-    fees: '', shipping: '', notes: '', itemCount: '', file: null 
+    fees: '', shipping: '', notes: '', itemCount: '', file: null as string | null 
   })
 
   // --- 2. DATA ARCHITECTURE ---
-  const [sales, setSales] = useState([])
-  const [expenses, setExpenses] = useState([])
-  const [buyouts, setBuyouts] = useState([])
-  const [payroll, setPayroll] = useState([])
-  const [disbursements, setDisbursements] = useState([])
+  const [sales, setSales] = useState<any[]>([])
+  const [expenses, setExpenses] = useState<any[]>([])
+  const [buyouts, setBuyouts] = useState<any[]>([])
+  const [payroll, setPayroll] = useState<any[]>([])
+  const [disbursements, setDisbursements] = useState<any[]>([])
 
   const fetchData = useCallback(async () => {
     const [sRes, eRes, bRes, payRes, dRes] = await Promise.all([
@@ -37,8 +37,9 @@ export default function ManaSocialMasterApp() {
       supabase.from('disbursements').select('*')
     ]);
 
-    const filterByDate = (data, key) => data?.filter(i => {
-      const d = new Date(i[key] || i.sale_date || i.purchase_date || i.due_date || i.pay_date || i.disbursement_date);
+    const filterByDate = (data: any[] | null, key: string) => data?.filter(i => {
+      const dateVal = i[key] || i.sale_date || i.purchase_date || i.due_date || i.pay_date || i.disbursement_date;
+      const d = new Date(dateVal);
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth);
     }) || [];
 
@@ -52,40 +53,55 @@ export default function ManaSocialMasterApp() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   // --- 3. CORE ACTIONS ---
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     setIsUploading(true);
     const fileName = `${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from('documents').upload(fileName, file);
-    if (!error) setFormData({ ...formData, file: fileName });
+    if (!error) setFormData(prev => ({ ...prev, file: fileName }));
     setIsUploading(false);
   };
 
   const handleSave = async () => {
-    if (!formData.amount || !formData.label) return alert("Required fields missing.");
+    if (!formData.amount || !formData.label || !editingItem) return alert("Required fields missing.");
     const table = editingItem.table;
     
-    const payload = {
-      sales: { platform: formData.label, amount: parseFloat(formData.amount || '0'), fees: parseFloat(formData.fees || '0'), shipping: parseFloat(formData.shipping || '0'), sale_date: formData.date, attachment_url: formData.file },
-      buyouts: { seller_name: formData.label, total_cost: parseFloat(formData.amount || '0'), notes: `Count: ${formData.itemCount} | ${formData.notes}`, due_date: formData.date, attachment_url: formData.file },
-      expenses: { category: formData.label, cost: parseFloat(formData.amount || '0'), purchase_date: formData.date, attachment_url: formData.file },
-      payroll: { employee_name: formData.label, amount: parseFloat(formData.amount || '0'), pay_date: formData.date, status: 'paid' },
-      disbursements: { recipient: formData.label, amount: parseFloat(formData.amount || '0'), notes: formData.notes, disbursement_date: formData.date }
-    }[table];
+    // Helper to safely parse numbers and avoid TypeScript string/number errors
+    const safeParse = (val: string) => {
+      const parsed = parseFloat(val);
+      return isNaN(parsed) ? 0 : parsed;
+    };
 
-    const { error } = await supabase.from(table).insert([payload]);
-    if (error) alert(error.message);
-    else { setEditingItem(null); setFormData({ label: '', amount: '', date: new Date().toISOString().split('T')[0], fees: '', shipping: '', notes: '', itemCount: '', file: null }); fetchData(); }
+    const buyoutNotes = formData.itemCount ? `Count: ${formData.itemCount} | ${formData.notes}` : formData.notes;
+
+    const payloadMappings: Record<string, any> = {
+      sales: { platform: formData.label, amount: safeParse(formData.amount), fees: safeParse(formData.fees), shipping: safeParse(formData.shipping), sale_date: formData.date, attachment_url: formData.file },
+      buyouts: { seller_name: formData.label, total_cost: safeParse(formData.amount), notes: buyoutNotes, due_date: formData.date, attachment_url: formData.file },
+      expenses: { category: formData.label, cost: safeParse(formData.amount), purchase_date: formData.date, attachment_url: formData.file },
+      payroll: { employee_name: formData.label, amount: safeParse(formData.amount), pay_date: formData.date, status: 'paid' },
+      disbursements: { recipient: formData.label, amount: safeParse(formData.amount), notes: formData.notes, disbursement_date: formData.date }
+    };
+
+    const { error } = await supabase.from(table).insert([payloadMappings[table]]);
+    
+    if (error) {
+      alert(`Database Error: ${error.message}`);
+    } else { 
+      setEditingItem(null); 
+      setFormData({ label: '', amount: '', date: new Date().toISOString().split('T')[0], fees: '', shipping: '', notes: '', itemCount: '', file: null }); 
+      fetchData(); 
+    }
   };
 
   // --- 4. ACCOUNTING ENGINE ---
   const grossRevenue = sales.reduce((sum, s) => sum + Number(s.amount), 0);
   const totalFees = sales.reduce((sum, s) => sum + Number(s.fees || 0) + Number(s.shipping || 0), 0);
   const directExpenses = expenses.reduce((sum, e) => sum + Number(e.cost), 0);
+  const totalBuyouts = buyouts.reduce((sum, b) => sum + Number(b.total_cost), 0);
   const totalPayroll = payroll.reduce((sum, p) => sum + Number(p.amount), 0);
   
-  const totalExpenses = directExpenses + totalPayroll + totalFees;
+  const totalExpenses = directExpenses + totalBuyouts + totalPayroll + totalFees;
   const netRevenue = grossRevenue - totalExpenses;
   
   const fontStack = 'Calibri, Candara, Segoe, "Segoe UI", Optima, Arial, sans-serif';
@@ -191,7 +207,7 @@ export default function ManaSocialMasterApp() {
 
               {activeTab === 'disburse' && (
                 <div>
-                   <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px' }}>OWNER & EQUITY DISBURSEMENTS</h3>
+                   <h3 style={{ fontSize: '16px', fontWeight: '900', marginBottom: '15px' }}>OWNER DISBURSEMENTS</h3>
                    {disbursements.map(d => (
                     <div key={d.id} style={{ backgroundColor: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '10px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
                       <div>
