@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import * as XLSX from 'xlsx'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -42,6 +43,174 @@ const EXPENSE_CATEGORIES = Object.keys(DEDUCTIBILITY)
 const MILEAGE_RATE = 0.67
 const getEntity = (date: string) => new Date(date) < new Date('2026-03-18') ? 'sole_prop' : 'llc'
 
+// ─── TCGplayer XLSX Parser ──────────────────────────────────────────────────
+// Expects user has removed the title row — row 1 = headers
+function parseTCGplayerXLSX(file: File): Promise<{records: any[], meta: {periodStart: string, periodEnd: string, entity: string, numOrders: number}}> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target!.result as ArrayBuffer)
+        const wb = XLSX.read(data, { type: 'array' })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+
+        // Sheet name format: SellerTaxReport_MMDDYYYY_MMDDYYYY
+        const sheetName = wb.SheetNames[0]
+        const dateMatch = sheetName.match(/(\d{8})_(\d{8})$/)
+        let periodStart = '', periodEnd = '', entity = 'llc'
+        if (dateMatch) {
+          const s = dateMatch[1], en = dateMatch[2]
+          periodStart = `${s.slice(4)}-${s.slice(0,2)}-${s.slice(2,4)}`
+          periodEnd   = `${en.slice(4)}-${en.slice(0,2)}-${en.slice(2,4)}`
+          entity = new Date(periodEnd) < new Date('2026-03-18') ? 'sole_prop' : 'llc'
+        }
+
+        // Parse rows — user removed title row so row 1 = headers
+        const rows: any[] = XLSX.utils.sheet_to_json(ws)
+
+        let grossSales = 0, netSales = 0, netShipping = 0
+        let netTCGTax = 0, netSellerTax = 0
+        let totalRefunds = 0, refundedShipping = 0
+        let numOrders = 0
+
+        for (const row of rows) {
+          // Skip any non-state rows (totals rows etc)
+          const state = row['State'] || row['state']
+          if (!state || String(state).length !== 2) continue
+
+          grossSales     += Number(row['Gross Sales']             || 0)
+          netSales       += Number(row['Net Sales']               || 0)
+          netShipping    += Number(row['Net Shipping Amt']        || row['Shipping Amt'] || 0)
+          netTCGTax      += Number(row['Net TCG Tax Amt']         || row['TCG Tax Amt'] || 0)
+          netSellerTax   += Number(row['Net Seller Tax Amt']      || row['Seller Tax Amt'] || 0)
+          totalRefunds   += Number(row['Refunds']                 || 0)
+          refundedShipping += Number(row['Refunded Shipping Amt'] || 0)
+          numOrders      += Number(row['Number of Orders']        || 0)
+        }
+
+        // Fee derivation:
+        // TCGplayer keeps: gross - net - tax(not our money) - buyer_shipping_passthrough = fees
+        // Refunds are already baked into Net Sales, so no double-count
+        const derivedFees = parseFloat((grossSales - netSales - netTCGTax - netShipping).toFixed(2))
+
+        // Shipping expense: buyer-paid shipping still costs you a label
+        // If netShipping > 0, buyer paid but you record it as shipping expense
+        // If netShipping = 0, you paid out of pocket (stamps/pirateship) — recorded separately
+        const shippingExpense = parseFloat(netShipping.toFixed(2))
+
+        const saleDate = periodEnd || new Date().toISOString().split('T')[0]
+
+        const record = {
+          platform:     'tcgplayer',
+          amount:       parseFloat(grossSales.toFixed(2)),
+          fees:         derivedFees,
+          shipping:     shippingExpense,
+          sale_date:    saleDate,
+          period_start: periodStart || saleDate,
+          period_end:   periodEnd   || saleDate,
+          entity,
+          net_sales:    parseFloat(netSales.toFixed(2)),
+          num_orders:   numOrders,
+          // Accrual: revenue recognized over the period, not upload date
+          accrual_method: 'period',
+        }
+
+        resolve({ records: [record], meta: { periodStart, periodEnd, entity, numOrders } })
+      } catch (err: any) {
+        reject(new Error('TCGplayer parse failed: ' + err.message))
+      }
+    }
+    reader.onerror = () => reject(new Error('File read error'))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
+// ─── eBay CSV Parser ────────────────────────────────────────────────────────
+function parseEbayCSV(file: File): Promise<{records: any[], meta: {totalGross: number, totalFees: number, totalNet: number, rows: number}}> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const text = e.target!.result as string
+        const wb = XLSX.read(text, { type: 'string', raw: false })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows: any[] = XLSX.utils.sheet_to_json(ws)
+
+        const parseDollar = (v: any) => parseFloat(String(v || '0').replace(/[$,\s]/g, '')) || 0
+
+        let totalGross = 0, totalFees = 0, totalNet = 0, totalShippingLabels = 0
+        let totalBuyerShipping = 0, totalFVF = 0
+
+        const records: any[] = []
+
+        for (const row of rows) {
+          const title = row['Listing title']
+          if (!title) continue
+
+          const itemSales        = parseDollar(row['Item sales'])
+          const totalSellingCost = parseDollar(row['Total selling costs'])
+          const shippingLabels   = parseDollar(row['Shipping labels cost (Amount you paid to buy shipping labels on eBay)'])
+          const buyerShipping    = parseDollar(row['Shipping and handling paid by buyer to you'])
+          const netSales         = parseDollar(row['Net sales (Net of taxes and selling costs)'])
+          const fvf              = parseDollar(row['Final value fees'])
+          const qtySold          = Number(row['Quantity sold'] || 0)
+
+          if (itemSales === 0 && qtySold === 0) continue
+
+          // Fees = Total selling costs MINUS shipping labels
+          // (shipping labels are a separate expense, not a platform fee)
+          const platformFees = parseFloat((totalSellingCost - shippingLabels).toFixed(2))
+
+          totalGross          += itemSales
+          totalFees           += platformFees
+          totalNet            += netSales
+          totalShippingLabels += shippingLabels
+          totalBuyerShipping  += buyerShipping
+          totalFVF            += fvf
+
+          records.push({
+            platform:       'ebay',
+            listing_title:  title,
+            amount:         itemSales,
+            fees:           platformFees,
+            shipping:       shippingLabels,   // what YOU paid for eBay labels — your expense
+            buyer_shipping: buyerShipping,    // passthrough from buyer
+            net_sales:      netSales,
+            qty_sold:       qtySold,
+            sale_date:      new Date().toISOString().split('T')[0], // eBay report has no date col — use today
+            entity:         'llc', // eBay reports are always post-LLC
+            accrual_method: 'report_date',
+          })
+        }
+
+        // Aggregate into one record per upload (matches TCGplayer behavior)
+        const aggregated = {
+          platform:     'ebay',
+          amount:       parseFloat(totalGross.toFixed(2)),
+          fees:         parseFloat(totalFees.toFixed(2)),
+          shipping:     parseFloat(totalShippingLabels.toFixed(2)),
+          sale_date:    new Date().toISOString().split('T')[0],
+          period_start: new Date().toISOString().split('T')[0],
+          period_end:   new Date().toISOString().split('T')[0],
+          entity:       'llc',
+          net_sales:    parseFloat(totalNet.toFixed(2)),
+          num_orders:   records.length,
+          accrual_method: 'report_date',
+        }
+
+        resolve({
+          records: [aggregated],
+          meta: { totalGross, totalFees, totalNet: totalNet, rows: records.length }
+        })
+      } catch (err: any) {
+        reject(new Error('eBay parse failed: ' + err.message))
+      }
+    }
+    reader.onerror = () => reject(new Error('File read error'))
+    reader.readAsText(file)
+  })
+}
+
 async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<any[]> {
   try {
     const isImage = file.type.startsWith('image/')
@@ -54,7 +223,7 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
     if (isCSV || isXLSX) {
       const text = await file.text()
       const prompt = mode === 'sales'
-        ? `This is a sales report from TCGplayer, eBay, or ManaPool. Extract all sales transactions. For TCGplayer: look for Gross Sales, Net Sales, fees columns. For eBay: look for Gross transaction amount, Final Value Fee, order rows. For ManaPool: look for subtotal, shipping, order columns. Return ONLY a JSON array, no markdown:\n[{"platform":"tcgplayer|ebay|manapool","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","description":""}]\n\nFile content:\n${text.slice(0,8000)}`
+        ? `This is a sales report from ManaPool. Extract all sales transactions. Return ONLY a JSON array, no markdown:\n[{"platform":"manapool","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","description":""}]\n\nFile content:\n${text.slice(0,8000)}`
         : `This is an expense receipt or report. Extract all expenses. Return ONLY a JSON array, no markdown:\n[{"category":"Shipping & Postage|Platform Fees|Software & Subscriptions|Supplies & Packaging|Advertising|Professional Services|Bank & Finance Charges|Taxes & Licenses|Home Office|Other","cost":0,"date":"YYYY-MM-DD","notes":"vendor/description"}]\n\nFile content:\n${text.slice(0,8000)}`
       content = [{ type: 'text', text: prompt }]
     } else if (isImage || isPDF) {
@@ -151,6 +320,9 @@ export default function ManaSocialApp() {
   const [disbursements, setDisbursements] = useState<any[]>([])
   const [mileageLog, setMileageLog] = useState<any[]>([])
   const [cogsInventory, setCogsInventory] = useState<any[]>([])
+  // All-time cogs for accrual inventory flow (not filtered by month)
+  const [allCogsInventory, setAllCogsInventory] = useState<any[]>([])
+  const [allSales, setAllSales] = useState<any[]>([])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -162,7 +334,7 @@ export default function ManaSocialApp() {
 
   const fetchData = useCallback(async () => {
     if (!authed) return
-    const [s, e, b, p, d, ml, ci] = await Promise.all([
+    const [s, e, b, p, d, ml, ci, allCI, allS] = await Promise.all([
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
       supabase.from('buyouts').select('*'),
@@ -170,6 +342,8 @@ export default function ManaSocialApp() {
       supabase.from('disbursements').select('*'),
       supabase.from('mileage_log').select('*').order('date', {ascending:false}),
       supabase.from('cogs_inventory').select('*').order('date', {ascending:false}),
+      supabase.from('cogs_inventory').select('*').order('date', {ascending:true}),
+      supabase.from('sales').select('*').order('sale_date', {ascending:true}),
     ])
     const fd = (data: any[], key: string) => (data||[]).filter(i => {
       const d = new Date(i[key])
@@ -182,6 +356,8 @@ export default function ManaSocialApp() {
     setDisbursements(fd(d.data||[],'disbursement_date'))
     setMileageLog((ml.data||[]).filter(i => new Date(i.date).getFullYear()===selectedYear))
     setCogsInventory((ci.data||[]).filter(i => new Date(i.date).getFullYear()===selectedYear))
+    setAllCogsInventory(allCI.data||[])
+    setAllSales(allS.data||[])
   }, [authed, selectedYear, selectedMonth])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -190,10 +366,56 @@ export default function ManaSocialApp() {
   const mileageDeduction = totalMiles * MILEAGE_RATE
   const resetForm = () => setFormData(emptyForm)
 
+  // ─── File Upload Handler ────────────────────────────────────────────────
   const handleFileUpload = async (file: File, mode: 'sales'|'expenses') => {
     setUploadMode(mode)
-    setUploadStatus('Reading file with AI...')
     setUploadPreview([])
+
+    if (mode === 'sales') {
+      const isTCGplayer = file.name.toLowerCase().includes('tcgplayer') || file.name.match(/SellerTaxReport/i)
+      const isEbay = file.name.toLowerCase().includes('ebay') || file.name.toLowerCase().includes('listing')
+      const isXLSX = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
+      const isCSV = file.name.endsWith('.csv')
+
+      if (isXLSX && (isTCGplayer || (!isEbay))) {
+        // TCGplayer XLSX
+        setUploadStatus('Parsing TCGplayer report...')
+        try {
+          const { records, meta } = await parseTCGplayerXLSX(file)
+          setUploadPreview(records.map(r => ({
+            ...r,
+            _displayLabel: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}`,
+            _displayAmount: r.amount,
+            _meta: meta,
+          })))
+          setUploadStatus(`Found TCGplayer report: ${meta.periodStart} – ${meta.periodEnd} · ${meta.numOrders} orders · Entity: ${meta.entity === 'llc' ? 'Mana Social LLC' : 'Sole Prop'} · Review and confirm`)
+        } catch (err: any) {
+          setUploadStatus('Parse error: ' + err.message)
+        }
+        return
+      }
+
+      if (isCSV && (isEbay || file.name.toLowerCase().includes('listing'))) {
+        // eBay CSV
+        setUploadStatus('Parsing eBay report...')
+        try {
+          const { records, meta } = await parseEbayCSV(file)
+          setUploadPreview(records.map(r => ({
+            ...r,
+            _displayLabel: `eBay · ${meta.rows} listings`,
+            _displayAmount: r.amount,
+            _meta: meta,
+          })))
+          setUploadStatus(`Found eBay report: ${meta.rows} listings · Gross ${fmt(meta.totalGross)} · Fees ${fmt(meta.totalFees)} · Net ${fmt(meta.totalNet)} · Review and confirm`)
+        } catch (err: any) {
+          setUploadStatus('Parse error: ' + err.message)
+        }
+        return
+      }
+    }
+
+    // Fallback: AI parser (ManaPool, images, PDFs, expense receipts)
+    setUploadStatus('Reading file with AI...')
     const results = await parseFileWithAI(file, mode)
     if (!results.length) { setUploadStatus('Could not extract data. Try a different file.'); return }
     setUploadPreview(results)
@@ -204,18 +426,26 @@ export default function ManaSocialApp() {
     setUploadStatus('Saving...')
     if (uploadMode === 'sales') {
       const inserts = uploadPreview.map(r => ({
-        platform: r.platform || 'other', amount: parseFloat(r.amount)||0,
-        fees: parseFloat(r.fees)||0, shipping: parseFloat(r.shipping)||0,
-        sale_date: r.date || new Date().toISOString().split('T')[0],
-        entity: getEntity(r.date || new Date().toISOString().split('T')[0]),
+        platform:     r.platform || 'other',
+        amount:       parseFloat(r.amount)  || 0,
+        fees:         parseFloat(r.fees)    || 0,
+        shipping:     parseFloat(r.shipping)|| 0,
+        sale_date:    r.sale_date || r.date || new Date().toISOString().split('T')[0],
+        period_start: r.period_start || r.sale_date || r.date || new Date().toISOString().split('T')[0],
+        period_end:   r.period_end   || r.sale_date || r.date || new Date().toISOString().split('T')[0],
+        entity:       r.entity || getEntity(r.sale_date || r.date || new Date().toISOString().split('T')[0]),
+        net_sales:    parseFloat(r.net_sales) || 0,
+        num_orders:   parseInt(r.num_orders)  || 0,
       }))
       const { error } = await supabase.from('sales').insert(inserts)
       if (error) { setUploadStatus('Error: ' + error.message); return }
     } else {
       const inserts = uploadPreview.map(r => ({
-        category: r.category || 'Other', cost: parseFloat(r.cost)||0,
+        category:      r.category || 'Other',
+        cost:          parseFloat(r.cost)||0,
         purchase_date: r.date || new Date().toISOString().split('T')[0],
-        notes: r.notes || '', entity: getEntity(r.date || new Date().toISOString().split('T')[0]),
+        notes:         r.notes || '',
+        entity:        getEntity(r.date || new Date().toISOString().split('T')[0]),
       }))
       const { error } = await supabase.from('expenses').insert(inserts)
       if (error) { setUploadStatus('Error: ' + error.message); return }
@@ -241,7 +471,7 @@ export default function ManaSocialApp() {
     let payload: any = {}
     if (t==='sales') {
       if (!formData.amount||!formData.label) return alert('Missing fields')
-      payload = { platform:formData.label, amount:Number(formData.amount), fees:Number(formData.fees||0), shipping:Number(formData.shipping||0), sale_date:formData.date, entity:getEntity(formData.date) }
+      payload = { platform:formData.label, amount:Number(formData.amount), fees:Number(formData.fees||0), shipping:Number(formData.shipping||0), sale_date:formData.date, period_start:formData.date, period_end:formData.date, entity:getEntity(formData.date) }
     } else if (t==='buyouts') {
       if (!formData.amount||!formData.label) return alert('Missing fields')
       payload = { seller_name:formData.label, total_cost:Number(formData.amount), amount_paid:Number(formData.amountPaid||0), notes:`Qty: ${formData.itemCount} | ${formData.notes}`, due_date:formData.date, entity:getEntity(formData.date) }
@@ -335,6 +565,61 @@ export default function ManaSocialApp() {
   })
   const ytdTax = quarters.reduce((a,q)=>a+q.grand,0)
 
+  // ─── Accounting: Accrual P&L ────────────────────────────────────────────
+  const netSales     = sales.reduce((a,r)=>a+Number(r.net_sales||r.amount),0)
+  const grossMargin  = netSales - cogsRecognized
+  const totalOpEx    = opExpenses + staffingCosts + totalFees
+  const netIncome    = grossMargin - totalOpEx
+
+  // ─── Accounting: Inventory Flow waterfall by month ──────────────────────
+  const buildInventoryFlow = () => {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    // Total purchased before this year = beginning balance
+    const beginningBalance = allCogsInventory
+      .filter(r => new Date(r.date).getFullYear() < selectedYear)
+      .reduce((a,r)=>a+parseFloat(r.total_cost||0),0)
+
+    let runningBalance = beginningBalance
+    const flow: {label:string, amount:number, isAddition:boolean, running:number}[] = []
+
+    if (beginningBalance > 0) {
+      flow.push({ label: `Beginning Inventory (Jan 1 ${selectedYear})`, amount: beginningBalance, isAddition: true, running: beginningBalance })
+    }
+
+    for (let m = 0; m < 12; m++) {
+      const monthSales = allSales.filter(r => {
+        const d = new Date(r.sale_date)
+        return d.getFullYear() === selectedYear && d.getMonth() === m
+      })
+      const monthPurchases = allCogsInventory.filter(r => {
+        const d = new Date(r.date)
+        return d.getFullYear() === selectedYear && d.getMonth() === m
+      })
+
+      const purchased = monthPurchases.reduce((a,r)=>a+parseFloat(r.total_cost||0),0)
+      // COGS for month: recognize based on sold_units ratio changes
+      const cogsSold = monthPurchases.reduce((a,r)=>{
+        const ratio = r.total_units>0?Math.min((r.sold_units||0)/r.total_units,1):0
+        return a+parseFloat(r.total_cost||0)*ratio
+      },0)
+      // Also check sales revenue to estimate COGS if no inventory entries
+      const monthRevenue = monthSales.reduce((a,r)=>a+Number(r.amount),0)
+
+      if (purchased > 0) {
+        runningBalance += purchased
+        flow.push({ label: `${months[m]} — Inventory Purchased`, amount: purchased, isAddition: true, running: runningBalance })
+      }
+      if (cogsSold > 0) {
+        runningBalance -= cogsSold
+        flow.push({ label: `${months[m]} — COGS Recognized`, amount: cogsSold, isAddition: false, running: runningBalance })
+      }
+    }
+
+    return { flow, endingBalance: runningBalance }
+  }
+
+  const { flow: inventoryFlow, endingBalance } = buildInventoryFlow()
+
   const card: React.CSSProperties = {background:C.white,borderRadius:'16px',padding:'20px',border:`1px solid ${C.border}`,marginBottom:'12px',fontFamily:FONT}
   const inp: React.CSSProperties = {padding:'13px 14px',borderRadius:'10px',border:`1px solid ${C.border}`,fontSize:'15px',width:'100%',background:'#F5F6FA',boxSizing:'border-box',fontFamily:FONT}
   const lbl: React.CSSProperties = {fontSize:'12px',fontWeight:'bold',color:C.muted,letterSpacing:'0.05em',textTransform:'uppercase',marginBottom:'4px',display:'block',fontFamily:FONT}
@@ -345,12 +630,23 @@ export default function ManaSocialApp() {
     if (!uploadPreview.length && !uploadStatus) return null
     return (
       <div style={{...card,border:`1px solid ${C.teal}`,marginBottom:'12px'}}>
-        <div style={{fontSize:'12px',fontWeight:'bold',color:C.teal,marginBottom:'8px',textTransform:'uppercase'}}>AI Import Preview</div>
+        <div style={{fontSize:'12px',fontWeight:'bold',color:C.teal,marginBottom:'8px',textTransform:'uppercase'}}>Import Preview</div>
         {uploadStatus && <div style={{fontSize:'13px',color:C.muted,marginBottom:'8px'}}>{uploadStatus}</div>}
         {uploadPreview.map((r,i)=>(
-          <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px'}}>
-            <span style={{color:C.text}}>{uploadMode==='sales'?(r.platform||'?'):(r.category||'?')} · {r.date||'?'}</span>
-            <span style={{fontWeight:700,color:uploadMode==='sales'?'#10b981':'#ef4444'}}>{uploadMode==='sales'?fmt(r.amount||0):fmt(-(r.cost||0))}</span>
+          <div key={i} style={{padding:'8px 0',borderBottom:`1px solid ${C.border}`,fontSize:'13px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'4px'}}>
+              <span style={{color:C.text,fontWeight:700}}>{r._displayLabel || (uploadMode==='sales'?r.platform:r.category)} · {r.sale_date || r.date || '?'}</span>
+              <span style={{fontWeight:700,color:uploadMode==='sales'?'#10b981':'#ef4444'}}>{fmt(uploadMode==='sales'?(r._displayAmount||r.amount||0):-(r.cost||0))}</span>
+            </div>
+            {uploadMode==='sales' && r.fees != null && (
+              <div style={{fontSize:'12px',color:C.muted,display:'flex',gap:'12px'}}>
+                <span>Gross: {fmt(r.amount||0)}</span>
+                <span>Fees: {fmt(r.fees||0)}</span>
+                <span>Shipping: {fmt(r.shipping||0)}</span>
+                <span>Net: {fmt(r.net_sales||0)}</span>
+                {r.entity && <span style={{color:r.entity==='llc'?C.teal:C.gold}}>{r.entity==='llc'?'LLC':'Sole Prop'}</span>}
+              </div>
+            )}
           </div>
         ))}
         {uploadPreview.length>0&&(
@@ -535,6 +831,9 @@ export default function ManaSocialApp() {
               <div>
                 <div style={{fontWeight:700,marginBottom:'2px',fontSize:'15px'}}>{s.platform}</div>
                 <div style={{fontSize:'13px',color:C.muted}}>{s.sale_date} · Fees {fmt(Number(s.fees||0)+Number(s.shipping||0))}</div>
+                {(s.period_start && s.period_start !== s.sale_date) && (
+                  <div style={{fontSize:'12px',color:C.muted}}>Period: {s.period_start} – {s.period_end}</div>
+                )}
                 <div style={{fontSize:'12px',color:s.entity==='llc'?C.teal:C.gold,marginTop:'2px'}}>{s.entity==='llc'?'LLC':'Sole Prop'}</div>
               </div>
               <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
@@ -668,6 +967,124 @@ export default function ManaSocialApp() {
             )
           })}
           {cogsInventory.length===0&&<div style={{textAlign:'center',padding:'40px',color:C.muted,fontFamily:FONT}}>No inventory entries yet</div>}
+        </div>
+      )
+
+      case 'accounting': return (
+        <div>
+          {/* ── Accrual method badge ── */}
+          <div style={{padding:'8px 14px',borderRadius:'8px',background:'rgba(45,191,184,0.1)',border:`1px solid rgba(45,191,184,0.25)`,marginBottom:'12px',fontSize:'12px',color:'#1A7A75',fontWeight:'bold',fontFamily:FONT,display:'flex',alignItems:'center',gap:'6px'}}>
+            <span>⚖️</span> Accrual Method — revenue & expenses recognized in the period earned/incurred
+          </div>
+
+          {/* ── Income Statement ── */}
+          <div style={card}>
+            <div style={{fontSize:'12px',color:C.muted,fontWeight:'bold',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:'14px',fontFamily:FONT}}>Income Statement · {selectedMonth===0?selectedYear:new Date(selectedYear,selectedMonth-1).toLocaleString('default',{month:'long',year:'numeric'})}</div>
+
+            {/* Net Sales */}
+            <div style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${C.border}`}}>
+              <span style={{fontSize:'15px',fontFamily:FONT}}>Net Sales</span>
+              <span style={{fontSize:'15px',fontWeight:700,color:'#10b981',fontFamily:FONT}}>{fmt(netSales)}</span>
+            </div>
+
+            {/* COGS */}
+            <div style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:`1px solid ${C.border}`}}>
+              <span style={{fontSize:'15px',fontFamily:FONT}}>Cost of Goods Sold</span>
+              <span style={{fontSize:'15px',fontWeight:700,color:'#ef4444',fontFamily:FONT}}>{fmt(cogsRecognized)}</span>
+            </div>
+
+            {/* Gross Margin */}
+            <div style={{display:'flex',justifyContent:'space-between',padding:'12px 0',borderBottom:`2px solid ${C.border}`,background:'rgba(27,42,74,0.02)',marginLeft:'-20px',marginRight:'-20px',paddingLeft:'20px',paddingRight:'20px'}}>
+              <span style={{fontSize:'16px',fontWeight:700,fontFamily:FONT}}>Gross Margin</span>
+              <span style={{fontSize:'16px',fontWeight:900,color:grossMargin>=0?'#10b981':'#ef4444',fontFamily:FONT}}>{fmt(grossMargin)}</span>
+            </div>
+
+            {/* Operating Expenses breakdown */}
+            <div style={{padding:'10px 0 4px',fontSize:'12px',color:C.muted,fontWeight:'bold',letterSpacing:'0.05em',textTransform:'uppercase',fontFamily:FONT}}>Operating Expenses</div>
+            {[
+              ['Platform Fees', totalFees],
+              ['Op. Expenses', opExpenses],
+              ['Payroll', staffingCosts],
+            ].map(([label, val]) => (
+              <div key={String(label)} style={{display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:`1px solid ${C.border}`,paddingLeft:'12px'}}>
+                <span style={{fontSize:'14px',color:C.muted,fontFamily:FONT}}>{label}</span>
+                <span style={{fontSize:'14px',color:'#ef4444',fontFamily:FONT}}>{fmt(Number(val))}</span>
+              </div>
+            ))}
+            <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0 8px 12px',borderBottom:`1px solid ${C.border}`}}>
+              <span style={{fontSize:'14px',fontWeight:700,fontFamily:FONT}}>Total Operating Expenses</span>
+              <span style={{fontSize:'14px',fontWeight:700,color:'#ef4444',fontFamily:FONT}}>{fmt(totalOpEx)}</span>
+            </div>
+
+            {/* Net Income */}
+            <div style={{display:'flex',justifyContent:'space-between',padding:'14px 0 0',marginTop:'4px'}}>
+              <span style={{fontSize:'17px',fontWeight:900,fontFamily:FONT}}>Net Income</span>
+              <span style={{fontSize:'17px',fontWeight:900,color:netIncome>=0?'#10b981':'#ef4444',fontFamily:FONT,textDecoration:'underline double'}}>{fmt(netIncome)}</span>
+            </div>
+          </div>
+
+          {/* ── Key Metric Tiles ── */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'12px'}}>
+            {[
+              {label:'Gross Margin %', value: netSales>0?((grossMargin/netSales)*100).toFixed(1)+'%':'—', color: grossMargin>=0?C.teal:C.pink},
+              {label:'Net Margin %',   value: netSales>0?((netIncome/netSales)*100).toFixed(1)+'%':'—',  color: netIncome>=0?C.teal:C.pink},
+              {label:'COGS Ratio',     value: netSales>0?((cogsRecognized/netSales)*100).toFixed(1)+'%':'—', color: C.purple},
+              {label:'OpEx Ratio',     value: netSales>0?((totalOpEx/netSales)*100).toFixed(1)+'%':'—',  color: C.gold},
+            ].map(t=>(
+              <div key={t.label} style={{...card,padding:'14px',marginBottom:0,textAlign:'center'}}>
+                <div style={{fontSize:'11px',color:C.muted,fontWeight:'bold',letterSpacing:'0.05em',textTransform:'uppercase',marginBottom:'6px'}}>{t.label}</div>
+                <div style={{fontSize:'24px',fontWeight:900,color:t.color,fontFamily:FONT}}>{t.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Inventory Flow Waterfall (Image 2 style) ── */}
+          <div style={card}>
+            <div style={{fontSize:'12px',color:C.muted,fontWeight:'bold',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:'14px',fontFamily:FONT}}>Inventory Flow — {selectedYear}</div>
+
+            {inventoryFlow.length === 0 ? (
+              <div style={{textAlign:'center',padding:'30px',color:C.muted,fontSize:'14px',fontFamily:FONT}}>No inventory data yet</div>
+            ) : (
+              <>
+                {inventoryFlow.map((row, i) => (
+                  <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0',borderBottom:`1px solid ${C.border}`}}>
+                    <span style={{fontSize:'14px',color:C.text,fontFamily:FONT,flex:1,paddingRight:'8px'}}>{row.label}</span>
+                    <span style={{
+                      fontSize:'15px',fontWeight:700,fontFamily:FONT,minWidth:'80px',textAlign:'right',
+                      color: row.isAddition ? '#10b981' : '#ef4444'
+                    }}>
+                      {row.isAddition ? '' : '('}{fmt(row.amount)}{row.isAddition ? '' : ')'}
+                    </span>
+                  </div>
+                ))}
+                {/* Ending inventory */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0 0',marginTop:'4px'}}>
+                  <span style={{fontSize:'16px',fontWeight:700,fontFamily:FONT}}>Ending Inventory (Balance Sheet)</span>
+                  <span style={{fontSize:'16px',fontWeight:900,color:C.teal,fontFamily:FONT,textDecoration:'underline'}}>{fmt(endingBalance)}</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ── Entity Split ── */}
+          <div style={card}>
+            <div style={{fontSize:'12px',color:C.muted,fontWeight:'bold',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:'12px',fontFamily:FONT}}>Revenue by Entity</div>
+            {(['sole_prop','llc'] as const).map(entity => {
+              const entitySales = sales.filter(s=>s.entity===entity)
+              const entityGross = entitySales.reduce((a,r)=>a+Number(r.amount),0)
+              const entityNet   = entitySales.reduce((a,r)=>a+Number(r.net_sales||r.amount),0)
+              if (entityGross === 0) return null
+              return (
+                <div key={entity} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0',borderBottom:`1px solid ${C.border}`}}>
+                  <div>
+                    <div style={{fontSize:'14px',fontWeight:700,color:entity==='llc'?C.teal:C.gold,fontFamily:FONT}}>{entity==='llc'?'Mana Social LLC':'Camera Pho (Sole Prop)'}</div>
+                    <div style={{fontSize:'12px',color:C.muted,fontFamily:FONT}}>Net: {fmt(entityNet)}</div>
+                  </div>
+                  <div style={{fontSize:'17px',fontWeight:700,color:'#10b981',fontFamily:FONT}}>{fmt(entityGross)}</div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )
 
@@ -827,13 +1244,14 @@ export default function ManaSocialApp() {
   if (!authed) return <LoginScreen onLogin={()=>setAuthed(true)} />
 
   const TABS = [
-    {id:'summary',label:'Summary'},
-    {id:'income',label:'Sales'},
-    {id:'expense',label:'Expenses'},
-    {id:'cogs',label:'COGS'},
-    {id:'deductions',label:'Deductions'},
-    {id:'tax',label:'Tax'},
-    {id:'payroll',label:'Payroll'},
+    {id:'summary',    label:'Summary'},
+    {id:'income',     label:'Sales'},
+    {id:'expense',    label:'Expenses'},
+    {id:'cogs',       label:'COGS'},
+    {id:'accounting', label:'Accounting'},
+    {id:'deductions', label:'Deductions'},
+    {id:'tax',        label:'Tax'},
+    {id:'payroll',    label:'Payroll'},
   ]
 
   return (
@@ -875,7 +1293,7 @@ export default function ManaSocialApp() {
       </div>
       <nav style={{position:'fixed',bottom:0,left:0,right:0,background:C.white,borderTop:`2px solid ${C.border}`,display:'flex',zIndex:400,height:'100px'}}>
         {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{flex:1,border:'none',background:'none',fontSize:'12px',fontWeight:900,color:activeTab===t.id?C.teal:C.muted,padding:'8px 2px',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:FONT,borderTop:activeTab===t.id?`3px solid ${C.teal}`:'3px solid transparent'}}>
+          <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{flex:1,border:'none',background:'none',fontSize:'11px',fontWeight:900,color:activeTab===t.id?C.teal:C.muted,padding:'8px 2px',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:FONT,borderTop:activeTab===t.id?`3px solid ${C.teal}`:'3px solid transparent'}}>
             {t.label}
           </button>
         ))}
