@@ -184,28 +184,46 @@ function parseManaPoolCSV(file: File): Promise<{ records: any[], meta: any }> {
         const wb = XLSX.read(text, { type: 'string', raw: false })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows: any[] = XLSX.utils.sheet_to_json(ws)
-        const records: any[] = []
         let totalGross = 0, totalFees = 0, totalShipping = 0, totalOrders = 0
+        let minDate = '', maxDate = ''
         for (const row of rows) {
           const period = row['Period'] || row['period']
           if (!period) continue
+          // Handle Excel serial date numbers
+          let dateStr = ''
+          if (typeof period === 'number') {
+            const d = new Date(Math.round((period - 25569) * 86400 * 1000))
+            dateStr = d.toISOString().split('T')[0]
+          } else {
+            dateStr = String(period).split('T')[0]
+          }
+          if (!minDate || dateStr < minDate) minDate = dateStr
+          if (!maxDate || dateStr > maxDate) maxDate = dateStr
           const total    = parseFloat(row['Total']       || 0)
           const subtotal = parseFloat(row['Subtotal']    || 0)
           const shipping = parseFloat(row['Shipping']    || 0)
           const orders   = parseInt(row['Order Count']   || 0)
-          // ManaPool fee: 5% of subtotal + 2.9% of total + $0.30 per order
           const fees = parseFloat(((subtotal * 0.05) + (total * 0.029) + (0.30 * orders)).toFixed(2))
-          const dateStr = String(period).includes('T') ? String(period).split('T')[0] : String(period)
-          records.push({
-            platform: 'manapool', amount: subtotal, fees, shipping,
-            sale_date: dateStr, period_start: dateStr, period_end: dateStr,
-            entity: new Date(dateStr) < LLC_START ? 'sole_prop' : 'llc',
-            net_sales: parseFloat((subtotal - fees).toFixed(2)),
-            num_orders: orders
-          })
           totalGross += subtotal; totalFees += fees; totalShipping += shipping; totalOrders += orders
         }
-        resolve({ records, meta: { totalGross, totalFees, totalShipping, totalOrders, rows: records.length } })
+        const saleDate = maxDate || new Date().toISOString().split('T')[0]
+        const entity = new Date(saleDate) < LLC_START ? 'sole_prop' : 'llc'
+        const record = {
+          platform: 'manapool',
+          amount: parseFloat(totalGross.toFixed(2)),
+          fees: parseFloat(totalFees.toFixed(2)),
+          shipping: parseFloat(totalShipping.toFixed(2)),
+          sale_date: saleDate,
+          period_start: minDate || saleDate,
+          period_end: maxDate || saleDate,
+          entity,
+          net_sales: parseFloat((totalGross - totalFees).toFixed(2)),
+          num_orders: totalOrders
+        }
+        resolve({
+          records: [record],
+          meta: { totalGross, totalFees, totalShipping, totalOrders, periodStart: minDate, periodEnd: maxDate, rows: rows.length }
+        })
       } catch (err: any) { reject(new Error('ManaPool parse failed: ' + err.message)) }
     }
     reader.onerror = () => reject(new Error('File read error'))
@@ -595,7 +613,7 @@ export default function ManaSocialApp() {
           const { records, meta } = await parseManaPoolCSV(file)
           setUploadMode('sales')
           setUploadPreview(records)
-          setUploadStatus(`ManaPool: ${meta.rows} daily records · ${meta.totalOrders} orders · Gross ${fmt(meta.totalGross)} · Fees ~${fmt(meta.totalFees)} · Shipping ${fmt(meta.totalShipping)}`)
+          setUploadStatus(`ManaPool: ${meta.periodStart} – ${meta.periodEnd} · ${meta.totalOrders} orders · Gross ${fmt(meta.totalGross)} · Fees ~${fmt(meta.totalFees)} · Net ${fmt(meta.totalGross - meta.totalFees)}`)
         } catch (err: any) { setUploadStatus('Error: ' + err.message) }
         return
       }
