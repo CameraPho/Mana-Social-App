@@ -9,14 +9,12 @@ const supabase = createClient(
 )
 
 const FONT = "'Calibri', sans-serif"
-
 const C = {
   navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
   pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
   bg: '#F0F2F8', white: '#FFFFFF', muted: '#8A96B0',
   text: '#1B2A4A', border: 'rgba(27,42,74,0.12)', green: '#10b981',
 }
-
 const fmt = (n: number) => {
   if (n < 0) return '-$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -29,6 +27,27 @@ const pctFmt = (n: number, d: number) => d === 0 ? '—' : (n / d * 100).toFixed
 const getEntity = (date: string) => new Date(date) < new Date('2026-03-18') ? 'sole_prop' : 'llc'
 const LLC_START = new Date('2026-03-18')
 
+// ─── AI Learning: persist category corrections ────────────────────────────
+const AI_LEARN_KEY = 'mana_social_ai_corrections'
+function getCorrections(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(AI_LEARN_KEY) || '{}') } catch { return {} }
+}
+function saveCorrection(title: string, category: string) {
+  const corrections = getCorrections()
+  const key = title.toLowerCase().slice(0, 40)
+  corrections[key] = category
+  localStorage.setItem(AI_LEARN_KEY, JSON.stringify(corrections))
+}
+function findLearned(title: string): string | null {
+  const corrections = getCorrections()
+  const t = title.toLowerCase()
+  for (const [key, val] of Object.entries(corrections)) {
+    if (t.includes(key)) return val
+  }
+  return null
+}
+
+// ─── Expense Categories ───────────────────────────────────────────────────
 const DEDUCTIBILITY: Record<string, { pct: number | null, label: string, line: string }> = {
   'Shipping & Postage':         { pct: 100,  label: '100% deductible',             line: 'Sch C Line 27a' },
   'Selling Fees & Commissions': { pct: 100,  label: '100% deductible',             line: 'Sch C Line 10'  },
@@ -46,6 +65,7 @@ const DEDUCTIBILITY: Record<string, { pct: number | null, label: string, line: s
   'Internet & Phone':           { pct: null, label: 'Partial — business use %',    line: 'Sch C Line 25'  },
   'Education & Training':       { pct: 100,  label: '100% deductible',             line: 'Sch C Line 27a' },
   'Home Office':                { pct: null, label: 'Partial — set % in settings', line: 'Sch C Line 30'  },
+  'Inventory Purchase':         { pct: 100,  label: '100% — COGS when sold',       line: 'Sch C Line 38'  },
   'Other':                      { pct: null, label: 'Needs review',                line: 'Sch C Line 27a' },
 }
 const EXPENSE_CATEGORIES = Object.keys(DEDUCTIBILITY)
@@ -53,6 +73,31 @@ const MILEAGE_RATE = 0.67
 const ASSET_CATEGORIES = ['Equipment', 'Furniture & Fixtures', 'Vehicle']
 const USEFUL_LIFE: Record<string, number> = { Equipment: 5, 'Furniture & Fixtures': 7, Vehicle: 5 }
 
+// ─── Amazon auto-categorization ───────────────────────────────────────────
+function categorizeAmazonItem(title: string, amazonCategory: string): { expCat: string, isInventory: boolean } {
+  const learned = findLearned(title)
+  if (learned) return { expCat: learned, isInventory: learned === 'Inventory Purchase' }
+  const t = title.toLowerCase()
+  const ac = (amazonCategory || '').toLowerCase()
+  const inventoryKeywords = ['magic: the gathering', 'magic the gathering', 'pokemon', 'yu-gi-oh', 'yugioh', 'funko', 'tmnt', 'turtle', 'digimon', 'one piece', 'final fantasy', 'bloomburrow', 'lorwyn', 'karlov', 'strixhaven', 'commander deck', 'booster box', 'booster bundle', 'secret lair', 'collector', 'play booster', 'draft booster', 'set booster', 'precon', 'riftbound']
+  const suppliesKeywords = ['envelope', 'mailer', 'bubble', 'bag', 'sleeve', 'semi rigid', 'toploader', 'card holder', 'divider', 'label', 'sticker', 'poly', 'shipping bag', 'kraft', 'tape', 'box', 'package', 'dunnage', 'wrap', 'protector', 'team bag']
+  const equipmentKeywords = ['scanner', 'printer', 'mouse', 'keyboard', 'monitor', 'camera', 'light', 'shelf', 'shelv', 'rack', 'tray', 'sort tray', 'scissors', 'scale']
+  if (inventoryKeywords.some(k => t.includes(k))) return { expCat: 'Inventory Purchase', isInventory: true }
+  if (suppliesKeywords.some(k => t.includes(k))) return { expCat: 'Supplies & Packaging', isInventory: false }
+  if (equipmentKeywords.some(k => t.includes(k))) return { expCat: 'Equipment', isInventory: false }
+  if (ac.includes('toy')) return { expCat: 'Inventory Purchase', isInventory: true }
+  if (ac.includes('office') || ac.includes('industrial') || ac.includes('business')) return { expCat: 'Supplies & Packaging', isInventory: false }
+  if (ac.includes('computer') || ac.includes('electronic')) return { expCat: 'Equipment', isInventory: false }
+  return { expCat: 'Supplies & Packaging', isInventory: false }
+}
+
+function normalizeUser(user: string): string {
+  const u = (user || '').toLowerCase()
+  if (u.includes('kenny') || u.includes('ken')) return 'Kenny'
+  return 'Cam'
+}
+
+// ─── Parsers ──────────────────────────────────────────────────────────────
 function parseTCGplayerXLSX(file: File): Promise<{ records: any[], meta: any }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -66,8 +111,8 @@ function parseTCGplayerXLSX(file: File): Promise<{ records: any[], meta: any }> 
         let periodStart = '', periodEnd = '', entity = 'llc'
         if (dateMatch) {
           const s = dateMatch[1], en = dateMatch[2]
-          periodStart = `${s.slice(4)}-${s.slice(0, 2)}-${s.slice(2, 4)}`
-          periodEnd   = `${en.slice(4)}-${en.slice(0, 2)}-${en.slice(2, 4)}`
+          periodStart = `${s.slice(4)}-${s.slice(0,2)}-${s.slice(2,4)}`
+          periodEnd   = `${en.slice(4)}-${en.slice(0,2)}-${en.slice(2,4)}`
           entity = new Date(periodEnd) < LLC_START ? 'sole_prop' : 'llc'
         }
         const rows: any[] = XLSX.utils.sheet_to_json(ws)
@@ -130,6 +175,88 @@ function parseEbayCSV(file: File): Promise<{ records: any[], meta: any }> {
   })
 }
 
+function parseManaPoolCSV(file: File): Promise<{ records: any[], meta: any }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const text = e.target!.result as string
+        const wb = XLSX.read(text, { type: 'string', raw: false })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows: any[] = XLSX.utils.sheet_to_json(ws)
+        const records: any[] = []
+        let totalGross = 0, totalFees = 0, totalShipping = 0, totalOrders = 0
+        for (const row of rows) {
+          const period = row['Period'] || row['period']
+          if (!period) continue
+          const total    = parseFloat(row['Total']       || 0)
+          const subtotal = parseFloat(row['Subtotal']    || 0)
+          const shipping = parseFloat(row['Shipping']    || 0)
+          const orders   = parseInt(row['Order Count']   || 0)
+          // ManaPool fee: 5% of subtotal + 2.9% of total + $0.30 per order
+          const fees = parseFloat(((subtotal * 0.05) + (total * 0.029) + (0.30 * orders)).toFixed(2))
+          const dateStr = String(period).includes('T') ? String(period).split('T')[0] : String(period)
+          records.push({
+            platform: 'manapool', amount: subtotal, fees, shipping,
+            sale_date: dateStr, period_start: dateStr, period_end: dateStr,
+            entity: new Date(dateStr) < LLC_START ? 'sole_prop' : 'llc',
+            net_sales: parseFloat((subtotal - fees).toFixed(2)),
+            num_orders: orders
+          })
+          totalGross += subtotal; totalFees += fees; totalShipping += shipping; totalOrders += orders
+        }
+        resolve({ records, meta: { totalGross, totalFees, totalShipping, totalOrders, rows: records.length } })
+      } catch (err: any) { reject(new Error('ManaPool parse failed: ' + err.message)) }
+    }
+    reader.onerror = () => reject(new Error('File read error'))
+    reader.readAsText(file)
+  })
+}
+
+function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const text = e.target!.result as string
+        const wb = XLSX.read(text, { type: 'string', raw: false })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows: any[] = XLSX.utils.sheet_to_json(ws)
+        const seen = new Set<string>()
+        const records: any[] = []
+        for (const row of rows) {
+          const orderId = row['Order ID'] || ''
+          const asin = row['ASIN'] || ''
+          const key = `${orderId}_${asin}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          const title = row['Title'] || ''
+          const amazonCat = row['Amazon-Internal Product Category'] || ''
+          const cost = parseFloat(String(row['Item Net Total'] || row['Item Subtotal'] || 0).replace(/[$,]/g, '')) || 0
+          const tax = parseFloat(String(row['Item Tax'] || 0).replace(/[$,]/g, '')) || 0
+          const dateRaw = row['Order Date'] || ''
+          let dateStr = new Date().toISOString().split('T')[0]
+          if (dateRaw) {
+            const parts = dateRaw.split('/')
+            if (parts.length === 3) dateStr = `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
+          }
+          const userName = normalizeUser(row['Account User'] || '')
+          const { expCat, isInventory } = categorizeAmazonItem(title, amazonCat)
+          const entity = new Date(dateStr) < LLC_START ? 'sole_prop' : 'llc'
+          records.push({
+            _type: isInventory ? 'inventory' : 'expense',
+            expCat, isInventory, title, cost, tax, dateStr, userName, entity,
+            orderId, asin
+          })
+        }
+        resolve({ records, meta: { rows: records.length } })
+      } catch (err: any) { reject(new Error('Amazon parse failed: ' + err.message)) }
+    }
+    reader.onerror = () => reject(new Error('File read error'))
+    reader.readAsText(file)
+  })
+}
+
 async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<any[]> {
   try {
     const isImage = file.type.startsWith('image/')
@@ -140,8 +267,8 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
     if (isCSV || isXLSX) {
       const text = await file.text()
       const prompt = mode === 'sales'
-        ? `ManaPool sales report. Extract sales. Return ONLY JSON array:\n[{"platform":"manapool","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD"}]\n\n${text.slice(0, 8000)}`
-        : `Expense receipt. Extract expenses. Return ONLY JSON array:\n[{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"vendor"}]\n\n${text.slice(0, 8000)}`
+        ? `Sales report. Extract all sales. Return ONLY JSON array:\n[{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","num_orders":1}]\n\n${text.slice(0,8000)}`
+        : `Expense receipt or report. Extract all expenses. Return ONLY JSON array:\n[{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"vendor/item","user_name":"Cam"}]\n\n${text.slice(0,8000)}`
       content = [{ type: 'text', text: prompt }]
     } else if (isImage || isPDF) {
       const base64 = await new Promise<string>((res, rej) => {
@@ -152,7 +279,7 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
       })
       const prompt = mode === 'sales'
         ? 'Sales receipt. Return ONLY JSON array: [{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD"}]'
-        : `Expense receipt. Return ONLY JSON array: [{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"vendor"}]`
+        : `Expense receipt or invoice. Extract all line items. Return ONLY JSON array: [{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"item description","user_name":"Cam"}]`
       content = [
         { type: isImage ? 'image' : 'document', source: { type: 'base64', media_type: file.type || 'application/pdf', data: base64 } },
         { type: 'text', text: prompt }
@@ -171,11 +298,34 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
 function calcDepreciation(cost: number, life: number, purchaseDate: string, year: number) {
   const purchaseYear = new Date(purchaseDate).getFullYear()
   const yearsIn = year - purchaseYear
-  if (yearsIn < 0 || yearsIn >= life) return { slAnnual: 0, slAccumulated: 0, slBookValue: cost, sec179: cost }
+  if (yearsIn < 0 || yearsIn >= life) return { slAnnual: 0, slAccumulated: 0, slBookValue: cost }
   const slAnnual = parseFloat((cost / life).toFixed(2))
   const slAccumulated = parseFloat((slAnnual * (yearsIn + 1)).toFixed(2))
   const slBookValue = parseFloat(Math.max(0, cost - slAccumulated).toFixed(2))
-  return { slAnnual, slAccumulated, slBookValue, sec179: cost }
+  return { slAnnual, slAccumulated, slBookValue }
+}
+
+// ─── Date helpers for bulk entry ─────────────────────────────────────────
+function getDatesInRange(start: string, end: string): string[] {
+  const dates: string[] = []
+  const cur = new Date(start + 'T12:00:00')
+  const last = new Date(end + 'T12:00:00')
+  while (cur <= last) {
+    dates.push(cur.toISOString().split('T')[0])
+    cur.setDate(cur.getDate() + 1)
+  }
+  return dates
+}
+function getWeekDates(dateStr: string): string[] {
+  const d = new Date(dateStr + 'T12:00:00')
+  const day = d.getDay()
+  const monday = new Date(d); monday.setDate(d.getDate() - day + (day === 0 ? -6 : 1))
+  return Array.from({ length: 7 }, (_, i) => { const dd = new Date(monday); dd.setDate(monday.getDate() + i); return dd.toISOString().split('T')[0] })
+}
+function getMonthDates(dateStr: string): string[] {
+  const [y, m] = dateStr.split('-').map(Number)
+  const days = new Date(y, m, 0).getDate()
+  return Array.from({ length: days }, (_, i) => `${y}-${String(m).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`)
 }
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
@@ -221,9 +371,16 @@ export default function ManaSocialApp() {
   const [showSettings, setShowSettings] = useState(false)
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadPreview, setUploadPreview] = useState<any[]>([])
-  const [uploadMode, setUploadMode] = useState<'sales' | 'expenses'>('sales')
+  const [uploadMode, setUploadMode] = useState<'sales' | 'expenses' | 'amazon'>('sales')
   const [syncStatus, setSyncStatus] = useState('')
   const [acctDrilldown, setAcctDrilldown] = useState<string | null>(null)
+  const [bulkAddOpen, setBulkAddOpen] = useState(false)
+  const [bulkTable, setBulkTable] = useState('mileage_log')
+  const [bulkRows, setBulkRows] = useState<any[]>([])
+  const [bulkDateMode, setBulkDateMode] = useState<'single'|'range'|'week'|'month'>('single')
+  const [bulkDateFrom, setBulkDateFrom] = useState(new Date().toISOString().split('T')[0])
+  const [bulkDateTo, setBulkDateTo] = useState(new Date().toISOString().split('T')[0])
+  const [bulkUser, setBulkUser] = useState('Cam')
   const salesFileRef = useRef<HTMLInputElement>(null)
   const expFileRef = useRef<HTMLInputElement>(null)
 
@@ -238,19 +395,20 @@ export default function ManaSocialApp() {
     payPeriod: '', hoursWorked: '', hourlyRate: '16', rothEligible: '', rothContributed: '',
     bankName: 'Chase', accountType: 'Checking', accountLast4: '', bankBalance: '',
     apVendor: '', apTotal: '', apPaid: '', apDue: '',
+    supplyItem: '', supplyUnit: '', supplyCost: '',
   }
   const [formData, setFormData] = useState(emptyForm)
 
   const [sales, setSales] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
-  const [collections, setCollections] = useState<any[]>([])
+  const [accountsPayable, setAccountsPayable] = useState<any[]>([])
   const [payroll, setPayroll] = useState<any[]>([])
   const [disbursements, setDisbursements] = useState<any[]>([])
   const [mileageLog, setMileageLog] = useState<any[]>([])
   const [cogsInventory, setCogsInventory] = useState<any[]>([])
   const [assets, setAssets] = useState<any[]>([])
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
-  const [accountsPayable, setAccountsPayable] = useState<any[]>([])
+  const [supplyCosts, setSupplyCosts] = useState<any[]>([])
   const [allCogsInventory, setAllCogsInventory] = useState<any[]>([])
 
   useEffect(() => {
@@ -265,10 +423,10 @@ export default function ManaSocialApp() {
       const d = new Date(i[key])
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth)
     })
-    const [s, e, b, p, d, ml, ci, allCI, ast, ba, ap] = await Promise.all([
+    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc] = await Promise.all([
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
-      supabase.from('collections').select('*').order('due_date', { ascending: false }),
+      supabase.from('accounts_payable').select('*').order('invoice_date', { ascending: false }),
       supabase.from('payroll').select('*').order('pay_date', { ascending: false }),
       supabase.from('disbursements').select('*'),
       supabase.from('mileage_log').select('*').order('date', { ascending: false }),
@@ -276,11 +434,11 @@ export default function ManaSocialApp() {
       supabase.from('cogs_inventory').select('*').order('date', { ascending: true }),
       supabase.from('assets').select('*').order('purchase_date', { ascending: false }),
       supabase.from('bank_accounts').select('*'),
-      supabase.from('accounts_payable').select('*').order('invoice_date', { ascending: false }),
+      supabase.from('supply_costs').select('*').order('effective_date', { ascending: false }),
     ])
     setSales(fd(s.data || [], 'sale_date'))
     setExpenses(fd(e.data || [], 'purchase_date'))
-    setCollections(fd(b.data || [], 'due_date'))
+    setAccountsPayable(ap.data || [])
     setPayroll(fd(p.data || [], 'pay_date'))
     setDisbursements(fd(d.data || [], 'disbursement_date'))
     setMileageLog((ml.data || []).filter(i => new Date(i.date).getFullYear() === selectedYear))
@@ -288,11 +446,12 @@ export default function ManaSocialApp() {
     setAllCogsInventory(allCI.data || [])
     setAssets(ast.data || [])
     setBankAccounts(ba.data || [])
-    setAccountsPayable(ap.data || [])
+    setSupplyCosts(sc.data || [])
   }, [authed, selectedYear, selectedMonth])
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // ─── Computed values ──────────────────────────────────────────────────
   const gross = sales.reduce((s, r) => s + Number(r.amount), 0)
   const totalPlatformFees = sales.reduce((s, r) => s + Number(r.fees || 0), 0)
   const totalShippingExpense = sales.reduce((s, r) => s + Number(r.shipping || 0), 0)
@@ -303,11 +462,9 @@ export default function ManaSocialApp() {
     return acc
   }, {} as Record<string, number>)
   const opExpenses = Object.values(expByCategory).reduce((a, b) => a + b, 0)
-  const inventoryCosts = collections.reduce((s, r) => s + Number(r.total_cost), 0)
-  const totalPaid = collections.reduce((s, r) => s + Number(r.amount_paid || 0), 0)
-  const totalOwed = inventoryCosts - totalPaid
+  const totalAPOwed = accountsPayable.reduce((a, r) => a + Math.max(0, Number(r.total_amount) - Number(r.amount_paid || 0)), 0)
   const staffingCosts = payroll.reduce((s, r) => s + Number(r.amount), 0)
-  const totalCosts = totalFees + opExpenses + inventoryCosts + staffingCosts
+  const totalCosts = totalFees + opExpenses + totalAPOwed + staffingCosts
   const netRevenue = gross - totalCosts
   const cogsRecognized = cogsInventory.reduce((a, r) => {
     const ratio = r.total_units > 0 ? Math.min((r.sold_units || 0) / r.total_units, 1) : 0
@@ -341,17 +498,23 @@ export default function ManaSocialApp() {
   const grossMargin = netSalesAmt - cogsRecognized
   const totalOpEx = opExpenses + staffingCosts + totalPlatformFees + totalDepreciation
   const netIncome = grossMargin - totalOpEx
-  const totalAPOwed = accountsPayable.reduce((a, r) => a + Math.max(0, Number(r.total_amount) - Number(r.amount_paid || 0)), 0)
   const totalCash = bankAccounts.filter(b => b.account_type !== 'Credit').reduce((a, r) => a + Number(r.current_balance || 0), 0)
   const totalCreditDebt = bankAccounts.filter(b => b.account_type === 'Credit').reduce((a, r) => a + Math.abs(Number(r.current_balance || 0)), 0)
   const endingInventory = allCogsInventory.reduce((a, r) => {
     const ratio = r.total_units > 0 ? Math.min((r.sold_units || 0) / r.total_units, 1) : 0
     return a + parseFloat(r.total_cost || 0) * (1 - ratio)
   }, 0)
-  const totalCurrentAssets = totalCash + endingInventory + totalOwed
+  const totalCurrentAssets = totalCash + endingInventory + totalAPOwed
   const totalAssets = totalCurrentAssets + totalBookValue
   const totalLiabilities = totalAPOwed + totalCreditDebt
   const ownerEquity = totalAssets - totalLiabilities
+
+  // Supply cost helpers — get latest cost for an item
+  const getLatestSupplyCost = (itemName: string): number => {
+    const matches = supplyCosts.filter(s => s.item_name === itemName).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
+    return matches.length > 0 ? parseFloat(matches[0].cost_per_unit) : 0
+  }
+  const uniqueSupplyItems = [...new Set(supplyCosts.map(s => s.item_name))]
 
   const quarters = [
     { label: 'Q1', start: '2026-01-01', end: '2026-03-31', due941: 'Apr 30', due1040: 'Apr 15' },
@@ -388,6 +551,7 @@ export default function ManaSocialApp() {
   }
   const { flow: inventoryFlow, endingBalance } = buildInventoryFlow()
 
+  // ─── Styles ───────────────────────────────────────────────────────────
   const card: React.CSSProperties = { background: C.white, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
   const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: '#F5F6FA', boxSizing: 'border-box', fontFamily: FONT }
   const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: FONT }
@@ -395,35 +559,65 @@ export default function ManaSocialApp() {
   const delBtn: React.CSSProperties = { background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '18px', fontFamily: FONT }
   const secHdr: React.CSSProperties = { fontSize: '11px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '12px', fontFamily: FONT, display: 'block' }
 
+  // ─── Upload Handler ────────────────────────────────────────────────────
   const handleFileUpload = async (file: File, mode: 'sales' | 'expenses') => {
-    setUploadMode(mode); setUploadPreview([])
+    setUploadPreview([])
+    const name = file.name.toLowerCase()
     if (mode === 'sales') {
-      const isTCG = file.name.toLowerCase().includes('tcgplayer') || /SellerTaxReport/i.test(file.name)
-      const isEbay = file.name.toLowerCase().includes('ebay') || file.name.toLowerCase().includes('listing')
-      const isXLSX = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
-      const isCSV = file.name.endsWith('.csv')
+      const isTCG = name.includes('tcgplayer') || /sellertaxreport/i.test(file.name)
+      const isEbay = name.includes('ebay') || name.includes('listing')
+      const isManaPool = name.includes('manapool') || name.includes('mana_pool') || name.includes('mana pool')
+      const isXLSX = name.endsWith('.xlsx') || name.endsWith('.xls')
+      const isCSV = name.endsWith('.csv')
       if (isXLSX && (isTCG || !isEbay)) {
         setUploadStatus('Parsing TCGplayer report...')
         try {
           const { records, meta } = await parseTCGplayerXLSX(file)
+          setUploadMode('sales')
           setUploadPreview(records.map(r => ({ ...r, _displayLabel: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}`, _meta: meta })))
           setUploadStatus(`TCGplayer: ${meta.periodStart} – ${meta.periodEnd} · ${meta.numOrders} orders · ${meta.entity === 'llc' ? 'LLC' : 'Sole Prop'} · Gross ${fmt(meta.grossSales)} · Fees ${fmt(meta.derivedFees)} · Net ${fmt(meta.netSales)}`)
         } catch (err: any) { setUploadStatus('Error: ' + err.message) }
         return
       }
-      if (isCSV && (isEbay || file.name.toLowerCase().includes('listing'))) {
+      if (isCSV && (isEbay || name.includes('listing'))) {
         setUploadStatus('Parsing eBay report...')
         try {
           const { records, meta } = await parseEbayCSV(file)
+          setUploadMode('sales')
           setUploadPreview(records.map(r => ({ ...r, _displayLabel: `eBay · ${meta.rows} listings`, _meta: meta })))
           setUploadStatus(`eBay: ${meta.rows} listings · Gross ${fmt(meta.totalGross)} · Fees ${fmt(meta.totalFees)} · Net ${fmt(meta.totalNet)}`)
         } catch (err: any) { setUploadStatus('Error: ' + err.message) }
         return
       }
+      if (isCSV && isManaPool) {
+        setUploadStatus('Parsing ManaPool report...')
+        try {
+          const { records, meta } = await parseManaPoolCSV(file)
+          setUploadMode('sales')
+          setUploadPreview(records)
+          setUploadStatus(`ManaPool: ${meta.rows} daily records · ${meta.totalOrders} orders · Gross ${fmt(meta.totalGross)} · Fees ~${fmt(meta.totalFees)} · Shipping ${fmt(meta.totalShipping)}`)
+        } catch (err: any) { setUploadStatus('Error: ' + err.message) }
+        return
+      }
     }
+    if (mode === 'expenses') {
+      const isAmazon = name.includes('amazon')
+      if (isAmazon) {
+        setUploadStatus('Parsing Amazon order report...')
+        try {
+          const { records, meta } = await parseAmazonCSV(file)
+          setUploadMode('amazon')
+          setUploadPreview(records)
+          setUploadStatus(`Amazon: ${meta.rows} items — review categories and confirm. AI has auto-categorized based on product titles. You can change any category before saving.`)
+        } catch (err: any) { setUploadStatus('Error: ' + err.message) }
+        return
+      }
+    }
+    // AI fallback
+    setUploadMode(mode)
     setUploadStatus('Reading file with AI...')
     const results = await parseFileWithAI(file, mode)
-    if (!results.length) { setUploadStatus('Could not extract data.'); return }
+    if (!results.length) { setUploadStatus('Could not extract data. Try a different file format.'); return }
     setUploadPreview(results)
     setUploadStatus(`Found ${results.length} item(s) — review and confirm`)
   }
@@ -431,11 +625,24 @@ export default function ManaSocialApp() {
   const confirmUpload = async () => {
     setUploadStatus('Saving...')
     if (uploadMode === 'sales') {
-      const inserts = uploadPreview.map(r => ({ platform: r.platform || 'other', amount: parseFloat(r.amount) || 0, fees: parseFloat(r.fees) || 0, shipping: parseFloat(r.shipping) || 0, sale_date: r.sale_date || r.date || new Date().toISOString().split('T')[0], period_start: r.period_start || r.sale_date || new Date().toISOString().split('T')[0], period_end: r.period_end || r.sale_date || new Date().toISOString().split('T')[0], entity: r.entity || getEntity(r.sale_date || new Date().toISOString().split('T')[0]), net_sales: parseFloat(r.net_sales) || 0, num_orders: parseInt(r.num_orders) || 0 }))
+      const inserts = uploadPreview.map(r => ({ platform: r.platform || 'other', amount: parseFloat(r.amount) || 0, fees: parseFloat(r.fees) || 0, shipping: parseFloat(r.shipping) || 0, sale_date: r.sale_date || r.date || new Date().toISOString().split('T')[0], period_start: r.period_start || r.sale_date || new Date().toISOString().split('T')[0], period_end: r.period_end || r.sale_date || new Date().toISOString().split('T')[0], entity: r.entity || getEntity(r.sale_date || new Date().toISOString().split('T')[0]), net_sales: parseFloat(r.net_sales) || 0, num_orders: parseInt(r.num_orders) || 1 }))
       const { error } = await supabase.from('sales').insert(inserts)
       if (error) { setUploadStatus('Error: ' + error.message); return }
+    } else if (uploadMode === 'amazon') {
+      const expenseRows = uploadPreview.filter(r => !r.isInventory)
+      const inventoryRows = uploadPreview.filter(r => r.isInventory)
+      if (expenseRows.length > 0) {
+        const expInserts = expenseRows.map(r => ({ category: r.expCat, cost: r.cost, purchase_date: r.dateStr, notes: r.title?.slice(0, 100), entity: r.entity, user_name: r.userName, paid_by_company: true }))
+        const { error } = await supabase.from('expenses').insert(expInserts)
+        if (error) { setUploadStatus('Error saving expenses: ' + error.message); return }
+      }
+      if (inventoryRows.length > 0) {
+        const invInserts = inventoryRows.map(r => ({ date: r.dateStr, inventory_type: 'sealed', description: r.title?.slice(0, 100), set_name: null, purchase_price: r.cost, quantity: 1, card_count: 0, cards_per_box: 0, total_cost: r.cost, cost_per_unit: r.cost, total_units: 1, sold_units: 0, est_sell_value: 0, entity: r.entity }))
+        const { error } = await supabase.from('cogs_inventory').insert(invInserts)
+        if (error) { setUploadStatus('Error saving inventory: ' + error.message); return }
+      }
     } else {
-      const inserts = uploadPreview.map(r => ({ category: r.category || 'Other', cost: parseFloat(r.cost) || 0, purchase_date: r.date || new Date().toISOString().split('T')[0], notes: r.notes || '', entity: getEntity(r.date || new Date().toISOString().split('T')[0]), user_name: 'Cam', paid_by_company: true }))
+      const inserts = uploadPreview.map(r => ({ category: r.category || 'Other', cost: parseFloat(r.cost) || 0, purchase_date: r.date || new Date().toISOString().split('T')[0], notes: r.notes || '', entity: getEntity(r.date || new Date().toISOString().split('T')[0]), user_name: r.user_name || 'Cam', paid_by_company: true }))
       const { error } = await supabase.from('expenses').insert(inserts)
       if (error) { setUploadStatus('Error: ' + error.message); return }
     }
@@ -450,7 +657,7 @@ export default function ManaSocialApp() {
       const data = await res.json()
       if (data.error) setSyncStatus('Error: ' + data.error)
       else { setSyncStatus(data.message || 'Synced'); fetchData() }
-    } catch { setSyncStatus('Sync failed') }
+    } catch { setSyncStatus('Sync failed — check API route') }
     setTimeout(() => setSyncStatus(''), 6000)
   }
 
@@ -461,11 +668,13 @@ export default function ManaSocialApp() {
     if (t === 'sales') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
       payload = { platform: formData.label, amount: Number(formData.amount), fees: Number(formData.fees || 0), shipping: Number(formData.shipping || 0), sale_date: formData.date, period_start: formData.date, period_end: formData.date, entity: getEntity(formData.date), net_sales: Number(formData.amount) - Number(formData.fees || 0), num_orders: editingItem.data?.num_orders ?? 1 }
-    } else if (t === 'collections') {
-      if (!formData.amount || !formData.label) return alert('Missing fields')
-      payload = { seller_name: formData.label, total_cost: Number(formData.amount), amount_paid: Number(formData.amountPaid || 0), notes: `Qty: ${formData.itemCount} | ${formData.notes}`, due_date: formData.date, entity: getEntity(formData.date) }
+    } else if (t === 'accounts_payable') {
+      if (!formData.apTotal || !formData.apVendor) return alert('Missing fields')
+      payload = { vendor_name: formData.apVendor, description: formData.label, invoice_date: formData.date, due_date: formData.apDue || formData.date, total_amount: Number(formData.apTotal), amount_paid: Number(formData.amountPaid || 0), entity: getEntity(formData.date), notes: formData.notes }
     } else if (t === 'expenses') {
       if (!formData.amount) return alert('Missing amount')
+      // Save AI correction for future auto-fill
+      if (formData.label) saveCorrection(formData.label, formData.category)
       payload = { category: formData.category, cost: Number(formData.amount), purchase_date: formData.date, notes: formData.label, entity: getEntity(formData.date), user_name: formData.userName || 'Cam', paid_by_company: formData.paidByCompany }
     } else if (t === 'payroll') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
@@ -475,7 +684,7 @@ export default function ManaSocialApp() {
       payload = { recipient: formData.label, amount: Number(formData.amount), notes: formData.notes, disbursement_date: formData.date }
     } else if (t === 'mileage_log') {
       if (!formData.miles || !formData.milePurpose) return alert('Missing fields')
-      payload = { date: formData.date, purpose: formData.milePurpose, from_location: formData.mileFrom, to_location: formData.mileTo, miles: parseFloat(formData.miles) || 0 }
+      payload = { date: formData.date, purpose: formData.milePurpose, from_location: formData.mileFrom, to_location: formData.mileTo, miles: parseFloat(formData.miles) || 0, user_name: formData.userName || 'Cam' }
     } else if (t === 'cogs_inventory') {
       if (!formData.cogsCost || !formData.label) return alert('Missing fields')
       const cost = parseFloat(formData.cogsCost) || 0, qty = parseInt(formData.cogsQty) || 1, totalCost = cost * qty
@@ -487,9 +696,9 @@ export default function ManaSocialApp() {
     } else if (t === 'bank_accounts') {
       if (!formData.bankBalance) return alert('Missing balance')
       payload = { bank_name: formData.bankName, account_type: formData.accountType, account_last4: formData.accountLast4, current_balance: Number(formData.bankBalance), as_of_date: formData.date, notes: formData.notes }
-    } else if (t === 'accounts_payable') {
-      if (!formData.apTotal || !formData.apVendor) return alert('Missing fields')
-      payload = { vendor_name: formData.apVendor, description: formData.label, invoice_date: formData.date, due_date: formData.apDue || formData.date, total_amount: Number(formData.apTotal), amount_paid: Number(formData.apPaid || 0), entity: getEntity(formData.date), notes: formData.notes }
+    } else if (t === 'supply_costs') {
+      if (!formData.supplyItem || !formData.supplyCost) return alert('Missing fields')
+      payload = { item_name: formData.supplyItem, unit_description: formData.supplyUnit || 'each', cost_per_unit: parseFloat(formData.supplyCost), effective_date: formData.date, notes: formData.notes }
     }
     if (editingItem.data?.id) {
       const { error } = await supabase.from(t).update(payload).eq('id', editingItem.data.id)
@@ -504,42 +713,110 @@ export default function ManaSocialApp() {
   const startEdit = (table: string, row: any) => {
     const pre: any = { ...emptyForm, date: row.sale_date || row.purchase_date || row.due_date || row.pay_date || row.disbursement_date || row.date || emptyForm.date }
     if (table === 'sales') { pre.label = row.platform; pre.amount = String(row.amount); pre.fees = String(row.fees || 0); pre.shipping = String(row.shipping || 0) }
-    else if (table === 'collections') { pre.label = row.seller_name; pre.amount = String(row.total_cost); pre.amountPaid = String(row.amount_paid || 0); pre.notes = row.notes || '' }
+    else if (table === 'accounts_payable') { pre.apVendor = row.vendor_name; pre.label = row.description || ''; pre.apTotal = String(row.total_amount); pre.amountPaid = String(row.amount_paid || 0); pre.apDue = row.due_date || ''; pre.notes = row.notes || '' }
     else if (table === 'expenses') { pre.label = row.notes || ''; pre.amount = String(row.cost); pre.category = row.category || 'Other'; pre.userName = row.user_name || 'Cam'; pre.paidByCompany = row.paid_by_company ?? true }
     else if (table === 'payroll') { pre.label = row.employee_name; pre.amount = String(row.amount); pre.hoursWorked = String(row.hours_worked || ''); pre.hourlyRate = String(row.hourly_rate || 16); pre.payPeriod = row.pay_period || '' }
     else if (table === 'disbursements') { pre.label = row.recipient; pre.amount = String(row.amount); pre.notes = row.notes || '' }
+    else if (table === 'mileage_log') { pre.milePurpose = row.purpose; pre.mileFrom = row.from_location; pre.mileTo = row.to_location; pre.miles = String(row.miles); pre.userName = row.user_name || 'Cam' }
     else if (table === 'assets') { pre.label = row.description; pre.amount = String(row.cost); pre.assetCategory = row.category || 'Equipment'; pre.assetLife = String(row.useful_life_yrs || 5); pre.notes = row.notes || ''; pre.userName = row.user_name || 'Cam' }
     else if (table === 'bank_accounts') { pre.bankName = row.bank_name; pre.accountType = row.account_type; pre.accountLast4 = row.account_last4 || ''; pre.bankBalance = String(row.current_balance || 0); pre.notes = row.notes || '' }
-    else if (table === 'accounts_payable') { pre.apVendor = row.vendor_name; pre.label = row.description || ''; pre.apTotal = String(row.total_amount); pre.apPaid = String(row.amount_paid || 0); pre.apDue = row.due_date || ''; pre.notes = row.notes || '' }
+    else if (table === 'supply_costs') { pre.supplyItem = row.item_name; pre.supplyUnit = row.unit_description; pre.supplyCost = String(row.cost_per_unit); pre.notes = row.notes || '' }
     setFormData(pre); setEditingItem({ table, data: row })
   }
 
-  const handleUpdatePaid = async (id: string, amount_paid: number) => { await supabase.from('collections').update({ amount_paid }).eq('id', id); fetchData() }
   const handleUpdateSold = async (id: string, sold_units: number) => { await supabase.from('cogs_inventory').update({ sold_units }).eq('id', id); fetchData() }
   const handleDelete = async (table: string, id: string) => { if (!confirm('Delete?')) return; await supabase.from(table).delete().eq('id', id); fetchData() }
   const signOut = async () => { await supabase.auth.signOut() }
 
+  // ─── Bulk Add Handler ─────────────────────────────────────────────────
+  const generateBulkDates = (): string[] => {
+    if (bulkDateMode === 'single') return [bulkDateFrom]
+    if (bulkDateMode === 'range') return getDatesInRange(bulkDateFrom, bulkDateTo)
+    if (bulkDateMode === 'week') return getWeekDates(bulkDateFrom)
+    if (bulkDateMode === 'month') return getMonthDates(bulkDateFrom)
+    return [bulkDateFrom]
+  }
+
+  const initBulkRows = () => {
+    const dates = generateBulkDates()
+    if (bulkTable === 'mileage_log') {
+      setBulkRows(dates.map(d => ({ date: d, purpose: 'USPS drop-off', from_location: 'Home', to_location: 'USPS Moreno Valley', miles: '3', user_name: bulkUser, selected: true })))
+    } else if (bulkTable === 'expenses') {
+      setBulkRows(dates.map(d => ({ date: d, category: 'Supplies & Packaging', notes: '', cost: '', user_name: bulkUser, selected: true })))
+    } else if (bulkTable === 'sales') {
+      setBulkRows(dates.map(d => ({ date: d, platform: '', amount: '', fees: '', shipping: '', selected: true })))
+    } else if (bulkTable === 'payroll') {
+      setBulkRows(dates.map(d => ({ date: d, employee_name: '', amount: '', hours_worked: '', hourly_rate: '16', selected: true })))
+    } else {
+      setBulkRows(dates.map(d => ({ date: d, selected: true })))
+    }
+  }
+
+  const saveBulkRows = async () => {
+    const selected = bulkRows.filter(r => r.selected)
+    if (!selected.length) return alert('No rows selected')
+    let inserts: any[] = []
+    if (bulkTable === 'mileage_log') {
+      inserts = selected.map(r => ({ date: r.date, purpose: r.purpose, from_location: r.from_location, to_location: r.to_location, miles: parseFloat(r.miles) || 0, user_name: r.user_name || 'Cam' }))
+    } else if (bulkTable === 'expenses') {
+      inserts = selected.filter(r => r.cost).map(r => ({ category: r.category, cost: parseFloat(r.cost), purchase_date: r.date, notes: r.notes, entity: getEntity(r.date), user_name: r.user_name || 'Cam', paid_by_company: true }))
+    } else if (bulkTable === 'sales') {
+      inserts = selected.filter(r => r.amount).map(r => ({ platform: r.platform || 'other', amount: parseFloat(r.amount) || 0, fees: parseFloat(r.fees) || 0, shipping: parseFloat(r.shipping) || 0, sale_date: r.date, period_start: r.date, period_end: r.date, entity: getEntity(r.date), net_sales: (parseFloat(r.amount) || 0) - (parseFloat(r.fees) || 0), num_orders: 1 }))
+    } else if (bulkTable === 'payroll') {
+      inserts = selected.filter(r => r.amount || (r.hours_worked && r.hourly_rate)).map(r => {
+        const amt = r.amount ? parseFloat(r.amount) : (parseFloat(r.hours_worked) * parseFloat(r.hourly_rate))
+        return { employee_name: r.employee_name, amount: amt, pay_date: r.date, hours_worked: parseFloat(r.hours_worked) || 0, hourly_rate: parseFloat(r.hourly_rate) || 16 }
+      })
+    }
+    if (!inserts.length) return alert('No valid rows to save')
+    const { error } = await supabase.from(bulkTable).insert(inserts)
+    if (error) return alert(error.message)
+    setBulkAddOpen(false); setBulkRows([]); fetchData()
+  }
+
+  // ─── Upload Preview ────────────────────────────────────────────────────
   const renderUploadPreview = () => {
     if (!uploadPreview.length && !uploadStatus) return null
     return (
       <div style={{ ...card, border: `1px solid ${C.teal}` }}>
         <div style={{ fontSize: '12px', fontWeight: 'bold', color: C.teal, marginBottom: '8px', textTransform: 'uppercase' }}>Import Preview</div>
         {uploadStatus && <div style={{ fontSize: '13px', color: C.muted, marginBottom: '8px' }}>{uploadStatus}</div>}
-        {uploadPreview.map((r, i) => (
-          <div key={i} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}`, fontSize: '13px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-              <span style={{ fontWeight: 700 }}>{r._displayLabel || (uploadMode === 'sales' ? r.platform : r.category)} · {r.sale_date || r.date || '?'}</span>
-              <span style={{ fontWeight: 700, color: uploadMode === 'sales' ? C.green : '#ef4444' }}>{fmt(uploadMode === 'sales' ? (r.amount || 0) : -(r.cost || 0))}</span>
-            </div>
-            {uploadMode === 'sales' && r.fees != null && (
-              <div style={{ fontSize: '12px', color: C.muted, display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <span>Gross: {fmt(r.amount || 0)}</span><span>Fees: {fmt(r.fees || 0)}</span>
-                <span>Shipping: {fmt(r.shipping || 0)}</span><span>Net: {fmt(r.net_sales || 0)}</span>
-                {r.entity && <span style={{ color: r.entity === 'llc' ? C.teal : C.gold }}>{r.entity === 'llc' ? 'LLC' : 'Sole Prop'}</span>}
+        {uploadMode === 'amazon' ? (
+          <div>
+            {uploadPreview.map((r, i) => (
+              <div key={i} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}`, fontSize: '13px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ fontWeight: 700, color: r.isInventory ? C.purple : C.text, flex: 1, paddingRight: '8px', fontSize: '12px' }}>{r.title?.slice(0, 50)}</span>
+                  <span style={{ fontWeight: 700, color: '#ef4444', flexShrink: 0 }}>{fmt(-r.cost)}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select value={r.expCat} onChange={e => { const updated = [...uploadPreview]; updated[i] = { ...r, expCat: e.target.value, isInventory: e.target.value === 'Inventory Purchase' }; saveCorrection(r.title, e.target.value); setUploadPreview(updated) }} style={{ ...inp, padding: '4px 8px', fontSize: '12px', width: 'auto', flex: 1 }}>
+                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    <option value="Inventory Purchase">Inventory Purchase</option>
+                  </select>
+                  <span style={{ fontSize: '11px', color: C.muted, flexShrink: 0 }}>{r.dateStr} · {r.userName}</span>
+                </div>
               </div>
-            )}
+            ))}
           </div>
-        ))}
+        ) : (
+          uploadPreview.map((r, i) => (
+            <div key={i} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}`, fontSize: '13px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span style={{ fontWeight: 700 }}>{r._displayLabel || (uploadMode === 'sales' ? r.platform : r.category)} · {r.sale_date || r.date || '?'}</span>
+                <span style={{ fontWeight: 700, color: uploadMode === 'sales' ? C.green : '#ef4444' }}>{fmt(uploadMode === 'sales' ? (r.amount || 0) : -(r.cost || 0))}</span>
+              </div>
+              {uploadMode === 'sales' && r.fees != null && (
+                <div style={{ fontSize: '12px', color: C.muted, display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <span>Gross: {fmt(r.amount || 0)}</span><span>Fees: {fmt(r.fees || 0)}</span>
+                  <span>Ship: {fmt(r.shipping || 0)}</span><span>Net: {fmt(r.net_sales || 0)}</span>
+                  {r.entity && <span style={{ color: r.entity === 'llc' ? C.teal : C.gold }}>{r.entity === 'llc' ? 'LLC' : 'Sole Prop'}</span>}
+                  {r.num_orders > 0 && <span>{r.num_orders} orders</span>}
+                </div>
+              )}
+            </div>
+          ))
+        )}
         {uploadPreview.length > 0 && (
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
             <button onClick={confirmUpload} style={{ padding: '10px 18px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Save all</button>
@@ -550,6 +827,7 @@ export default function ManaSocialApp() {
     )
   }
 
+  // ─── Form ─────────────────────────────────────────────────────────────
   const renderForm = () => {
     if (!editingItem) return null
     const t = editingItem.table
@@ -567,11 +845,19 @@ export default function ManaSocialApp() {
         </div>
         <div style={{ display: 'grid', gap: '10px' }}>
           {t !== 'bank_accounts' && <div><span style={lbl}>Date</span><input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} style={inp} /></div>}
-          {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable'].includes(t) && (
+          {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable','supply_costs'].includes(t) && (
             <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', fontFamily: FONT, background: getEntity(formData.date) === 'sole_prop' ? 'rgba(240,192,64,0.12)' : 'rgba(45,191,184,0.1)', color: getEntity(formData.date) === 'sole_prop' ? '#7A5A00' : '#1A7A75' }}>
               {getEntity(formData.date) === 'sole_prop' ? 'Camera Pho (Sole Prop)' : 'Mana Social LLC'}
             </div>
           )}
+
+          {t === 'supply_costs' && <>
+            <div><span style={lbl}>Supply Item Name</span><input value={formData.supplyItem} onChange={e => setFormData({ ...formData, supplyItem: e.target.value })} placeholder="e.g. Penny Sleeve, Forever Stamp, Bubble Mailer 4x8" style={inp} /></div>
+            <div><span style={lbl}>Unit Description</span><input value={formData.supplyUnit} onChange={e => setFormData({ ...formData, supplyUnit: e.target.value })} placeholder="e.g. per sleeve, per stamp, per pack of 100" style={inp} /></div>
+            <div><span style={lbl}>Cost Per Unit ($)</span><input type="number" step="0.0001" value={formData.supplyCost} onChange={e => setFormData({ ...formData, supplyCost: e.target.value })} placeholder="0.0100" style={inp} /></div>
+            <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Source, order #, etc." style={inp} /></div>
+          </>}
+
           {t === 'assets' && <>
             <div><span style={lbl}>Category</span>
               <select value={formData.assetCategory} onChange={e => setFormData({ ...formData, assetCategory: e.target.value, assetLife: String(USEFUL_LIFE[e.target.value] || 5) })} style={inp}>
@@ -591,9 +877,10 @@ export default function ManaSocialApp() {
                 </select>
               </div>
             </div>
-            {formData.amount && (() => { const cost = parseFloat(formData.amount)||0, life = parseInt(formData.assetLife)||5, sl = cost/life; return (<div style={{ padding:'10px',borderRadius:'8px',background:'rgba(45,191,184,0.08)',fontSize:'13px',color:'#1A7A75',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px' }}><span>Sec 179: <strong>{fmt(cost)}</strong></span><span>SL/yr: <strong>{fmt(sl)}</strong></span><span>Life: <strong>{life} yrs</strong></span><span>Yr 1 book: <strong>{fmt(cost-sl)}</strong></span></div>) })()}
+            {formData.amount && (() => { const cost = parseFloat(formData.amount)||0, life = parseInt(formData.assetLife)||5, sl = cost/life; return (<div style={{ padding:'10px',borderRadius:'8px',background:'rgba(45,191,184,0.08)',fontSize:'13px',color:'#1A7A75',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px' }}><span>Sec 179: <strong>{fmt(cost)}</strong></span><span>SL/yr: <strong>{fmt(sl)}</strong></span></div>) })()}
             <div><span style={lbl}>Notes / PO#</span><input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Order number or notes" style={inp} /></div>
           </>}
+
           {t === 'bank_accounts' && <>
             <div><span style={lbl}>Bank</span>
               <select value={formData.bankName} onChange={e => setFormData({ ...formData, bankName: e.target.value })} style={inp}>
@@ -612,28 +899,38 @@ export default function ManaSocialApp() {
             <div><span style={lbl}>Current Balance ($)</span><input type="number" step="0.01" value={formData.bankBalance} onChange={e => setFormData({ ...formData, bankBalance: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="e.g. Chase Ink Business" style={inp} /></div>
           </>}
+
           {t === 'accounts_payable' && <>
             <div><span style={lbl}>Vendor / Seller Name</span><input value={formData.apVendor} onChange={e => setFormData({ ...formData, apVendor: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} /></div>
-            <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => setFormData({ ...formData, label: e.target.value })} placeholder="e.g. Collection purchase" style={inp} /></div>
+            <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => setFormData({ ...formData, label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 cards" style={inp} /></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} style={inp} /></div>
               <div><span style={lbl}>Due Date</span><input type="date" value={formData.apDue} onChange={e => setFormData({ ...formData, apDue: e.target.value })} style={inp} /></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => setFormData({ ...formData, apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
-              <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.apPaid} onChange={e => setFormData({ ...formData, apPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
+              <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => setFormData({ ...formData, amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
             </div>
             <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Payment terms, context" style={{ ...inp, height: '60px', resize: 'vertical' }} /></div>
           </>}
+
           {t === 'mileage_log' && <>
-            <div><span style={lbl}>Business Purpose</span><input value={formData.milePurpose} onChange={e => setFormData({ ...formData, milePurpose: e.target.value })} placeholder="e.g. USPS drop-off, card show" style={inp} /></div>
+            <div><span style={lbl}>Business Purpose</span><input value={formData.milePurpose} onChange={e => setFormData({ ...formData, milePurpose: e.target.value })} placeholder="e.g. USPS drop-off" style={inp} /></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div><span style={lbl}>From</span><input value={formData.mileFrom} onChange={e => setFormData({ ...formData, mileFrom: e.target.value })} placeholder="Home" style={inp} /></div>
               <div><span style={lbl}>To</span><input value={formData.mileTo} onChange={e => setFormData({ ...formData, mileTo: e.target.value })} placeholder="USPS Moreno Valley" style={inp} /></div>
             </div>
-            <div><span style={lbl}>Miles</span><input type="number" step="0.1" value={formData.miles} onChange={e => setFormData({ ...formData, miles: e.target.value })} placeholder="0.0" style={inp} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div><span style={lbl}>Miles</span><input type="number" step="0.1" value={formData.miles} onChange={e => setFormData({ ...formData, miles: e.target.value })} placeholder="0.0" style={inp} /></div>
+              <div><span style={lbl}>Logged By</span>
+                <select value={formData.userName} onChange={e => setFormData({ ...formData, userName: e.target.value })} style={inp}>
+                  <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
+                </select>
+              </div>
+            </div>
             {formData.miles && <div style={{ padding: '10px', borderRadius: '8px', background: 'rgba(45,191,184,0.08)', fontSize: '14px', color: '#1A7A75' }}>Deduction: <strong>{fmt(parseFloat(formData.miles)*MILEAGE_RATE)}</strong></div>}
           </>}
+
           {t === 'cogs_inventory' && <>
             <div><span style={lbl}>Inventory Type</span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
@@ -660,7 +957,8 @@ export default function ManaSocialApp() {
             <div><span style={lbl}>Est. Sell Value ($)</span><input type="number" step="0.01" value={formData.cogsEstValue} onChange={e => setFormData({ ...formData, cogsEstValue: e.target.value })} placeholder="0.00" style={inp} /></div>
             {formData.cogsCost && (() => { const p = cogsPreview(); return (<div style={{ padding:'10px',borderRadius:'8px',background:'rgba(45,191,184,0.08)',fontSize:'14px',color:'#1A7A75',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px' }}><span>Total: <strong>{fmt(p.total)}</strong></span><span>Units: <strong>{p.units.toLocaleString()}</strong></span><span>Per unit: <strong>${p.cpu.toFixed(3)}</strong></span>{formData.cogsEstValue&&<span>Margin: <strong>{p.total>0?(((parseFloat(formData.cogsEstValue)-p.total)/p.total)*100).toFixed(1)+'%':'—'}</strong></span>}</div>) })()}
           </>}
-          {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable'].includes(t) && <>
+
+          {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable','supply_costs'].includes(t) && <>
             {t==='expenses' ? <>
               <div><span style={lbl}>Category</span>
                 <select value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value })} style={inp}>
@@ -680,12 +978,8 @@ export default function ManaSocialApp() {
                   </select>
                 </div>
               </div>
-            </> : <div><span style={lbl}>{t==='sales'?'Platform':t==='collections'?'Seller Name':t==='payroll'?'Employee':'Recipient'}</span><input value={formData.label} onChange={e => setFormData({ ...formData, label: e.target.value })} placeholder="..." style={inp} /></div>}
+            </> : <div><span style={lbl}>{t==='sales'?'Platform':t==='payroll'?'Employee':'Recipient'}</span><input value={formData.label} onChange={e => setFormData({ ...formData, label: e.target.value })} placeholder="..." style={inp} /></div>}
             <div><span style={lbl}>Amount ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-            {t==='collections' && <>
-              <div><span style={lbl}>Amount Paid So Far ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => setFormData({ ...formData, amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
-              <div><span style={lbl}>Card Count</span><input type="number" value={formData.itemCount} onChange={e => setFormData({ ...formData, itemCount: e.target.value })} placeholder="# of cards" style={inp} /></div>
-            </>}
             {t==='sales' && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div><span style={lbl}>Fees ($)</span><input type="number" step="0.01" value={formData.fees} onChange={e => setFormData({ ...formData, fees: e.target.value })} placeholder="0.00" style={inp} /></div>
               <div><span style={lbl}>Shipping Cost ($)</span><input type="number" step="0.01" value={formData.shipping} onChange={e => setFormData({ ...formData, shipping: e.target.value })} placeholder="0.00" style={inp} /></div>
@@ -701,8 +995,9 @@ export default function ManaSocialApp() {
                 <div><span style={lbl}>Roth IRA Contributed ($)</span><input type="number" step="0.01" value={formData.rothContributed} onChange={e => setFormData({ ...formData, rothContributed: e.target.value })} placeholder="0.00" style={inp} /></div>
               </div>
             </>}
-            {['collections','disbursements'].includes(t) && <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>}
+            {t==='disbursements' && <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>}
           </>}
+
           <button onClick={handleSave} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '16px', borderRadius: '12px', fontWeight: 900, border: 'none', fontSize: '16px', cursor: 'pointer', marginTop: '4px', fontFamily: FONT }}>
             {isEditing ? 'UPDATE RECORD' : 'SAVE RECORD'}
           </button>
@@ -711,6 +1006,7 @@ export default function ManaSocialApp() {
     )
   }
 
+  // ─── Accounting components ─────────────────────────────────────────────
   const PLRow = ({ label, value, indent = false, bold = false, isNegative = false, showDrilldown = false, drillId = '' }: any) => (
     <div onClick={showDrilldown ? () => setAcctDrilldown(acctDrilldown === drillId ? null : drillId) : undefined}
       style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${bold ? '12px' : '8px'} 0`, borderBottom: `1px solid ${C.border}`, paddingLeft: indent ? '16px' : '0', cursor: showDrilldown ? 'pointer' : 'default', background: showDrilldown && acctDrilldown === drillId ? 'rgba(45,191,184,0.04)' : 'transparent' }}>
@@ -722,7 +1018,6 @@ export default function ManaSocialApp() {
       </span>
     </div>
   )
-
   const DD = ({ children }: any) => <div style={{ background: '#F5F6FA', borderRadius: '8px', padding: '10px', marginBottom: '4px' }}>{children}</div>
   const DDRow = ({ label, value, neg = false }: any) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '4px 0', borderBottom: `1px solid ${C.border}` }}>
@@ -731,6 +1026,87 @@ export default function ManaSocialApp() {
     </div>
   )
 
+  // ─── Bulk Add Modal ────────────────────────────────────────────────────
+  const renderBulkModal = () => {
+    if (!bulkAddOpen) return null
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.92)', display: 'flex', alignItems: 'flex-end', zIndex: 2000, fontFamily: FONT }}>
+        <div style={{ background: C.white, width: '100%', borderRadius: '20px 20px 0 0', padding: '24px', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h2 style={{ fontWeight: 900, color: C.navy, fontSize: '17px' }}>BULK ADD</h2>
+            <button onClick={() => { setBulkAddOpen(false); setBulkRows([]) }} style={{ background: 'none', border: 'none', fontSize: '24px', color: C.muted, cursor: 'pointer' }}>×</button>
+          </div>
+          <div style={{ display: 'grid', gap: '10px', marginBottom: '16px' }}>
+            <div><span style={lbl}>Record Type</span>
+              <select value={bulkTable} onChange={e => setBulkTable(e.target.value)} style={inp}>
+                <option value="mileage_log">Mileage</option>
+                <option value="expenses">Expenses</option>
+                <option value="sales">Sales</option>
+                <option value="payroll">Payroll</option>
+              </select>
+            </div>
+            <div><span style={lbl}>Logged By</span>
+              <select value={bulkUser} onChange={e => setBulkUser(e.target.value)} style={inp}>
+                <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
+              </select>
+            </div>
+            <div><span style={lbl}>Date Selection</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '6px', marginBottom: '8px' }}>
+                {(['single','range','week','month'] as const).map(m => (
+                  <button key={m} onClick={() => setBulkDateMode(m)} style={{ padding: '8px 4px', borderRadius: '8px', border: `1px solid ${bulkDateMode===m?C.teal:C.border}`, background: bulkDateMode===m?'rgba(45,191,184,0.1)':'#F5F6FA', fontSize: '12px', fontWeight: bulkDateMode===m?'bold':'normal', cursor: 'pointer', color: bulkDateMode===m?'#1A7A75':C.text, fontFamily: FONT, textTransform: 'capitalize' }}>{m}</button>
+                ))}
+              </div>
+              {bulkDateMode === 'single' && <input type="date" value={bulkDateFrom} onChange={e => setBulkDateFrom(e.target.value)} style={inp} />}
+              {bulkDateMode === 'range' && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div><span style={lbl}>From</span><input type="date" value={bulkDateFrom} onChange={e => setBulkDateFrom(e.target.value)} style={inp} /></div>
+                <div><span style={lbl}>To</span><input type="date" value={bulkDateTo} onChange={e => setBulkDateTo(e.target.value)} style={inp} /></div>
+              </div>}
+              {(bulkDateMode === 'week' || bulkDateMode === 'month') && <div><span style={lbl}>Any date in the {bulkDateMode}</span><input type="date" value={bulkDateFrom} onChange={e => setBulkDateFrom(e.target.value)} style={inp} /></div>}
+            </div>
+            <button onClick={initBulkRows} style={{ padding: '12px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Generate Rows</button>
+          </div>
+
+          {bulkRows.length > 0 && <>
+            <div style={{ fontSize: '12px', color: C.muted, marginBottom: '8px' }}>Check/uncheck rows to include. Edit values as needed.</div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+              <button onClick={() => setBulkRows(bulkRows.map(r => ({ ...r, selected: true })))} style={editBtn}>Select All</button>
+              <button onClick={() => setBulkRows(bulkRows.map(r => ({ ...r, selected: false })))} style={editBtn}>Deselect All</button>
+              {bulkTable === 'mileage_log' && <button onClick={() => setBulkRows(bulkRows.filter(r => { const d = new Date(r.date).getDay(); return d !== 0 && d !== 6 }).map(r => ({ ...r, selected: true })).concat(bulkRows.filter(r => { const d = new Date(r.date).getDay(); return d === 0 || d === 6 }).map(r => ({ ...r, selected: false }))))} style={editBtn}>Weekdays Only</button>}
+            </div>
+            {bulkRows.map((row, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
+                <input type="checkbox" checked={row.selected} onChange={e => { const updated = [...bulkRows]; updated[i].selected = e.target.checked; setBulkRows(updated) }} style={{ width: '18px', height: '18px', flexShrink: 0 }} />
+                <span style={{ fontSize: '12px', color: C.muted, minWidth: '70px' }}>{row.date} {new Date(row.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short'})}</span>
+                {bulkTable === 'mileage_log' && <>
+                  <input value={row.purpose} onChange={e => { const u=[...bulkRows]; u[i].purpose=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', flex: 2 }} placeholder="Purpose" />
+                  <input type="number" step="0.1" value={row.miles} onChange={e => { const u=[...bulkRows]; u[i].miles=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', width: '60px', flex: 0 }} placeholder="mi" />
+                </>}
+                {bulkTable === 'expenses' && <>
+                  <select value={row.category} onChange={e => { const u=[...bulkRows]; u[i].category=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', flex: 2 }}>
+                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input type="number" step="0.01" value={row.cost} onChange={e => { const u=[...bulkRows]; u[i].cost=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', width: '80px', flex: 0 }} placeholder="$" />
+                </>}
+                {bulkTable === 'sales' && <>
+                  <input value={row.platform} onChange={e => { const u=[...bulkRows]; u[i].platform=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', flex: 1 }} placeholder="Platform" />
+                  <input type="number" step="0.01" value={row.amount} onChange={e => { const u=[...bulkRows]; u[i].amount=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', width: '80px', flex: 0 }} placeholder="$" />
+                </>}
+                {bulkTable === 'payroll' && <>
+                  <input value={row.employee_name} onChange={e => { const u=[...bulkRows]; u[i].employee_name=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', flex: 1 }} placeholder="Employee" />
+                  <input type="number" step="0.5" value={row.hours_worked} onChange={e => { const u=[...bulkRows]; u[i].hours_worked=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', width: '60px', flex: 0 }} placeholder="hrs" />
+                </>}
+              </div>
+            ))}
+            <button onClick={saveBulkRows} style={{ width: '100%', marginTop: '16px', padding: '14px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, cursor: 'pointer', fontSize: '15px', fontFamily: FONT }}>
+              Save {bulkRows.filter(r=>r.selected).length} Records
+            </button>
+          </>}
+        </div>
+      </div>
+    )
+  }
+
+  // ─── Tabs ──────────────────────────────────────────────────────────────
   const renderTab = () => {
     switch (activeTab) {
       case 'summary': return (
@@ -747,9 +1123,9 @@ export default function ManaSocialApp() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
             {[{ label: 'Gross Margin %', value: pctFmt(grossMargin, netSalesAmt), color: grossMargin >= 0 ? C.teal : C.pink },
-              { label: 'Net Margin %',   value: pctFmt(netIncome, netSalesAmt),   color: netIncome >= 0 ? C.teal : C.pink },
-              { label: 'COGS Ratio',     value: pctFmt(cogsRecognized, netSalesAmt), color: C.purple },
-              { label: 'OpEx Ratio',     value: pctFmt(totalOpEx, netSalesAmt),   color: C.gold }
+              { label: 'Net Margin %', value: pctFmt(netIncome, netSalesAmt), color: netIncome >= 0 ? C.teal : C.pink },
+              { label: 'COGS Ratio', value: pctFmt(cogsRecognized, netSalesAmt), color: C.purple },
+              { label: 'OpEx Ratio', value: pctFmt(totalOpEx, netSalesAmt), color: C.gold }
             ].map(t => (
               <div key={t.label} style={{ ...card, padding: '14px', marginBottom: 0, textAlign: 'center' }}>
                 <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '6px' }}>{t.label}</div>
@@ -758,23 +1134,13 @@ export default function ManaSocialApp() {
             ))}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-            {[['Selling Fees', fmt(-totalPlatformFees)], ['Op. Expenses', fmt(-opExpenses)], ['Inventory A/P', fmt(-inventoryCosts)], ['Payroll', fmt(-staffingCosts)]].map(([l, v]) => (
+            {[['Selling Fees', fmt(-totalPlatformFees)], ['Op. Expenses', fmt(-opExpenses)], ['Accounts Payable', fmt(-totalAPOwed)], ['Payroll', fmt(-staffingCosts)]].map(([l, v]) => (
               <div key={String(l)} style={{ ...card, padding: '14px', marginBottom: 0 }}>
                 <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px' }}>{l}</div>
                 <div style={{ fontSize: '20px', fontWeight: 700, color: '#fda4af' }}>{v}</div>
               </div>
             ))}
           </div>
-          {totalOwed > 0 && (
-            <div style={{ ...card, background: 'rgba(240,192,64,0.08)', border: '1px solid rgba(240,192,64,0.3)' }}>
-              <div style={{ fontSize: '11px', color: '#7A5A00', fontWeight: 'bold', letterSpacing: '0.05em', marginBottom: '8px' }}>OUTSTANDING COLLECTION BALANCE</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-                <div><div style={{ fontSize: '12px', color: C.muted }}>Total</div><div style={{ fontSize: '20px', fontWeight: 700 }}>{fmt(inventoryCosts)}</div></div>
-                <div><div style={{ fontSize: '12px', color: C.muted }}>Paid</div><div style={{ fontSize: '20px', fontWeight: 700, color: C.teal }}>{fmt(totalPaid)}</div></div>
-                <div><div style={{ fontSize: '12px', color: C.muted }}>Remaining</div><div style={{ fontSize: '20px', fontWeight: 700, color: C.pink }}>{fmt(totalOwed)}</div></div>
-              </div>
-            </div>
-          )}
           <div style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div><div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>SOLE PROP</div><div style={{ fontSize: '14px', fontWeight: 700, color: C.gold }}>Jan 1 – Mar 17</div></div>
             <div style={{ color: C.border, fontSize: '20px' }}>→</div>
@@ -796,7 +1162,7 @@ export default function ManaSocialApp() {
               <button onClick={() => salesFileRef.current?.click()} style={{ padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: '#F5F6FA', fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload file</button>
               <button onClick={syncManaPool} style={{ padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>Sync ManaPool</button>
             </div>
-            <input ref={salesFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" capture="environment" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'sales'); e.target.value = '' }} />
+            <input ref={salesFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'sales'); e.target.value = '' }} />
             <div style={{ fontSize: '12px', color: C.muted }}>TCGplayer .xlsx · eBay .csv · ManaPool .csv · photos · PDFs</div>
             {syncStatus && <div style={{ marginTop: '8px', fontSize: '13px', color: C.teal }}>{syncStatus}</div>}
           </div>
@@ -825,42 +1191,114 @@ export default function ManaSocialApp() {
         <div>
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL EXPENSES</div>
-            <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(opExpenses + inventoryCosts)}</div>
+            <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(opExpenses + totalAPOwed)}</div>
           </div>
+
+          {/* Import */}
           <div style={{ ...card, padding: '14px' }}>
             <span style={secHdr}>IMPORT EXPENSES</span>
-            <button onClick={() => expFileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: '#F5F6FA', fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload receipt / file / photo</button>
-            <input ref={expFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" capture="environment" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'expenses'); e.target.value = '' }} />
-            <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Photo a receipt or upload CSV/PDF — AI extracts and categorizes</div>
+            <button onClick={() => expFileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: '#F5F6FA', fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload receipt / Amazon CSV / photo</button>
+            <input ref={expFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'expenses'); e.target.value = '' }} />
+            <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Amazon orders .csv · receipts · PDFs — AI auto-categorizes. Manual edits are remembered.</div>
           </div>
           {renderUploadPreview()}
-          {totalOwed > 0 && (
+
+          {/* Supply Cost Tracker */}
+          <div style={{ ...card, border: `1px solid rgba(107,63,160,0.25)` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ ...secHdr, marginBottom: 0, color: C.purple }}>SUPPLY COST TRACKER</span>
+              <button onClick={() => setEditingItem({ table: 'supply_costs' })} style={{ background: C.purple, color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Add</button>
+            </div>
+            {uniqueSupplyItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '16px', color: C.muted, fontSize: '13px' }}>No supply costs tracked yet. Add items to calculate shipping costs.</div>
+            ) : (
+              <div>
+                {uniqueSupplyItems.map(item => {
+                  const history = supplyCosts.filter(s => s.item_name === item).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
+                  const latest = history[0]
+                  return (
+                    <div key={item} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '14px' }}>{item}</div>
+                          <div style={{ fontSize: '12px', color: C.muted }}>{latest.unit_description} · as of {latest.effective_date}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 700, color: C.purple, fontSize: '15px' }}>${parseFloat(latest.cost_per_unit).toFixed(4)}</div>
+                          {history.length > 1 && <div style={{ fontSize: '11px', color: C.muted }}>{history.length} price history</div>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                        <button onClick={() => startEdit('supply_costs', latest)} style={editBtn}>Update price</button>
+                        <button onClick={() => handleDelete('supply_costs', latest.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
+                      </div>
+                    </div>
+                  )
+                })}
+                {/* Shipping cost calculator */}
+                {uniqueSupplyItems.length > 0 && (
+                  <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(107,63,160,0.06)', borderRadius: '10px' }}>
+                    <div style={{ fontSize: '12px', color: C.purple, fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Shipping Cost Calculator</div>
+                    <div style={{ fontSize: '12px', color: C.muted, marginBottom: '8px' }}>Current cost per single card shipment using tracked supply prices:</div>
+                    {(() => {
+                      const items = ['Penny Sleeve', 'Semi-Rigid Card Saver', 'Team Bag', 'A6 Envelope', 'Forever Stamp', 'LetterTrack Pro']
+                      let total = 0
+                      const rows = items.map(item => {
+                        const cost = getLatestSupplyCost(item)
+                        total += cost
+                        return { item, cost }
+                      }).filter(r => r.cost > 0)
+                      return rows.length > 0 ? (
+                        <div>
+                          {rows.map(r => (
+                            <div key={r.item} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '3px 0' }}>
+                              <span style={{ color: C.muted }}>{r.item}</span>
+                              <span>${r.cost.toFixed(4)}</span>
+                            </div>
+                          ))}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700, padding: '6px 0 0', borderTop: `1px solid ${C.border}`, marginTop: '4px' }}>
+                            <span>Total per shipment</span>
+                            <span style={{ color: C.purple }}>${total.toFixed(4)}</span>
+                          </div>
+                        </div>
+                      ) : <div style={{ fontSize: '12px', color: C.muted }}>Add supply costs above to see calculation</div>
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Accounts Payable */}
+          {accountsPayable.filter(a => Number(a.total_amount) - Number(a.amount_paid || 0) > 0).length > 0 && (
             <div style={{ ...card, background: 'rgba(240,192,64,0.08)', border: '1px solid rgba(240,192,64,0.3)', padding: '14px 16px' }}>
-              <div style={{ fontSize: '12px', color: '#7A5A00', fontWeight: 'bold', marginBottom: '10px' }}>COLLECTION PAYMENT TRACKER</div>
-              {collections.map(b => {
-                const paid = Number(b.amount_paid||0), owed = Number(b.total_cost)-paid
-                const p = Number(b.total_cost) > 0 ? (paid/Number(b.total_cost)*100) : 0
+              <div style={{ fontSize: '12px', color: '#7A5A00', fontWeight: 'bold', marginBottom: '10px' }}>ACCOUNTS PAYABLE — OPEN BALANCES</div>
+              {accountsPayable.filter(a => Number(a.total_amount) - Number(a.amount_paid || 0) > 0).map(b => {
+                const paid = Number(b.amount_paid || 0), owed = Number(b.total_amount) - paid
+                const p = Number(b.total_amount) > 0 ? (paid / Number(b.total_amount) * 100) : 0
                 return (
                   <div key={b.id} style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px solid rgba(240,192,64,0.2)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ fontWeight: 700, fontSize: '15px' }}>{b.seller_name}</span>
-                      <span style={{ fontSize: '14px', color: owed > 0 ? C.pink : C.teal, fontWeight: 700 }}>{owed > 0 ? `${fmt(owed)} left` : 'Paid off'}</span>
+                      <span style={{ fontWeight: 700, fontSize: '15px' }}>{b.vendor_name}</span>
+                      <span style={{ fontSize: '14px', color: C.pink, fontWeight: 700 }}>{fmt(owed)} left</span>
                     </div>
+                    {b.description && <div style={{ fontSize: '12px', color: C.muted, marginBottom: '4px' }}>{b.description}</div>}
                     <div style={{ height: '6px', background: 'rgba(27,42,74,0.1)', borderRadius: '3px', marginBottom: '6px' }}>
-                      <div style={{ height: '100%', width: `${Math.min(p,100)}%`, background: p>=100?C.teal:C.gold, borderRadius: '3px', transition: 'width 0.3s' }} />
+                      <div style={{ height: '100%', width: `${Math.min(p, 100)}%`, background: p >= 100 ? C.teal : C.gold, borderRadius: '3px', transition: 'width 0.3s' }} />
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: C.muted }}>
-                      <span>Paid: {fmt(paid)}</span><span>Total: {fmt(Number(b.total_cost))}</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: C.muted, marginBottom: '8px' }}>
+                      <span>Paid: {fmt(paid)}</span><span>Total: {fmt(Number(b.total_amount))}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                      <span style={{ fontSize: '13px', color: C.muted }}>Update paid:</span>
-                      <input type="number" step="0.01" min="0" max={b.total_cost} value={paid} onChange={e => handleUpdatePaid(b.id, parseFloat(e.target.value)||0)} style={{ ...inp, width: '110px', padding: '5px 8px', fontSize: '14px' }} />
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={() => startEdit('accounts_payable', b)} style={editBtn}>Update Payment</button>
+                      <button onClick={() => handleDelete('accounts_payable', b.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
                     </div>
                   </div>
                 )
               })}
             </div>
           )}
+
           {expenses.map(e => (
             <div key={e.id} style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
@@ -868,9 +1306,9 @@ export default function ManaSocialApp() {
                 {e.notes && <div style={{ fontSize: '13px', color: C.muted }}>{e.notes}</div>}
                 <div style={{ fontSize: '13px', color: C.muted }}>{e.purchase_date}</div>
                 <div style={{ display: 'flex', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
-                  {DEDUCTIBILITY[e.category] && <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', background: DEDUCTIBILITY[e.category].pct===100?'#E1F5EE':'#FEF3E2', color: DEDUCTIBILITY[e.category].pct===100?'#085041':'#7A5A00' }}>{DEDUCTIBILITY[e.category].label}</div>}
-                  <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', background: e.paid_by_company?'rgba(16,185,129,0.12)':'rgba(240,192,64,0.15)', color: e.paid_by_company?'#085041':'#7A5A00' }}>
-                    {e.user_name||'Cam'}{e.paid_by_company?' — LLC paid':' — personal funds'}
+                  {DEDUCTIBILITY[e.category] && <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', background: DEDUCTIBILITY[e.category].pct === 100 ? '#E1F5EE' : '#FEF3E2', color: DEDUCTIBILITY[e.category].pct === 100 ? '#085041' : '#7A5A00' }}>{DEDUCTIBILITY[e.category].label}</div>}
+                  <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', background: e.paid_by_company ? 'rgba(16,185,129,0.12)' : 'rgba(240,192,64,0.15)', color: e.paid_by_company ? '#085041' : '#7A5A00' }}>
+                    {e.user_name || 'Cam'}{e.paid_by_company ? ' — LLC paid' : ' — personal funds'}
                   </div>
                 </div>
               </div>
@@ -881,54 +1319,7 @@ export default function ManaSocialApp() {
               </div>
             </div>
           ))}
-          {collections.map(b => (
-            <div key={b.id} style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontWeight: 700, marginBottom: '2px', fontSize: '15px' }}>{b.seller_name} <span style={{ fontSize: '13px', color: C.muted, fontWeight: 'normal' }}>(Collection)</span></div>
-                {b.notes && <div style={{ fontSize: '13px', color: C.muted }}>{b.notes}</div>}
-                <div style={{ fontSize: '13px', color: C.muted }}>{b.due_date}</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 700, color: '#ef4444', fontSize: '17px' }}>{fmt(-Number(b.total_cost))}</span>
-                <button onClick={() => startEdit('collections', b)} style={editBtn}>Edit</button>
-                <button onClick={() => handleDelete('collections', b.id)} style={delBtn}>×</button>
-              </div>
-            </div>
-          ))}
-          {expenses.length===0&&collections.length===0 && <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No expenses this period</div>}
-        </div>
-      )
-
-      case 'cogs': return (
-        <div>
-          <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
-            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>INVENTORY PURCHASED</div>
-            <div style={{ fontSize: '30px', fontWeight: 900 }}>{fmt(cogsInventory.reduce((a,r)=>a+parseFloat(r.total_cost||0),0))}</div>
-            <div style={{ fontSize: '14px', color: '#fda4af', marginTop: '4px' }}>COGS recognized: {fmt(cogsRecognized)}</div>
-          </div>
-          {(() => { const ci=cogsInventory.filter(r=>['collection','booster_box','precon','singles'].includes(r.inventory_type)); const tC=ci.reduce((a,r)=>a+parseFloat(r.total_cost||0),0); const tU=ci.reduce((a,r)=>a+parseInt(r.total_units||0),0); return tU>0?(<div style={{...card,textAlign:'center',padding:'14px'}}><div style={{fontSize:'12px',color:C.muted,marginBottom:'4px'}}>BLENDED AVG COST / CARD</div><div style={{fontSize:'30px',fontWeight:900,color:C.purple}}>${(tC/tU).toFixed(3)}</div><div style={{fontSize:'13px',color:C.muted}}>{tU.toLocaleString()} cards · {fmt(tC)}</div></div>):null })()}
-          {cogsInventory.map(r => {
-            const sold=r.sold_units||0, ratio=r.total_units>0?Math.min(sold/r.total_units,1):0, recog=parseFloat(r.total_cost||0)*ratio
-            return (
-              <div key={r.id} style={card}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <div><div style={{ fontWeight: 700, fontSize: '15px' }}>{r.description}</div>{r.set_name&&<div style={{fontSize:'13px',color:C.muted}}>{r.set_name}</div>}<div style={{fontSize:'12px',color:C.muted}}>{r.date} · {r.inventory_type}</div></div>
-                  <div style={{ textAlign: 'right' }}><div style={{fontWeight:700,color:C.pink,fontSize:'16px'}}>{fmt(parseFloat(r.total_cost||0))}</div><div style={{fontSize:'12px',color:C.muted}}>${parseFloat(r.cost_per_unit||0).toFixed(3)}/unit</div></div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '13px', color: C.muted }}>Sold:</span>
-                  <input type="number" min="0" max={r.total_units} value={sold} onChange={e=>handleUpdateSold(r.id,parseInt(e.target.value)||0)} style={{...inp,width:'80px',padding:'4px 8px',fontSize:'14px',textAlign:'center'}} />
-                  <span style={{ fontSize: '13px', color: C.muted }}>/ {r.total_units?.toLocaleString()}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                  <span style={{color:C.pink}}>Recognized: {fmt(recog)}</span>
-                  <span style={{color:C.gold}}>Remaining: {fmt(parseFloat(r.total_cost||0)-recog)}</span>
-                </div>
-                <button onClick={()=>handleDelete('cogs_inventory',r.id)} style={{...editBtn,marginTop:'8px'}}>Delete</button>
-              </div>
-            )
-          })}
-          {cogsInventory.length===0 && <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No inventory entries yet</div>}
+          {expenses.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No expenses this period</div>}
         </div>
       )
 
@@ -937,116 +1328,108 @@ export default function ManaSocialApp() {
           <div style={{ padding: '8px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
             ⚖️ Accrual Method — revenue & expenses recognized in period earned/incurred
           </div>
-
-          {/* INCOME STATEMENT */}
           <div style={card}>
-            <span style={secHdr}>INCOME STATEMENT · {selectedMonth===0?selectedYear:new Date(selectedYear,selectedMonth-1).toLocaleString('default',{month:'long',year:'numeric'})}</span>
+            <span style={secHdr}>INCOME STATEMENT · {selectedMonth === 0 ? selectedYear : new Date(selectedYear, selectedMonth - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}</span>
             <PLRow label="Gross Revenue" value={gross} bold />
             <PLRow label="Less: Selling Fees & Commissions" value={totalPlatformFees} indent isNegative />
             <PLRow label="Less: Shipping Expense" value={totalShippingExpense} indent isNegative />
             <PLRow label="Net Sales" value={netSalesAmt} bold />
             <PLRow label="Cost of Goods Sold" value={cogsRecognized} isNegative showDrilldown drillId="cogs" />
-            {acctDrilldown==='cogs' && <DD>{cogsInventory.map(r=>{const ratio=r.total_units>0?Math.min((r.sold_units||0)/r.total_units,1):0;const recog=parseFloat(r.total_cost||0)*ratio;return recog>0?<DDRow key={r.id} label={r.description} value={recog} neg />:null})}</DD>}
-            <div style={{ display:'flex',justifyContent:'space-between',padding:'12px 0',borderBottom:`2px solid ${C.border}` }}>
-              <span style={{ fontSize:'16px',fontWeight:700,fontFamily:FONT }}>Gross Profit</span>
-              <span style={{ fontSize:'16px',fontWeight:900,color:grossMargin>=0?C.green:'#ef4444',fontFamily:FONT }}>{grossMargin<0?`(${fmt(Math.abs(grossMargin))})`:fmt(grossMargin)}</span>
+            {acctDrilldown === 'cogs' && <DD>{cogsInventory.map(r => { const ratio = r.total_units > 0 ? Math.min((r.sold_units || 0) / r.total_units, 1) : 0; const recog = parseFloat(r.total_cost || 0) * ratio; return recog > 0 ? <DDRow key={r.id} label={r.description} value={recog} neg /> : null })}</DD>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: `2px solid ${C.border}` }}>
+              <span style={{ fontSize: '16px', fontWeight: 700, fontFamily: FONT }}>Gross Profit</span>
+              <span style={{ fontSize: '16px', fontWeight: 900, color: grossMargin >= 0 ? C.green : '#ef4444', fontFamily: FONT }}>{grossMargin < 0 ? `(${fmt(Math.abs(grossMargin))})` : fmt(grossMargin)}</span>
             </div>
-            <div style={{ padding:'10px 0 4px',fontSize:'12px',color:C.muted,fontWeight:'bold',letterSpacing:'0.05em',textTransform:'uppercase',fontFamily:FONT }}>Operating Expenses</div>
-            {EXPENSE_CATEGORIES.filter(cat=>expByCategory[cat]>0).map(cat=>(
+            <div style={{ padding: '10px 0 4px', fontSize: '12px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.05em', textTransform: 'uppercase', fontFamily: FONT }}>Operating Expenses</div>
+            {EXPENSE_CATEGORIES.filter(cat => expByCategory[cat] > 0).map(cat => (
               <div key={cat}>
                 <PLRow label={cat} value={expByCategory[cat]} indent isNegative showDrilldown drillId={`exp_${cat}`} />
-                {acctDrilldown===`exp_${cat}` && <DD>{expenses.filter(e=>e.category===cat).map(e=><DDRow key={e.id} label={`${e.notes||e.purchase_date}${e.user_name?` · ${e.user_name}`:''}`} value={Number(e.cost)} neg />)}</DD>}
+                {acctDrilldown === `exp_${cat}` && <DD>{expenses.filter(e => e.category === cat).map(e => <DDRow key={e.id} label={`${e.notes || e.purchase_date}${e.user_name ? ` · ${e.user_name}` : ''}`} value={Number(e.cost)} neg />)}</DD>}
               </div>
             ))}
             <PLRow label="Salaries & Wages" value={staffingCosts} indent isNegative showDrilldown drillId="payroll_dd" />
-            {acctDrilldown==='payroll_dd' && <DD>{payroll.map(p=><DDRow key={p.id} label={`${p.employee_name} · ${p.pay_date}`} value={Number(p.amount)} neg />)}</DD>}
-            {totalDepreciation>0 && <PLRow label="Depreciation" value={totalDepreciation} indent isNegative showDrilldown drillId="dep_dd" />}
-            {acctDrilldown==='dep_dd' && <DD>{assets.map(a=>{const life=parseInt(a.useful_life_yrs)||USEFUL_LIFE[a.category]||5;const {slAnnual}=calcDepreciation(parseFloat(a.cost),life,a.purchase_date,selectedYear);return slAnnual>0?<DDRow key={a.id} label={`${a.description} (${life}yr SL)`} value={slAnnual} neg />:null})}</DD>}
+            {acctDrilldown === 'payroll_dd' && <DD>{payroll.map(p => <DDRow key={p.id} label={`${p.employee_name} · ${p.pay_date}`} value={Number(p.amount)} neg />)}</DD>}
+            {totalDepreciation > 0 && <PLRow label="Depreciation" value={totalDepreciation} indent isNegative showDrilldown drillId="dep_dd" />}
+            {acctDrilldown === 'dep_dd' && <DD>{assets.map(a => { const life = parseInt(a.useful_life_yrs) || USEFUL_LIFE[a.category] || 5; const { slAnnual } = calcDepreciation(parseFloat(a.cost), life, a.purchase_date, selectedYear); return slAnnual > 0 ? <DDRow key={a.id} label={`${a.description} (${life}yr SL)`} value={slAnnual} neg /> : null })}</DD>}
             <PLRow label="Total Operating Expenses" value={totalOpEx} bold isNegative />
-            <div style={{ display:'flex',justifyContent:'space-between',padding:'14px 0 0',marginTop:'4px' }}>
-              <span style={{ fontSize:'18px',fontWeight:900,fontFamily:FONT,textDecoration:'underline double' }}>Net Income</span>
-              <span style={{ fontSize:'18px',fontWeight:900,color:netIncome>=0?C.green:'#ef4444',fontFamily:FONT,textDecoration:'underline double' }}>{netIncome<0?`(${fmt(Math.abs(netIncome))})`:fmt(netIncome)}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: '4px' }}>
+              <span style={{ fontSize: '18px', fontWeight: 900, fontFamily: FONT, textDecoration: 'underline double' }}>Net Income</span>
+              <span style={{ fontSize: '18px', fontWeight: 900, color: netIncome >= 0 ? C.green : '#ef4444', fontFamily: FONT, textDecoration: 'underline double' }}>{netIncome < 0 ? `(${fmt(Math.abs(netIncome))})` : fmt(netIncome)}</span>
             </div>
           </div>
-
-          {/* BALANCE SHEET */}
           <div style={card}>
-            <span style={secHdr}>BALANCE SHEET — as of {new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>
-            <div style={{ fontSize:'13px',fontWeight:700,color:C.navy,padding:'6px 0',borderBottom:`1px solid ${C.border}`,marginBottom:'4px' }}>ASSETS</div>
-            <div style={{ fontSize:'12px',color:C.muted,fontWeight:'bold',padding:'6px 0 2px' }}>Current Assets</div>
+            <span style={secHdr}>BALANCE SHEET — as of {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: C.navy, padding: '6px 0', borderBottom: `1px solid ${C.border}`, marginBottom: '4px' }}>ASSETS</div>
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', padding: '6px 0 2px' }}>Current Assets</div>
             <PLRow label="Cash & Bank Accounts" value={totalCash} indent showDrilldown drillId="cash_dd" />
-            {acctDrilldown==='cash_dd' && <DD>
-              {bankAccounts.filter(b=>b.account_type!=='Credit').map(b=><DDRow key={b.id} label={`${b.bank_name} ${b.account_type}${b.account_last4?` ·${b.account_last4}`:''}`} value={Number(b.current_balance)} />)}
-              <div style={{textAlign:'right',marginTop:'6px'}}><button onClick={()=>setEditingItem({table:'bank_accounts'})} style={editBtn}>+ Update Balance</button></div>
+            {acctDrilldown === 'cash_dd' && <DD>
+              {bankAccounts.filter(b => b.account_type !== 'Credit').map(b => <DDRow key={b.id} label={`${b.bank_name} ${b.account_type}${b.account_last4 ? ` ·${b.account_last4}` : ''}`} value={Number(b.current_balance)} />)}
+              <div style={{ textAlign: 'right', marginTop: '6px' }}><button onClick={() => setEditingItem({ table: 'bank_accounts' })} style={editBtn}>+ Update Balance</button></div>
             </DD>}
-            <PLRow label="Accounts Receivable (Collections)" value={totalOwed} indent showDrilldown drillId="ar_dd" />
-            {acctDrilldown==='ar_dd' && <DD>{collections.filter(b=>Number(b.total_cost)-Number(b.amount_paid||0)>0).map(b=>{const owed=Number(b.total_cost)-Number(b.amount_paid||0);return <DDRow key={b.id} label={b.seller_name} value={owed} />})}</DD>}
-            <PLRow label="Inventory (ending)" value={endingInventory} indent />
+            <PLRow label="Accounts Receivable" value={0} indent />
+            <PLRow label="Inventory (ending)" value={endingInventory} indent showDrilldown drillId="inv_dd" />
+            {acctDrilldown === 'inv_dd' && <DD>{allCogsInventory.filter(r => (r.sold_units || 0) < (r.total_units || 0)).map(r => { const rem = parseFloat(r.total_cost || 0) * (1 - Math.min((r.sold_units || 0) / (r.total_units || 1), 1)); return <DDRow key={r.id} label={r.description} value={rem} /> })}</DD>}
             <PLRow label="Total Current Assets" value={totalCurrentAssets} bold />
-            <div style={{ fontSize:'12px',color:C.muted,fontWeight:'bold',padding:'10px 0 2px' }}>Fixed Assets</div>
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', padding: '10px 0 2px' }}>Fixed Assets</div>
             <PLRow label="Equipment & Furniture (cost)" value={totalAssetCost} indent showDrilldown drillId="fixed_dd" />
-            {acctDrilldown==='fixed_dd' && <DD>{assets.map(a=><DDRow key={a.id} label={`${a.description} (${a.purchase_date})`} value={parseFloat(a.cost)} />)}</DD>}
-            {totalAccumulatedDep>0 && <PLRow label="Less: Accumulated Depreciation" value={totalAccumulatedDep} indent isNegative />}
+            {acctDrilldown === 'fixed_dd' && <DD>{assets.map(a => <DDRow key={a.id} label={`${a.description} (${a.purchase_date})`} value={parseFloat(a.cost)} />)}</DD>}
+            {totalAccumulatedDep > 0 && <PLRow label="Less: Accumulated Depreciation" value={totalAccumulatedDep} indent isNegative />}
             <PLRow label="Net Fixed Assets" value={totalBookValue} bold />
-            <div style={{ display:'flex',justifyContent:'space-between',padding:'10px 0',borderTop:`2px solid ${C.border}`,marginTop:'4px' }}>
-              <span style={{ fontSize:'16px',fontWeight:900,fontFamily:FONT }}>Total Assets</span>
-              <span style={{ fontSize:'16px',fontWeight:900,color:C.navy,fontFamily:FONT }}>{fmt(totalAssets)}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: `2px solid ${C.border}`, marginTop: '4px' }}>
+              <span style={{ fontSize: '16px', fontWeight: 900, fontFamily: FONT }}>Total Assets</span>
+              <span style={{ fontSize: '16px', fontWeight: 900, color: C.navy, fontFamily: FONT }}>{fmt(totalAssets)}</span>
             </div>
-            <div style={{ fontSize:'13px',fontWeight:700,color:C.navy,padding:'10px 0 4px',borderBottom:`1px solid ${C.border}`,marginTop:'8px' }}>LIABILITIES & EQUITY</div>
-            <div style={{ fontSize:'12px',color:C.muted,fontWeight:'bold',padding:'6px 0 2px' }}>Current Liabilities</div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: C.navy, padding: '10px 0 4px', borderBottom: `1px solid ${C.border}`, marginTop: '8px' }}>LIABILITIES & EQUITY</div>
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', padding: '6px 0 2px' }}>Current Liabilities</div>
             <PLRow label="Accounts Payable" value={totalAPOwed} indent showDrilldown drillId="ap_dd" />
-            {acctDrilldown==='ap_dd' && <DD>
-              {accountsPayable.filter(a=>Number(a.total_amount)-Number(a.amount_paid||0)>0).map(a=>{const owed=Number(a.total_amount)-Number(a.amount_paid||0);return <DDRow key={a.id} label={`${a.vendor_name}${a.due_date?` · Due ${a.due_date}`:''}`} value={owed} neg />})}
-              <div style={{textAlign:'right',marginTop:'6px'}}><button onClick={()=>setEditingItem({table:'accounts_payable'})} style={editBtn}>+ Add A/P</button></div>
+            {acctDrilldown === 'ap_dd' && <DD>
+              {accountsPayable.filter(a => Number(a.total_amount) - Number(a.amount_paid || 0) > 0).map(a => { const owed = Number(a.total_amount) - Number(a.amount_paid || 0); return <DDRow key={a.id} label={`${a.vendor_name}${a.due_date ? ` · Due ${a.due_date}` : ''}`} value={owed} neg /> })}
+              <div style={{ textAlign: 'right', marginTop: '6px' }}><button onClick={() => setEditingItem({ table: 'accounts_payable' })} style={editBtn}>+ Add A/P</button></div>
             </DD>}
             <PLRow label="Credit Card Balances" value={totalCreditDebt} indent showDrilldown drillId="cc_dd" />
-            {acctDrilldown==='cc_dd' && <DD>{bankAccounts.filter(b=>b.account_type==='Credit').map(b=><DDRow key={b.id} label={`${b.bank_name}${b.notes?` — ${b.notes}`:''}`} value={Math.abs(Number(b.current_balance))} neg />)}</DD>}
+            {acctDrilldown === 'cc_dd' && <DD>{bankAccounts.filter(b => b.account_type === 'Credit').map(b => <DDRow key={b.id} label={`${b.bank_name}${b.notes ? ` — ${b.notes}` : ''}`} value={Math.abs(Number(b.current_balance))} neg />)}</DD>}
             <PLRow label="Total Liabilities" value={totalLiabilities} bold />
-            <div style={{ fontSize:'12px',color:C.muted,fontWeight:'bold',padding:'10px 0 2px' }}>Owner's Equity</div>
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', padding: '10px 0 2px' }}>Owner's Equity</div>
             <PLRow label="Retained Earnings / Net Income" value={netIncome} indent />
             <PLRow label="Total Owner's Equity" value={ownerEquity} bold />
-            <div style={{ display:'flex',justifyContent:'space-between',padding:'10px 0',borderTop:`2px solid ${C.border}`,marginTop:'4px' }}>
-              <span style={{ fontSize:'16px',fontWeight:900,fontFamily:FONT }}>Total Liabilities & Equity</span>
-              <span style={{ fontSize:'16px',fontWeight:900,color:C.navy,fontFamily:FONT }}>{fmt(totalLiabilities+ownerEquity)}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: `2px solid ${C.border}`, marginTop: '4px' }}>
+              <span style={{ fontSize: '16px', fontWeight: 900, fontFamily: FONT }}>Total Liabilities & Equity</span>
+              <span style={{ fontSize: '16px', fontWeight: 900, color: C.navy, fontFamily: FONT }}>{fmt(totalLiabilities + ownerEquity)}</span>
             </div>
           </div>
-
-          {/* INVENTORY FLOW */}
           <div style={card}>
             <span style={secHdr}>INVENTORY FLOW — {selectedYear}</span>
-            {inventoryFlow.length===0
-              ? <div style={{textAlign:'center',padding:'30px',color:C.muted,fontSize:'14px'}}>No inventory data yet</div>
+            {inventoryFlow.length === 0
+              ? <div style={{ textAlign: 'center', padding: '30px', color: C.muted, fontSize: '14px' }}>No inventory data yet</div>
               : <>
-                {inventoryFlow.map((row,i) => (
-                  <div key={i} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0',borderBottom:`1px solid ${C.border}` }}>
-                    <span style={{ fontSize:'14px',color:C.text,fontFamily:FONT,flex:1,paddingRight:'8px' }}>{row.label}</span>
-                    <span style={{ fontSize:'15px',fontWeight:700,fontFamily:FONT,minWidth:'90px',textAlign:'right',color:row.isAddition?C.green:'#ef4444' }}>
-                      {row.isAddition?'':'('}{fmt(row.amount)}{row.isAddition?'':')'}
+                {inventoryFlow.map((row, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
+                    <span style={{ fontSize: '14px', color: C.text, fontFamily: FONT, flex: 1, paddingRight: '8px' }}>{row.label}</span>
+                    <span style={{ fontSize: '15px', fontWeight: 700, fontFamily: FONT, minWidth: '90px', textAlign: 'right', color: row.isAddition ? C.green : '#ef4444' }}>
+                      {row.isAddition ? '' : '('}{fmt(row.amount)}{row.isAddition ? '' : ')'}
                     </span>
                   </div>
                 ))}
-                <div style={{ display:'flex',justifyContent:'space-between',padding:'12px 0 0',marginTop:'4px' }}>
-                  <span style={{ fontSize:'16px',fontWeight:700,fontFamily:FONT,textDecoration:'underline' }}>Ending Inventory (Balance Sheet)</span>
-                  <span style={{ fontSize:'16px',fontWeight:900,color:C.teal,fontFamily:FONT,textDecoration:'underline' }}>{fmt(endingBalance)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0 0', marginTop: '4px' }}>
+                  <span style={{ fontSize: '16px', fontWeight: 700, fontFamily: FONT, textDecoration: 'underline' }}>Ending Inventory (Balance Sheet)</span>
+                  <span style={{ fontSize: '16px', fontWeight: 900, color: C.teal, fontFamily: FONT, textDecoration: 'underline' }}>{fmt(endingBalance)}</span>
                 </div>
               </>}
           </div>
-
-          {/* ENTITY SPLIT */}
           <div style={card}>
             <span style={secHdr}>REVENUE BY ENTITY</span>
-            {(['sole_prop','llc'] as const).map(entity => {
-              const es=sales.filter(s=>s.entity===entity)
-              const eGross=es.reduce((a,r)=>a+Number(r.amount),0)
-              const eNet=es.reduce((a,r)=>a+Number(r.net_sales||r.amount),0)
-              if (eGross===0) return null
+            {(['sole_prop', 'llc'] as const).map(entity => {
+              const es = sales.filter(s => s.entity === entity)
+              const eGross = es.reduce((a, r) => a + Number(r.amount), 0)
+              const eNet = es.reduce((a, r) => a + Number(r.net_sales || r.amount), 0)
+              if (eGross === 0) return null
               return (
-                <div key={entity} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0',borderBottom:`1px solid ${C.border}` }}>
+                <div key={entity} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
                   <div>
-                    <div style={{ fontSize:'14px',fontWeight:700,color:entity==='llc'?C.teal:C.gold }}>{entity==='llc'?'Mana Social LLC':'Camera Pho (Sole Prop)'}</div>
-                    <div style={{ fontSize:'12px',color:C.muted }}>Net: {fmt(eNet)}</div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: entity === 'llc' ? C.teal : C.gold }}>{entity === 'llc' ? 'Mana Social LLC' : 'Camera Pho (Sole Prop)'}</div>
+                    <div style={{ fontSize: '12px', color: C.muted }}>Net: {fmt(eNet)}</div>
                   </div>
-                  <div style={{ fontSize:'17px',fontWeight:700,color:C.green }}>{fmt(eGross)}</div>
+                  <div style={{ fontSize: '17px', fontWeight: 700, color: C.green }}>{fmt(eGross)}</div>
                 </div>
               )
             })}
@@ -1060,8 +1443,7 @@ export default function ManaSocialApp() {
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL ASSETS (COST)</div>
             <div style={{ fontSize: '30px', fontWeight: 900 }}>{fmt(totalAssetCost)}</div>
             <div style={{ display: 'flex', gap: '16px', marginTop: '8px', fontSize: '13px', opacity: 0.7 }}>
-              <span>Book Value: {fmt(totalBookValue)}</span>
-              <span>Acc. Dep: {fmt(totalAccumulatedDep)}</span>
+              <span>Book Value: {fmt(totalBookValue)}</span><span>Acc. Dep: {fmt(totalAccumulatedDep)}</span>
             </div>
           </div>
           <div style={{ ...card, padding: '14px' }}>
@@ -1076,9 +1458,7 @@ export default function ManaSocialApp() {
                 <div style={{ fontSize: '22px', fontWeight: 900, color: C.teal }}>{fmt(totalAssetCost)}</div>
               </div>
             </div>
-            <div style={{ marginTop: '8px', fontSize: '12px', color: C.muted, padding: '8px', background: 'rgba(240,192,64,0.08)', borderRadius: '8px' }}>
-              Confirm with Kannie at tax time. Sec 179 = deduct full cost this year. Straight-line = spread over useful life.
-            </div>
+            <div style={{ marginTop: '8px', fontSize: '12px', color: C.muted, padding: '8px', background: 'rgba(240,192,64,0.08)', borderRadius: '8px' }}>Confirm with Kannie at tax time. Sec 179 = deduct full cost this year. Straight-line = spread over useful life.</div>
           </div>
           {ASSET_CATEGORIES.map(cat => {
             const catAssets = assets.filter(a => a.category === cat)
@@ -1087,21 +1467,15 @@ export default function ManaSocialApp() {
               <div key={cat} style={card}>
                 <span style={secHdr}>{cat}</span>
                 {catAssets.map(a => {
-                  const life = parseInt(a.useful_life_yrs)||USEFUL_LIFE[a.category]||5
-                  const { slAnnual, slAccumulated, slBookValue } = calcDepreciation(parseFloat(a.cost), life, a.purchase_date, selectedYear)
+                  const life = parseInt(a.useful_life_yrs) || USEFUL_LIFE[a.category] || 5
+                  const { slAnnual, slBookValue } = calcDepreciation(parseFloat(a.cost), life, a.purchase_date, selectedYear)
                   return (
                     <div key={a.id} style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: `1px solid ${C.border}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '15px' }}>{a.description}</div>
-                          <div style={{ fontSize: '12px', color: C.muted }}>{a.purchase_date} · {life}yr · {a.user_name}</div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontWeight: 700, fontSize: '15px' }}>{fmt(parseFloat(a.cost))}</div>
-                          <div style={{ fontSize: '12px', color: C.muted }}>Book: {fmt(slBookValue)}</div>
-                        </div>
+                        <div><div style={{ fontWeight: 700, fontSize: '15px' }}>{a.description}</div><div style={{ fontSize: '12px', color: C.muted }}>{a.purchase_date} · {life}yr · {a.user_name}</div></div>
+                        <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700, fontSize: '15px' }}>{fmt(parseFloat(a.cost))}</div><div style={{ fontSize: '12px', color: C.muted }}>Book: {fmt(slBookValue)}</div></div>
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '13px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                         <div style={{ padding: '6px 8px', background: 'rgba(107,63,160,0.08)', borderRadius: '6px' }}>
                           <div style={{ fontSize: '11px', color: C.muted }}>SL / year</div>
                           <div style={{ fontWeight: 700, color: C.purple }}>{fmt(slAnnual)}</div>
@@ -1136,18 +1510,18 @@ export default function ManaSocialApp() {
               <div style={{ marginBottom: '12px' }}>
                 <span style={lbl}>Home Office %</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input type="number" min="0" max="100" step="0.1" value={homeOfficePct} onChange={e => setHomeOfficePct(parseFloat(e.target.value)||0)} style={{ ...inp, width: '80px' }} />
+                  <input type="number" min="0" max="100" step="0.1" value={homeOfficePct} onChange={e => setHomeOfficePct(parseFloat(e.target.value) || 0)} style={{ ...inp, width: '80px' }} />
                   <span style={{ color: C.muted, fontSize: '14px' }}>% (e.g. 150/1500 sqft = 10%)</span>
                 </div>
               </div>
               <div style={{ marginBottom: '12px' }}>
                 <span style={lbl}>Internet & Phone Business Use %</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input type="number" min="0" max="100" step="1" value={internetPct} onChange={e => setInternetPct(parseFloat(e.target.value)||0)} style={{ ...inp, width: '80px' }} />
+                  <input type="number" min="0" max="100" step="1" value={internetPct} onChange={e => setInternetPct(parseFloat(e.target.value) || 0)} style={{ ...inp, width: '80px' }} />
                   <span style={{ color: C.muted, fontSize: '14px' }}>%</span>
                 </div>
               </div>
-              <div style={{ fontSize: '14px', color: C.text }}>Mileage: {MILEAGE_RATE*100}¢/mile · {totalMiles.toFixed(1)} miles · <strong style={{ color: C.teal }}>{fmt(mileageDeduction)}</strong></div>
+              <div style={{ fontSize: '14px', color: C.text }}>Mileage: {MILEAGE_RATE * 100}¢/mile · {totalMiles.toFixed(1)} miles · <strong style={{ color: C.teal }}>{fmt(mileageDeduction)}</strong></div>
             </div>
           )}
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '20px' }}>
@@ -1161,42 +1535,45 @@ export default function ManaSocialApp() {
           <div style={card}>
             <span style={secHdr}>EXPENSE DEDUCTIBILITY</span>
             {expenses.map(e => {
-              const rule = DEDUCTIBILITY[e.category]||DEDUCTIBILITY['Other']
+              const rule = DEDUCTIBILITY[e.category] || DEDUCTIBILITY['Other']
               const amt = Number(e.cost)
-              const ded = rule.pct===100?amt:rule.pct===50?amt*0.5:e.category==='Home Office'?amt*(homeOfficePct/100):e.category==='Internet & Phone'?amt*(internetPct/100):0
+              const ded = rule.pct === 100 ? amt : rule.pct === 50 ? amt * 0.5 : e.category === 'Home Office' ? amt * (homeOfficePct / 100) : e.category === 'Internet & Phone' ? amt * (internetPct / 100) : 0
               return (
                 <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '9px 0', borderBottom: `1px solid ${C.border}` }}>
                   <div>
                     <div style={{ fontSize: '14px', fontWeight: 500 }}>{e.category}</div>
                     {e.notes && <div style={{ fontSize: '12px', color: C.muted }}>{e.notes}</div>}
-                    <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginTop: '2px', background: rule.pct===100?'#E1F5EE':rule.pct===50?'#FEF3C7':'#FEF3E2', color: rule.pct===100?'#085041':'#7A5A00' }}>{rule.label} · {rule.line}</div>
+                    <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginTop: '2px', background: rule.pct === 100 ? '#E1F5EE' : rule.pct === 50 ? '#FEF3C7' : '#FEF3E2', color: rule.pct === 100 ? '#085041' : '#7A5A00' }}>{rule.label} · {rule.line}</div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '12px' }}>
                     <div style={{ fontSize: '14px', fontWeight: 700, color: C.teal }}>{fmt(ded)}</div>
-                    <div style={{ fontSize: '12px', color: C.muted }}>saves {fmt(ded*0.313)}</div>
+                    <div style={{ fontSize: '12px', color: C.muted }}>saves {fmt(ded * 0.313)}</div>
                   </div>
                 </div>
               )
             })}
-            {expenses.length===0 && <div style={{ textAlign: 'center', padding: '20px', color: C.muted }}>No expenses logged yet</div>}
+            {expenses.length === 0 && <div style={{ textAlign: 'center', padding: '20px', color: C.muted }}>No expenses logged yet</div>}
           </div>
           <div style={card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <span style={secHdr}>MILEAGE LOG</span>
-              <button onClick={() => setEditingItem({ table: 'mileage_log' })} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Trip</button>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button onClick={() => { setBulkTable('mileage_log'); setBulkAddOpen(true) }} style={{ ...editBtn, background: 'rgba(45,191,184,0.08)', borderColor: C.teal, color: C.teal }}>Bulk Add</button>
+                <button onClick={() => setEditingItem({ table: 'mileage_log' })} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Trip</button>
+              </div>
             </div>
             {mileageLog.map(r => (
               <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: `1px solid ${C.border}` }}>
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: 500 }}>{r.purpose}</div>
-                  <div style={{ fontSize: '12px', color: C.muted }}>{r.date} · {r.from_location} → {r.to_location}</div>
-                  <div style={{ fontSize: '12px', color: C.teal }}>{parseFloat(r.miles).toFixed(1)} mi · {fmt(parseFloat(r.miles)*MILEAGE_RATE)}</div>
+                  <div style={{ fontSize: '12px', color: C.muted }}>{r.date} · {r.from_location} → {r.to_location} · {r.user_name || 'Cam'}</div>
+                  <div style={{ fontSize: '12px', color: C.teal }}>{parseFloat(r.miles).toFixed(1)} mi · {fmt(parseFloat(r.miles) * MILEAGE_RATE)}</div>
                 </div>
                 <button onClick={() => handleDelete('mileage_log', r.id)} style={delBtn}>×</button>
               </div>
             ))}
-            {mileageLog.length===0 && <div style={{ textAlign: 'center', padding: '20px', color: C.muted }}>No trips logged yet</div>}
-            {mileageLog.length>0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', fontSize: '14px', fontWeight: 700 }}><span>{totalMiles.toFixed(1)} total miles</span><span style={{ color: C.teal }}>{fmt(mileageDeduction)}</span></div>}
+            {mileageLog.length === 0 && <div style={{ textAlign: 'center', padding: '20px', color: C.muted }}>No trips logged yet</div>}
+            {mileageLog.length > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', fontSize: '14px', fontWeight: 700 }}><span>{totalMiles.toFixed(1)} total miles</span><span style={{ color: C.teal }}>{fmt(mileageDeduction)}</span></div>}
           </div>
         </div>
       )
@@ -1216,7 +1593,7 @@ export default function ManaSocialApp() {
                 <div><div style={{ fontWeight: 900, fontSize: '17px', color: C.navy }}>{q.label} 2026</div><div style={{ fontSize: '12px', color: C.muted }}>{q.start} – {q.end}</div></div>
                 <div style={{ textAlign: 'right' }}><div style={{ fontSize: '21px', fontWeight: 900, color: C.pink }}>{fmt(q.grand)}</div><div style={{ fontSize: '12px', color: C.muted }}>est. total</div></div>
               </div>
-              {[['Form 941 — FICA',fmt(q.fica),`Due ${q.due941}`],['Form 940 — FUTA',fmt(q.futa),'Due Jan 31'],['CA UI/ETT',fmt(q.caUI),`Due ${q.due941}`],['1040-ES Federal',fmt(q.fedEst),`Due ${q.due1040}`],['100-ES California',fmt(q.caEst),`Due ${q.due1040}`]].map(([l,v,d]) => (
+              {[['Form 941 — FICA', fmt(q.fica), `Due ${q.due941}`], ['Form 940 — FUTA', fmt(q.futa), 'Due Jan 31'], ['CA UI/ETT', fmt(q.caUI), `Due ${q.due941}`], ['1040-ES Federal', fmt(q.fedEst), `Due ${q.due1040}`], ['100-ES California', fmt(q.caEst), `Due ${q.due1040}`]].map(([l, v, d]) => (
                 <div key={String(l)} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: `1px solid ${C.border}`, fontSize: '14px' }}>
                   <span>{l}</span>
                   <div style={{ textAlign: 'right' }}><span style={{ fontWeight: 700, color: C.pink, marginRight: '8px' }}>{v}</span><span style={{ fontSize: '12px', color: C.muted }}>{d}</span></div>
@@ -1225,7 +1602,7 @@ export default function ManaSocialApp() {
               <div style={{ marginTop: '10px', padding: '8px 10px', background: '#F5F6FA', borderRadius: '8px', fontSize: '12px', color: C.muted, display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                 <span>Net rev: <strong style={{ color: C.text }}>{fmt(q.netRev)}</strong></span>
                 <span>Exp: <strong style={{ color: C.text }}>{fmt(q.exp)}</strong></span>
-                <span>Payroll: <strong style={{ color:C.text }}>{fmt(q.grossPay)}</strong></span>
+                <span>Payroll: <strong style={{ color: C.text }}>{fmt(q.grossPay)}</strong></span>
                 <span>Taxable: <strong style={{ color: C.text }}>{fmt(q.taxable)}</strong></span>
               </div>
             </div>
@@ -1252,17 +1629,17 @@ export default function ManaSocialApp() {
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL PAYROLL</div>
             <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(staffingCosts)}</div>
-            <div style={{ fontSize: '13px', opacity: 0.5, marginTop: '2px' }}>FICA: {fmt(staffingCosts*0.153)} · FUTA: {fmt(staffingCosts*0.006)}</div>
-            <div style={{ fontSize: '13px', opacity: 0.5 }}>Roth IRA Contributed: {fmt(payroll.reduce((a,r)=>a+Number(r.roth_ira_contributed||0),0))}</div>
+            <div style={{ fontSize: '13px', opacity: 0.5, marginTop: '2px' }}>FICA: {fmt(staffingCosts * 0.153)} · FUTA: {fmt(staffingCosts * 0.006)}</div>
+            <div style={{ fontSize: '13px', opacity: 0.5 }}>Roth IRA Contributed: {fmt(payroll.reduce((a, r) => a + Number(r.roth_ira_contributed || 0), 0))}</div>
           </div>
           {payroll.map(p => (
             <div key={p.id} style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div style={{ fontWeight: 700, marginBottom: '2px', fontSize: '15px' }}>{p.employee_name}</div>
-                <div style={{ fontSize: '13px', color: C.muted }}>{p.pay_date}{p.pay_period?` · Period ends ${p.pay_period}`:''}</div>
+                <div style={{ fontSize: '13px', color: C.muted }}>{p.pay_date}{p.pay_period ? ` · Period ends ${p.pay_period}` : ''}</div>
                 {p.hours_worked > 0 && <div style={{ fontSize: '13px', color: C.muted }}>{p.hours_worked} hrs @ ${p.hourly_rate}/hr</div>}
                 {p.roth_ira_contributed > 0 && <div style={{ fontSize: '12px', color: C.teal }}>Roth IRA: {fmt(p.roth_ira_contributed)} contributed</div>}
-                <div style={{ fontSize: '12px', color: C.muted }}>FICA: {fmt(Number(p.amount)*0.153)}</div>
+                <div style={{ fontSize: '12px', color: C.muted }}>FICA: {fmt(Number(p.amount) * 0.153)}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{ fontWeight: 700, fontSize: '17px' }}>{fmt(Number(p.amount))}</span>
@@ -1291,7 +1668,6 @@ export default function ManaSocialApp() {
     { id: 'summary',    label: 'Summary'    },
     { id: 'income',     label: 'Sales'      },
     { id: 'expense',    label: 'Expenses'   },
-    { id: 'cogs',       label: 'COGS'       },
     { id: 'accounting', label: 'Accounting' },
     { id: 'assets',     label: 'Assets'     },
     { id: 'deductions', label: 'Deductions' },
@@ -1313,7 +1689,7 @@ export default function ManaSocialApp() {
             </select>
             <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} style={{ flex: 2, padding: '10px', borderRadius: '10px', border: `2px solid ${C.border}`, fontWeight: 'bold', background: C.white, fontFamily: FONT, fontSize: '14px' }}>
               <option value={0}>Full Year</option>
-              {Array.from({ length: 12 }, (_, i) => <option key={i} value={i+1}>{new Date(0,i).toLocaleString('default',{month:'long'})}</option>)}
+              {Array.from({ length: 12 }, (_, i) => <option key={i} value={i + 1}>{new Date(0, i).toLocaleString('default', { month: 'long' })}</option>)}
             </select>
           </div>
         </header>
@@ -1330,18 +1706,19 @@ export default function ManaSocialApp() {
               <h2 style={{ fontWeight: 900, marginBottom: '16px', color: C.navy, fontSize: '17px' }}>ADD RECORD</h2>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 {[
-                  ['sales',           'SALE',       C.green],
-                  ['collections',     'COLLECTION', C.text],
-                  ['expenses',        'EXPENSE',    '#ef4444'],
-                  ['payroll',         'PAYROLL',    C.text],
-                  ['cogs_inventory',  'COGS',       C.purple],
-                  ['mileage_log',     'MILEAGE',    C.teal],
-                  ['assets',          'ASSET',      C.navy],
-                  ['accounts_payable','PAYABLE',    C.pink],
+                  ['sales',           'SALE',        C.green],
+                  ['accounts_payable','A/P',          C.pink],
+                  ['expenses',        'EXPENSE',     '#ef4444'],
+                  ['payroll',         'PAYROLL',     C.text],
+                  ['cogs_inventory',  'INVENTORY',   C.purple],
+                  ['mileage_log',     'MILEAGE',     C.teal],
+                  ['assets',          'ASSET',       C.navy],
+                  ['supply_costs',    'SUPPLY COST', C.purple],
                 ].map(([table, l, color]) => (
-                  <button key={String(table)} onClick={() => { setEditingItem({ table: String(table) }); setIsQuickAddOpen(false) }} style={{ padding: '17px', borderRadius: '12px', border: `1px solid ${C.border}`, fontWeight: 'bold', fontSize: '15px', background: C.white, color: color as string, cursor: 'pointer', fontFamily: FONT }}>{l}</button>
+                  <button key={String(table)} onClick={() => { setEditingItem({ table: String(table) }); setIsQuickAddOpen(false) }} style={{ padding: '17px', borderRadius: '12px', border: `1px solid ${C.border}`, fontWeight: 'bold', fontSize: '14px', background: C.white, color: color as string, cursor: 'pointer', fontFamily: FONT }}>{l}</button>
                 ))}
-                <button onClick={() => { setEditingItem({ table: 'disbursements' }); setIsQuickAddOpen(false) }} style={{ gridColumn: 'span 2', padding: '17px', borderRadius: '12px', border: `2px solid ${C.teal}`, color: C.teal, fontWeight: 900, background: C.white, cursor: 'pointer', fontSize: '15px', fontFamily: FONT }}>OWNER DRAW</button>
+                <button onClick={() => { setIsQuickAddOpen(false); setBulkAddOpen(true) }} style={{ padding: '17px', borderRadius: '12px', border: `2px solid ${C.gold}`, color: '#7A5A00', fontWeight: 900, background: 'rgba(240,192,64,0.08)', cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>BULK ADD</button>
+                <button onClick={() => { setEditingItem({ table: 'disbursements' }); setIsQuickAddOpen(false) }} style={{ padding: '17px', borderRadius: '12px', border: `2px solid ${C.teal}`, color: C.teal, fontWeight: 900, background: C.white, cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>OWNER DRAW</button>
               </div>
               <button onClick={() => setIsQuickAddOpen(false)} style={{ width: '100%', marginTop: '16px', border: 'none', background: 'none', color: C.muted, fontWeight: 'bold', cursor: 'pointer', padding: '8px', fontSize: '14px', fontFamily: FONT }}>CANCEL</button>
             </div>
@@ -1349,13 +1726,15 @@ export default function ManaSocialApp() {
         )}
       </div>
 
-      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: C.white, borderTop: `2px solid ${C.border}`, display: 'flex', zIndex: 400, height: '100px', overflowX: 'auto' }}>
+      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: C.white, borderTop: `2px solid ${C.border}`, display: 'flex', zIndex: 400, height: '72px' }}>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ flex: '0 0 auto', minWidth: '60px', border: 'none', background: 'none', fontSize: '10px', fontWeight: 900, color: activeTab === t.id ? C.teal : C.muted, padding: '8px 6px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: FONT, borderTop: activeTab === t.id ? `3px solid ${C.teal}` : '3px solid transparent' }}>
+          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ flex: 1, border: 'none', background: 'none', fontSize: '11px', fontWeight: 900, color: activeTab === t.id ? C.teal : C.muted, padding: '8px 2px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: FONT, borderTop: activeTab === t.id ? `3px solid ${C.teal}` : '3px solid transparent', minWidth: 0 }}>
             {t.label}
           </button>
         ))}
       </nav>
+
+      {renderBulkModal()}
     </div>
   )
 }
