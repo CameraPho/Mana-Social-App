@@ -3,10 +3,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
 
-// Required for the iOS image.png (HEIC) conversion fix
-// Run: npm install heic2any
-import heic2any from 'heic2any'
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -134,108 +130,17 @@ function parseEbayCSV(file: File): Promise<{ records: any[], meta: any }> {
   })
 }
 
-function parseManaPoolCSV(file: File): Promise<{ records: any[], meta: any }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const text = e.target!.result as string
-        const wb = XLSX.read(text, { type: 'string', raw: false })
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        const rows: any[] = XLSX.utils.sheet_to_json(ws)
-        let totalGross = 0, totalShipping = 0, totalNet = 0, rowCount = 0
-        for (const row of rows) {
-          if (!row['Period']) continue
-          totalGross += parseFloat(row['Total'] || '0')
-          totalShipping += parseFloat(row['Shipping'] || '0')
-          totalNet += parseFloat(row['Subtotal'] || '0')
-          rowCount += parseInt(row['Order Count'] || '0')
-        }
-        // Derived fees should be 0 based on standard ManaPool CSV structure
-        const derivedFees = parseFloat((totalGross - totalNet - totalShipping).toFixed(2))
-        const saleDate = new Date().toISOString().split('T')[0]
-        resolve({
-          records: [{ platform: 'manapool', amount: parseFloat(totalGross.toFixed(2)), fees: derivedFees, shipping: parseFloat(totalShipping.toFixed(2)), sale_date: saleDate, period_start: saleDate, period_end: saleDate, entity: getEntity(saleDate), net_sales: parseFloat(totalNet.toFixed(2)), num_orders: rowCount }],
-          meta: { totalGross, totalShipping, totalNet, rows: rowCount }
-        })
-      } catch (err: any) { reject(new Error('ManaPool parse failed: ' + err.message)) }
-    }
-    reader.onerror = () => reject(new Error('File read error'))
-    reader.readAsText(file)
-  })
-}
-
-function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        let text = e.target!.result as string
-        // CRITICAL FIX: Strip Amazon's annoying Excel formulas: ="0737" -> 0737
-        text = text.replace(/="([^"]*)"/g, '$1')
-        const wb = XLSX.read(text, { type: 'string', raw: false })
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        const rows: any[] = XLSX.utils.sheet_to_json(ws)
-        let records: any[] = []
-        let totalAmount = 0
-
-        for (const row of rows) {
-          const dateVal = row['Order Date']
-          const amountVal = row['Total Amount'] || row['Order Net Total']
-          if (!dateVal || !amountVal) continue
-
-          const d = new Date(dateVal)
-          const isoDate = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
-          const cost = parseFloat(String(amountVal).replace(/[$,]/g, '')) || 0
-          
-          if (cost <= 0) continue
-
-          totalAmount += cost
-          records.push({
-            category: 'Supplies & Packaging',
-            cost: cost,
-            date: isoDate,
-            notes: `Amazon: ${String(row['Title'] || row['Product Name'] || 'Purchase').substring(0, 45)}...`
-          })
-        }
-
-        resolve({
-          records,
-          meta: { totalAmount, count: records.length }
-        })
-      } catch (err: any) { reject(new Error('Amazon parse failed: ' + err.message)) }
-    }
-    reader.onerror = () => reject(new Error('File read error'))
-    reader.readAsText(file)
-  })
-}
-
 async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<any[]> {
   try {
-    let processedFile = file;
-    
-    // HEIC FIX: iOS disguised PNGs
-    if (file.type === 'image/heic' || file.name.toLowerCase().endsWith('.heic')) {
-      try {
-        const convertedBlob = await heic2any({ blob: file, toType: 'image/jpeg' });
-        const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
-        processedFile = new File([blob], file.name.replace(/\.(heic|png)$/i, '.jpg'), { type: 'image/jpeg' });
-      } catch (e) {
-        console.error("HEIC conversion failed", e);
-        return []; 
-      }
-    }
-
-    const isImage = processedFile.type.startsWith('image/')
-    const isPDF = processedFile.type === 'application/pdf'
-    const isCSV = processedFile.name.endsWith('.csv') || processedFile.type === 'text/csv'
-    const isXLSX = processedFile.name.endsWith('.xlsx') || processedFile.name.endsWith('.xls')
+    const isImage = file.type.startsWith('image/')
+    const isPDF = file.type === 'application/pdf'
+    const isCSV = file.name.endsWith('.csv') || file.type === 'text/csv'
+    const isXLSX = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
     let content: any[] = []
-
     if (isCSV || isXLSX) {
-      const text = await processedFile.text()
+      const text = await file.text()
       const prompt = mode === 'sales'
-        ? `Sales report. Extract sales. Return ONLY JSON array:\n[{"platform":"other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD"}]\n\n${text.slice(0, 8000)}`
+        ? `ManaPool sales report. Extract sales. Return ONLY JSON array:\n[{"platform":"manapool","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD"}]\n\n${text.slice(0, 8000)}`
         : `Expense receipt. Extract expenses. Return ONLY JSON array:\n[{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"vendor"}]\n\n${text.slice(0, 8000)}`
       content = [{ type: 'text', text: prompt }]
     } else if (isImage || isPDF) {
@@ -243,24 +148,23 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
         const reader = new FileReader()
         reader.onload = () => res((reader.result as string).split(',')[1])
         reader.onerror = rej
-        reader.readAsDataURL(processedFile)
+        reader.readAsDataURL(file)
       })
       const prompt = mode === 'sales'
         ? 'Sales receipt. Return ONLY JSON array: [{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD"}]'
         : `Expense receipt. Return ONLY JSON array: [{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"vendor"}]`
       content = [
-        { type: isImage ? 'image' : 'document', source: { type: 'base64', media_type: processedFile.type || 'application/pdf', data: base64 } },
+        { type: isImage ? 'image' : 'document', source: { type: 'base64', media_type: file.type || 'application/pdf', data: base64 } },
         { type: 'text', text: prompt }
       ]
     } else return []
-
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2000, messages: [{ role: 'user', content }] })
     })
     const data = await res.json()
-    const responseText = data.content?.[0]?.text || '[]'
-    return JSON.parse(responseText.replace(/```json|```/g, '').trim())
+    const text = data.content?.[0]?.text || '[]'
+    return JSON.parse(text.replace(/```json|```/g, '').trim())
   } catch { return [] }
 }
 
@@ -493,15 +397,12 @@ export default function ManaSocialApp() {
 
   const handleFileUpload = async (file: File, mode: 'sales' | 'expenses') => {
     setUploadMode(mode); setUploadPreview([])
-    
     if (mode === 'sales') {
       const isTCG = file.name.toLowerCase().includes('tcgplayer') || /SellerTaxReport/i.test(file.name)
       const isEbay = file.name.toLowerCase().includes('ebay') || file.name.toLowerCase().includes('listing')
-      const isManaPool = file.name.toLowerCase().includes('manapool')
       const isXLSX = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
       const isCSV = file.name.endsWith('.csv')
-
-      if (isXLSX && (isTCG || !isEbay && !isManaPool)) {
+      if (isXLSX && (isTCG || !isEbay)) {
         setUploadStatus('Parsing TCGplayer report...')
         try {
           const { records, meta } = await parseTCGplayerXLSX(file)
@@ -510,7 +411,6 @@ export default function ManaSocialApp() {
         } catch (err: any) { setUploadStatus('Error: ' + err.message) }
         return
       }
-      
       if (isCSV && (isEbay || file.name.toLowerCase().includes('listing'))) {
         setUploadStatus('Parsing eBay report...')
         try {
@@ -520,33 +420,7 @@ export default function ManaSocialApp() {
         } catch (err: any) { setUploadStatus('Error: ' + err.message) }
         return
       }
-
-      // NEW: Direct parser for ManaPool Sales
-      if (isCSV && isManaPool) {
-        setUploadStatus('Parsing ManaPool report...')
-        try {
-          const { records, meta } = await parseManaPoolCSV(file)
-          setUploadPreview(records.map(r => ({ ...r, _displayLabel: `ManaPool`, _meta: meta })))
-          setUploadStatus(`ManaPool: ${meta.rows} orders · Gross ${fmt(meta.totalGross)} · Net ${fmt(meta.totalNet)}`)
-        } catch (err: any) { setUploadStatus('Error: ' + err.message) }
-        return
-      }
-      
-    } else if (mode === 'expenses') {
-      const isAmazon = file.name.toLowerCase().includes('amazon')
-      
-      // NEW: Direct parser for Amazon Orders
-      if (isAmazon) {
-        setUploadStatus('Parsing Amazon report...')
-        try {
-          const { records, meta } = await parseAmazonCSV(file)
-          setUploadPreview(records.map((r, i) => ({ ...r, _displayLabel: `Amazon Item ${i+1}`, _meta: meta })))
-          setUploadStatus(`Amazon: ${meta.count} items · Total ${fmt(meta.totalAmount)}`)
-        } catch (err: any) { setUploadStatus('Error: ' + err.message) }
-        return
-      }
     }
-
     setUploadStatus('Reading file with AI...')
     const results = await parseFileWithAI(file, mode)
     if (!results.length) { setUploadStatus('Could not extract data.'); return }
