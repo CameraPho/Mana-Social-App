@@ -8,7 +8,7 @@ const supabase = createClient(
 )
 
 // FONT LOCKED — Calibri. Do not change unless explicitly requested.
-const FONT = "'Calibri', 'Gill Sans', 'Trebuchet MS', Arial, sans-serif"
+const FONT = "'Calibri', sans-serif"
 
 const C = {
   navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
@@ -42,33 +42,29 @@ const EXPENSE_CATEGORIES = Object.keys(DEDUCTIBILITY)
 const MILEAGE_RATE = 0.67
 const getEntity = (date: string) => new Date(date) < new Date('2026-03-18') ? 'sole_prop' : 'llc'
 
-// ── AI file parser using Claude API ──────────────────────────
 async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<any[]> {
   try {
-    const base64 = await new Promise<string>((res, rej) => {
-      const reader = new FileReader()
-      reader.onload = () => res((reader.result as string).split(',')[1])
-      reader.onerror = rej
-      reader.readAsDataURL(file)
-    })
-
     const isImage = file.type.startsWith('image/')
     const isPDF = file.type === 'application/pdf'
     const isCSV = file.name.endsWith('.csv') || file.type === 'text/csv'
     const isXLSX = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
 
-    let prompt = ''
     let content: any[] = []
 
     if (isCSV || isXLSX) {
-      // For CSV/XLSX read as text
       const text = await file.text()
-      prompt = mode === 'sales'
-        ? `This is a sales report from TCGplayer, eBay, or ManaPool. Extract all sales transactions. For TCGplayer: look for Gross Sales, Net Sales, fees columns. For eBay: look for "Gross transaction amount", "Final Value Fee", order rows. For ManaPool: look for subtotal, shipping, order columns. Return ONLY a JSON array, no markdown:\n[{"platform":"tcgplayer|ebay|manapool","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","description":""}]\n\nFile content:\n${text.slice(0,8000)}`
+      const prompt = mode === 'sales'
+        ? `This is a sales report from TCGplayer, eBay, or ManaPool. Extract all sales transactions. For TCGplayer: look for Gross Sales, Net Sales, fees columns. For eBay: look for Gross transaction amount, Final Value Fee, order rows. For ManaPool: look for subtotal, shipping, order columns. Return ONLY a JSON array, no markdown:\n[{"platform":"tcgplayer|ebay|manapool","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","description":""}]\n\nFile content:\n${text.slice(0,8000)}`
         : `This is an expense receipt or report. Extract all expenses. Return ONLY a JSON array, no markdown:\n[{"category":"Shipping & Postage|Platform Fees|Software & Subscriptions|Supplies & Packaging|Advertising|Professional Services|Bank & Finance Charges|Taxes & Licenses|Home Office|Other","cost":0,"date":"YYYY-MM-DD","notes":"vendor/description"}]\n\nFile content:\n${text.slice(0,8000)}`
       content = [{ type: 'text', text: prompt }]
     } else if (isImage || isPDF) {
-      prompt = mode === 'sales'
+      const base64 = await new Promise<string>((res, rej) => {
+        const reader = new FileReader()
+        reader.onload = () => res((reader.result as string).split(',')[1])
+        reader.onerror = rej
+        reader.readAsDataURL(file)
+      })
+      const prompt = mode === 'sales'
         ? 'This is a sales report or receipt. Extract all sales. Return ONLY a JSON array, no markdown: [{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","description":""}]'
         : 'This is an expense receipt. Extract the expense details. Return ONLY a JSON array, no markdown: [{"category":"Shipping & Postage|Platform Fees|Software & Subscriptions|Supplies & Packaging|Advertising|Professional Services|Bank & Finance Charges|Taxes & Licenses|Home Office|Other","cost":0,"date":"YYYY-MM-DD","notes":"vendor/description"}]'
       content = [
@@ -82,16 +78,11 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content }]
-      })
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2000, messages: [{ role: 'user', content }] })
     })
     const data = await res.json()
     const text = data.content?.[0]?.text || '[]'
-    const clean = text.replace(/```json|```/g, '').trim()
-    return JSON.parse(clean)
+    return JSON.parse(text.replace(/```json|```/g, '').trim())
   } catch {
     return []
   }
@@ -199,16 +190,12 @@ export default function ManaSocialApp() {
   const mileageDeduction = totalMiles * MILEAGE_RATE
   const resetForm = () => setFormData(emptyForm)
 
-  // ── File upload handler ───────────────────────────────────
   const handleFileUpload = async (file: File, mode: 'sales'|'expenses') => {
     setUploadMode(mode)
     setUploadStatus('Reading file with AI...')
     setUploadPreview([])
     const results = await parseFileWithAI(file, mode)
-    if (!results.length) {
-      setUploadStatus('Could not extract data. Try a different file.')
-      return
-    }
+    if (!results.length) { setUploadStatus('Could not extract data. Try a different file.'); return }
     setUploadPreview(results)
     setUploadStatus(`Found ${results.length} ${mode === 'sales' ? 'sale' : 'expense'}(s) — review and confirm`)
   }
@@ -217,10 +204,8 @@ export default function ManaSocialApp() {
     setUploadStatus('Saving...')
     if (uploadMode === 'sales') {
       const inserts = uploadPreview.map(r => ({
-        platform: r.platform || 'other',
-        amount: parseFloat(r.amount)||0,
-        fees: parseFloat(r.fees)||0,
-        shipping: parseFloat(r.shipping)||0,
+        platform: r.platform || 'other', amount: parseFloat(r.amount)||0,
+        fees: parseFloat(r.fees)||0, shipping: parseFloat(r.shipping)||0,
         sale_date: r.date || new Date().toISOString().split('T')[0],
         entity: getEntity(r.date || new Date().toISOString().split('T')[0]),
       }))
@@ -228,34 +213,28 @@ export default function ManaSocialApp() {
       if (error) { setUploadStatus('Error: ' + error.message); return }
     } else {
       const inserts = uploadPreview.map(r => ({
-        category: r.category || 'Other',
-        cost: parseFloat(r.cost)||0,
+        category: r.category || 'Other', cost: parseFloat(r.cost)||0,
         purchase_date: r.date || new Date().toISOString().split('T')[0],
-        notes: r.notes || '',
-        entity: getEntity(r.date || new Date().toISOString().split('T')[0]),
+        notes: r.notes || '', entity: getEntity(r.date || new Date().toISOString().split('T')[0]),
       }))
       const { error } = await supabase.from('expenses').insert(inserts)
       if (error) { setUploadStatus('Error: ' + error.message); return }
     }
-    setUploadPreview([])
-    setUploadStatus('Saved!')
-    fetchData()
+    setUploadPreview([]); setUploadStatus('Saved!'); fetchData()
     setTimeout(() => setUploadStatus(''), 3000)
   }
 
-  // ── ManaPool sync ─────────────────────────────────────────
   const syncManaPool = async () => {
-    setSyncStatus('Syncing...')
+    setSyncStatus('Syncing ManaPool...')
     try {
       const res = await fetch('/api/sync-manapool')
       const data = await res.json()
       if (data.error) setSyncStatus('Error: ' + data.error)
       else { setSyncStatus(data.message || 'Synced'); fetchData() }
-    } catch { setSyncStatus('Sync failed') }
-    setTimeout(() => setSyncStatus(''), 5000)
+    } catch { setSyncStatus('Sync failed — check console') }
+    setTimeout(() => setSyncStatus(''), 6000)
   }
 
-  // ── Save / Edit / Delete ──────────────────────────────────
   const handleSave = async () => {
     const t = editingItem?.table
     if (!t) return
@@ -284,9 +263,7 @@ export default function ManaSocialApp() {
       let totalUnits = formData.cogsType==='collection' ? parseInt(formData.cogsCards)||0 : ['booster_box','precon'].includes(formData.cogsType) ? (parseInt(formData.cogsCardsPerBox)||0)*qty : qty
       payload = { date:formData.date, inventory_type:formData.cogsType, description:formData.label, set_name:formData.cogsSet||null, purchase_price:cost, quantity:qty, card_count:parseInt(formData.cogsCards)||0, cards_per_box:parseInt(formData.cogsCardsPerBox)||0, total_cost:totalCost, cost_per_unit:totalUnits>0?totalCost/totalUnits:0, total_units:totalUnits, sold_units:0, est_sell_value:parseFloat(formData.cogsEstValue)||0, entity:getEntity(formData.date) }
     }
-
     if (editingItem.data?.id) {
-      // Editing existing record
       const { error } = await supabase.from(t).update(payload).eq('id', editingItem.data.id)
       if (error) return alert(error.message)
     } else {
@@ -303,29 +280,21 @@ export default function ManaSocialApp() {
     else if (table==='expenses') { pre.label=row.notes||''; pre.amount=String(row.cost); pre.category=row.category||'Other' }
     else if (table==='payroll') { pre.label=row.employee_name; pre.amount=String(row.amount) }
     else if (table==='disbursements') { pre.label=row.recipient; pre.amount=String(row.amount); pre.notes=row.notes||'' }
-    setFormData(pre)
-    setEditingItem({ table, data: row })
+    setFormData(pre); setEditingItem({ table, data: row })
   }
 
   const handleUpdatePaid = async (id: string, amount_paid: number) => {
-    await supabase.from('buyouts').update({ amount_paid }).eq('id', id)
-    fetchData()
+    await supabase.from('buyouts').update({ amount_paid }).eq('id', id); fetchData()
   }
-
   const handleUpdateSold = async (id: string, sold_units: number) => {
-    await supabase.from('cogs_inventory').update({ sold_units }).eq('id', id)
-    fetchData()
+    await supabase.from('cogs_inventory').update({ sold_units }).eq('id', id); fetchData()
   }
-
   const handleDelete = async (table: string, id: string) => {
     if (!confirm('Delete this entry?')) return
-    await supabase.from(table).delete().eq('id', id)
-    fetchData()
+    await supabase.from(table).delete().eq('id', id); fetchData()
   }
-
   const signOut = async () => { await supabase.auth.signOut() }
 
-  // ── Calculations ──────────────────────────────────────────
   const gross = sales.reduce((s,r)=>s+Number(r.amount),0)
   const totalFees = sales.reduce((s,r)=>s+Number(r.fees||0)+Number(r.shipping||0),0)
   const opExpenses = expenses.reduce((s,r)=>s+Number(r.cost),0)
@@ -366,14 +335,12 @@ export default function ManaSocialApp() {
   })
   const ytdTax = quarters.reduce((a,q)=>a+q.grand,0)
 
-  // ── Styles ────────────────────────────────────────────────
   const card: React.CSSProperties = {background:C.white,borderRadius:'16px',padding:'20px',border:`1px solid ${C.border}`,marginBottom:'12px',fontFamily:FONT}
   const inp: React.CSSProperties = {padding:'13px 14px',borderRadius:'10px',border:`1px solid ${C.border}`,fontSize:'15px',width:'100%',background:'#F5F6FA',boxSizing:'border-box',fontFamily:FONT}
   const lbl: React.CSSProperties = {fontSize:'12px',fontWeight:'bold',color:C.muted,letterSpacing:'0.05em',textTransform:'uppercase',marginBottom:'4px',display:'block',fontFamily:FONT}
   const editBtn: React.CSSProperties = {background:'none',border:`1px solid ${C.border}`,borderRadius:'6px',padding:'3px 8px',fontSize:'12px',color:C.muted,cursor:'pointer',fontFamily:FONT}
   const delBtn: React.CSSProperties = {background:'none',border:'none',color:C.muted,cursor:'pointer',fontSize:'18px',fontFamily:FONT}
 
-  // ── Upload preview panel ──────────────────────────────────
   const renderUploadPreview = () => {
     if (!uploadPreview.length && !uploadStatus) return null
     return (
@@ -396,7 +363,6 @@ export default function ManaSocialApp() {
     )
   }
 
-  // ── Form ──────────────────────────────────────────────────
   const renderForm = () => {
     if (!editingItem) return null
     const t = editingItem.table
@@ -493,10 +459,8 @@ export default function ManaSocialApp() {
     )
   }
 
-  // ── Tab content ───────────────────────────────────────────
   const renderTab = () => {
     switch(activeTab) {
-
       case 'summary': return (
         <div>
           <div style={{background:`linear-gradient(135deg,${C.navyDark},${C.navy})`,color:'#fff',padding:'28px',borderRadius:'20px',marginBottom:'12px',fontFamily:FONT}}>
@@ -551,8 +515,6 @@ export default function ManaSocialApp() {
             <div style={{fontSize:'30px',fontWeight:900,color:'#4ade80'}}>{fmt(gross-totalFees)}</div>
             <div style={{fontSize:'13px',opacity:0.5,marginTop:'2px'}}>Gross {fmt(gross)} · Fees {fmt(-totalFees)}</div>
           </div>
-
-          {/* ManaPool sync + file upload */}
           <div style={{...card,padding:'14px'}}>
             <div style={{fontSize:'11px',color:C.muted,fontWeight:'bold',letterSpacing:'0.05em',marginBottom:'10px'}}>IMPORT SALES</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'8px'}}>
@@ -564,12 +526,10 @@ export default function ManaSocialApp() {
               </button>
             </div>
             <input ref={salesFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" capture="environment" style={{display:'none'}} onChange={e=>{const f=e.target.files?.[0];if(f)handleFileUpload(f,'sales');e.target.value=''}} />
-            <div style={{fontSize:'12px',color:C.muted}}>Accepts: TCGplayer .xlsx, eBay .csv, ManaPool .csv, photos, PDFs</div>
+            <div style={{fontSize:'12px',color:C.muted}}>Accepts: TCGplayer .xlsx · eBay .csv · ManaPool .csv · photos · PDFs</div>
             {syncStatus&&<div style={{marginTop:'8px',fontSize:'13px',color:C.teal,fontFamily:FONT}}>{syncStatus}</div>}
           </div>
-
           {renderUploadPreview()}
-
           {sales.map(s=>(
             <div key={s.id} style={{...card,display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
               <div>
@@ -594,20 +554,15 @@ export default function ManaSocialApp() {
             <div style={{fontSize:'11px',opacity:0.6,fontWeight:'bold',letterSpacing:'1px'}}>TOTAL EXPENSES</div>
             <div style={{fontSize:'30px',fontWeight:900,color:'#fda4af'}}>{fmt(opExpenses+inventoryCosts)}</div>
           </div>
-
-          {/* File upload for expenses */}
           <div style={{...card,padding:'14px'}}>
             <div style={{fontSize:'11px',color:C.muted,fontWeight:'bold',letterSpacing:'0.05em',marginBottom:'10px'}}>IMPORT EXPENSES</div>
             <button onClick={()=>expFileRef.current?.click()} style={{width:'100%',padding:'12px',borderRadius:'10px',border:`1px solid ${C.border}`,background:'#F5F6FA',fontSize:'14px',fontWeight:'bold',color:C.navy,cursor:'pointer',fontFamily:FONT}}>
               Upload receipt / file / photo
             </button>
             <input ref={expFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" capture="environment" style={{display:'none'}} onChange={e=>{const f=e.target.files?.[0];if(f)handleFileUpload(f,'expenses');e.target.value=''}} />
-            <div style={{fontSize:'12px',color:C.muted,marginTop:'6px'}}>Take a photo of a receipt or upload a CSV/PDF — AI extracts and categorizes automatically</div>
+            <div style={{fontSize:'12px',color:C.muted,marginTop:'6px'}}>Take a photo of a receipt or upload CSV/PDF — AI extracts and categorizes automatically</div>
           </div>
-
           {renderUploadPreview()}
-
-          {/* Collection payment tracker */}
           {totalOwed>0&&(
             <div style={{...card,background:'rgba(240,192,64,0.08)',border:'1px solid rgba(240,192,64,0.3)',padding:'14px 16px'}}>
               <div style={{fontSize:'12px',color:'#7A5A00',fontWeight:'bold',marginBottom:'10px'}}>COLLECTION PAYMENT TRACKER</div>
@@ -635,7 +590,6 @@ export default function ManaSocialApp() {
               })}
             </div>
           )}
-
           {expenses.map(e=>(
             <div key={e.id} style={{...card,display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
               <div>
