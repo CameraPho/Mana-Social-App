@@ -460,7 +460,7 @@ export default function ManaSocialApp() {
     let payload: any = {}
     if (t === 'sales') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
-     payload = { platform: formData.label, amount: Number(formData.amount), fees: Number(formData.fees || 0), shipping: Number(formData.shipping || 0), sale_date: formData.date, period_start: formData.date, period_end: formData.date, entity: getEntity(formData.date), net_sales: Number(formData.amount) - Number(formData.fees || 0), num_orders: editingItem.data?.num_orders ?? 1 }
+      payload = { platform: formData.label, amount: Number(formData.amount), fees: Number(formData.fees || 0), shipping: Number(formData.shipping || 0), sale_date: formData.date, period_start: formData.date, period_end: formData.date, entity: getEntity(formData.date), net_sales: Number(formData.amount) - Number(formData.fees || 0), num_orders: editingItem.data?.num_orders ?? 1 }
     } else if (t === 'collections') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
       payload = { seller_name: formData.label, total_cost: Number(formData.amount), amount_paid: Number(formData.amountPaid || 0), notes: `Qty: ${formData.itemCount} | ${formData.notes}`, due_date: formData.date, entity: getEntity(formData.date) }
