@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -6,58 +6,57 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const token = process.env.MANAPOOL_API_TOKEN
   const email = process.env.MANAPOOL_EMAIL
 
   if (!token || !email) {
-    return NextResponse.json({ error: 'ManaPool credentials not configured' }, { status: 500 })
+    return NextResponse.json({ error: 'ManaPool credentials not configured in Vercel env vars' }, { status: 500 })
   }
 
   try {
-    // Fetch recent orders from ManaPool API
-    const res = await fetch('https://manapool.com/api/v1/seller/orders?status=completed&limit=100', {
+    const res = await fetch('https://manapool.com/api/v1/seller/orders?limit=100', {
       headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-Seller-Email': email,
+        'X-Email': email,
+        'X-Access-Token': token,
         'Content-Type': 'application/json',
-      }
+      },
+      cache: 'no-store',
     })
 
     if (!res.ok) {
       const err = await res.text()
-      return NextResponse.json({ error: `ManaPool API error: ${err}` }, { status: res.status })
+      return NextResponse.json({ error: `ManaPool API ${res.status}: ${err}` }, { status: res.status })
     }
 
     const data = await res.json()
-    const orders = data.orders || data.data || data || []
+    const orders: any[] = data.orders || []
 
-    if (!Array.isArray(orders) || orders.length === 0) {
-      return NextResponse.json({ synced: 0, message: 'No orders returned' })
+    if (!orders.length) {
+      return NextResponse.json({ synced: 0, message: 'No orders returned from ManaPool' })
     }
 
-    // Check existing sale_date + platform combos to avoid duplicates
+    // Pull existing ManaPool sales to avoid dupes
     const { data: existing } = await supabase
       .from('sales')
       .select('sale_date, amount')
       .eq('platform', 'manapool')
 
-    let synced = 0
-    const toInsert = []
+    const toInsert: any[] = []
 
     for (const order of orders) {
-      const saleDate = order.completed_at || order.created_at || order.date
-      if (!saleDate) continue
-      const dateStr = new Date(saleDate).toISOString().split('T')[0]
-      const amount = parseFloat(order.subtotal || order.total || order.amount || 0)
-      const fees = parseFloat(order.fees || order.platform_fee || 0)
-      const shipping = parseFloat(order.shipping_cost || order.shipping || 0)
+      const dateStr = new Date(order.created_at).toISOString().split('T')[0]
+      // amounts are in cents
+      const amount = (order.subtotal_cents || 0) / 100
+      const shipping = (order.shipping_cents || 0) / 100
+      const tax = (order.tax_cents || 0) / 100
+      const fees = 0 // ManaPool fees paid by buyer, not deducted from seller payout
 
-      // Skip if already exists (same date + amount)
-      const alreadyExists = (existing || []).some(e =>
-        e.sale_date === dateStr && Math.abs(Number(e.amount) - amount) < 0.01
+      // Skip if already exists (same date + amount within 1 cent)
+      const dupe = (existing || []).some(e =>
+        e.sale_date === dateStr && Math.abs(Number(e.amount) - amount) < 0.02
       )
-      if (alreadyExists) continue
+      if (dupe) continue
 
       const entity = new Date(dateStr) < new Date('2026-03-18') ? 'sole_prop' : 'llc'
 
@@ -74,10 +73,15 @@ export async function GET(req: NextRequest) {
     if (toInsert.length > 0) {
       const { error } = await supabase.from('sales').insert(toInsert)
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-      synced = toInsert.length
     }
 
-    return NextResponse.json({ synced, total: orders.length, message: `Synced ${synced} new orders` })
+    return NextResponse.json({
+      synced: toInsert.length,
+      total: orders.length,
+      skipped: orders.length - toInsert.length,
+      message: `Synced ${toInsert.length} new orders (${orders.length - toInsert.length} already existed)`,
+    })
+
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
