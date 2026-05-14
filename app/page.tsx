@@ -1225,8 +1225,7 @@ export default function ManaSocialApp() {
               <div style={{ marginTop: '10px', padding: '8px 10px', background: '#F5F6FA', borderRadius: '8px', fontSize: '12px', color: C.muted, display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                 <span>Net rev: <strong style={{ color: C.text }}>{fmt(q.netRev)}</strong></span>
                 <span>Exp: <strong style={{ color: C.text }}>{fmt(q.exp)}</strong></span>
-                <span>Payroll: <strong style={{ color:​​​​​​​​​​​​​​​​
- C.text }}>{fmt(q.grossPay)}</strong></span>
+                <span>Payroll: <strong style={{ color:C.text }}>{fmt(q.grossPay)}</strong></span>
                 <span>Taxable: <strong style={{ color: C.text }}>{fmt(q.taxable)}</strong></span>
               </div>
             </div>
