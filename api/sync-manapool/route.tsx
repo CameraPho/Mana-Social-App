@@ -36,7 +36,6 @@ export async function GET() {
       return NextResponse.json({ synced: 0, message: 'No orders returned from ManaPool' })
     }
 
-    // Pull existing ManaPool sales to avoid dupes
     const { data: existing } = await supabase
       .from('sales')
       .select('sale_date, amount')
@@ -46,20 +45,38 @@ export async function GET() {
 
     for (const order of orders) {
       const dateStr = new Date(order.created_at).toISOString().split('T')[0]
-      // amounts are in cents
       const amount = (order.subtotal_cents || 0) / 100
       const shipping = (order.shipping_cents || 0) / 100
-      const tax = (order.tax_cents || 0) / 100
-      const fees = 0 // ManaPool fees paid by buyer, not deducted from seller payout
-
-      // Skip if already exists (same date + amount within 1 cent)
       const dupe = (existing || []).some(e =>
         e.sale_date === dateStr && Math.abs(Number(e.amount) - amount) < 0.02
       )
       if (dupe) continue
+      toInsert.push({
+        platform: 'manapool',
+        amount,
+        fees: 0,
+        shipping,
+        sale_date: dateStr,
+        entity: new Date(dateStr) < new Date('2026-03-18') ? 'sole_prop' : 'llc',
+      })
+    }
 
-      const entity = new Date(dateStr) < new Date('2026-03-18') ? 'sole_prop' : 'llc'
+    if (toInsert.length > 0) {
+      const { error } = await supabase.from('sales').insert(toInsert)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    }
 
+    return NextResponse.json({
+      synced: toInsert.length,
+      total: orders.length,
+      skipped: orders.length - toInsert.length,
+      message: `Synced ${toInsert.length} new ManaPool orders (${orders.length - toInsert.length} already existed)`,
+    })
+
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
+}
       toInsert.push({
         platform: 'manapool',
         amount,
