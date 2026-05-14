@@ -47,16 +47,20 @@ export async function GET() {
       const dateStr = new Date(order.created_at).toISOString().split('T')[0]
       const amount = (order.subtotal_cents || 0) / 100
       const shipping = (order.shipping_cents || 0) / 100
+
       const dupe = (existing || []).some(e =>
         e.sale_date === dateStr && Math.abs(Number(e.amount) - amount) < 0.02
       )
       if (dupe) continue
+
       toInsert.push({
         platform: 'manapool',
         amount,
         fees: 0,
         shipping,
         sale_date: dateStr,
+        period_start: dateStr,
+        period_end: dateStr,
         entity: new Date(dateStr) < new Date('2026-03-18') ? 'sole_prop' : 'llc',
       })
     }
@@ -72,33 +76,6 @@ export async function GET() {
       skipped: orders.length - toInsert.length,
       message: `Synced ${toInsert.length} new ManaPool orders (${orders.length - toInsert.length} already existed)`,
     })
-
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
-  }
-}
-      toInsert.push({
-        platform: 'manapool',
-        amount,
-        fees,
-        shipping,
-        sale_date: dateStr,
-        entity,
-      })
-    }
-
-    if (toInsert.length > 0) {
-      const { error } = await supabase.from('sales').insert(toInsert)
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({
-      synced: toInsert.length,
-      total: orders.length,
-      skipped: orders.length - toInsert.length,
-      message: `Synced ${toInsert.length} new orders (${orders.length - toInsert.length} already existed)`,
-    })
-
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
