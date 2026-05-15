@@ -258,13 +258,6 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
             if (typeof dateRaw === 'number') {
               return new Date(Math.round((dateRaw - 25569) * 86400 * 1000)).toISOString().split('T')[0]
             }
-            const s = String(dateRaw)
-            if (s.includes('/')) {
-              const parts = s.split('/')
-              if (parts.length === 3) return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
-            }
-            return s.split('T')[0]
-          })()
           const userName = normalizeUser(row['Account User'] || '')
           const { expCat, isInventory } = categorizeAmazonItem(title, amazonCat)
           const entity = new Date(dateStr) < LLC_START ? 'sole_prop' : 'llc'
