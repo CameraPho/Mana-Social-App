@@ -286,7 +286,13 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
   })
 }
 
-async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<any[]> {
+async function hashFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer()
+  const hashBuf = await crypto.subtle.digest('SHA-256', buf)
+  return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function parseFileWithAI(file: File, mode: 'sales' | 'expenses', uploadedBy: string = 'Cam', override: boolean = false): Promise<any> {
   try {
     const isImage = file.type.startsWith('image/')
     const isPDF = file.type === 'application/pdf'
@@ -296,10 +302,7 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
 
     if (isCSV || isXLSX) {
       const text = await file.text()
-      const prompt = mode === 'sales'
-        ? `Sales report. Extract all sales. Return ONLY JSON array:\n[{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","num_orders":1}]\n\n${text.slice(0, 8000)}`
-        : `Expense receipt or report. Extract all expenses. Return ONLY JSON array:\n[{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"vendor/item","user_name":"Cam"}]\n\n${text.slice(0, 8000)}`
-      content = [{ type: 'text', text: prompt }]
+      content = [{ type: 'text', text: `Document: ${file.name}\n\n${text.slice(0, 12000)}` }]
     } else if (isImage || isPDF) {
       const base64 = await new Promise<string>((res, rej) => {
         const reader = new FileReader()
@@ -308,27 +311,24 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
         reader.readAsDataURL(file)
       })
       content = [
-        {
-          type: isPDF ? 'document' : 'image',
-          source: { type: 'base64', media_type: file.type || 'application/pdf', data: base64 }
-        }
+        { type: isPDF ? 'document' : 'image', source: { type: 'base64', media_type: file.type || 'application/pdf', data: base64 } }
       ]
-    } else return []
+    } else {
+      return { error: 'Unsupported file type' }
+    }
 
-    const res = await fetch('/api/parse-file', {
+    const fileHash = await hashFile(file)
+
+    const res = await fetch('/api/smart-parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content,
-        mode,
-        categories: EXPENSE_CATEGORIES.join('|')
-      })
+      body: JSON.stringify({ content, fileName: file.name, fileHash, fileSize: file.size, uploadedBy, override })
     })
-
     const data = await res.json()
-    if (data.error) throw new Error(data.error)
-    return data.result || []
-  } catch { return [] }
+    return data
+  } catch (err: any) {
+    return { error: err.message }
+  }
 }
 
 function calcDepreciation(cost: number, life: number, purchaseDate: string, year: number) {
@@ -411,6 +411,10 @@ export default function ManaSocialApp() {
   const [syncStatus, setSyncStatus] = useState('')
   const [acctDrilldown, setAcctDrilldown] = useState<string | null>(null)
   const [bulkAddOpen, setBulkAddOpen] = useState(false)
+  const [pendingReviewCount, setPendingReviewCount] = useState(0)
+  const [importQueueOpen, setImportQueueOpen] = useState(false)
+  const [importQueue, setImportQueue] = useState<any[]>([])
+  const [duplicateWarning, setDuplicateWarning] = useState<any>(null)
   const [bulkTable, setBulkTable] = useState('mileage_log')
   const [bulkRows, setBulkRows] = useState<any[]>([])
   const [bulkDateMode, setBulkDateMode] = useState<'single'|'range'|'week'|'month'>('single')
@@ -550,7 +554,7 @@ export default function ManaSocialApp() {
     const matches = supplyCosts.filter(s => s.item_name === itemName).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
     return matches.length > 0 ? parseFloat(matches[0].cost_per_unit) : 0
   }
-  const uniqueSupplyItems = Array.from(new Set(supplyCosts.map(s => s.item_name)))
+  const uniqueSupplyItems = [...new Set(supplyCosts.map(s => s.item_name))]
 
   const quarters = [
     { label: 'Q1', start: '2026-01-01', end: '2026-03-31', due941: 'Apr 30', due1040: 'Apr 15' },
@@ -596,6 +600,14 @@ export default function ManaSocialApp() {
   const secHdr: React.CSSProperties = { fontSize: '11px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '12px', fontFamily: FONT, display: 'block' }
 
   // ─── Upload Handler ────────────────────────────────────────────────────
+  const fetchImportQueue = async () => {
+    const { data } = await supabase.from('import_queue').select('*').in('status', ['pending', 'pending_auto']).order('created_at', { ascending: false })
+    setImportQueue(data || [])
+    setPendingReviewCount((data || []).filter((i: any) => i.confidence_tier !== 'auto').length)
+  }
+
+  useEffect(() => { if (authed) fetchImportQueue() }, [authed])
+
   const handleFileUpload = async (file: File, mode: 'sales' | 'expenses') => {
     setUploadPreview([])
     const name = file.name.toLowerCase()
@@ -649,13 +661,34 @@ export default function ManaSocialApp() {
         return
       }
     }
-    // AI fallback
+    // AI universal parser
     setUploadMode(mode)
-    setUploadStatus('Reading file with AI...')
-    const results = await parseFileWithAI(file, mode)
-    if (!results.length) { setUploadStatus('Could not extract data. Try a different file format.'); return }
-    setUploadPreview(results)
-    setUploadStatus(`Found ${results.length} item(s) — review and confirm`)
+    setUploadStatus('Reading file with AI... (this may take 10-20 seconds)')
+    const result = await parseFileWithAI(file, mode, 'Cam', false)
+
+    if (result.error) { setUploadStatus('Error: ' + result.error); return }
+    if (result.duplicate) {
+      setDuplicateWarning({ file, mode, existingDoc: result.existingDoc, message: result.message })
+      setUploadStatus('Duplicate detected — see warning')
+      return
+    }
+    if (!result.items || result.items.length === 0) { setUploadStatus('No data extracted. Try a different file format.'); return }
+
+    fetchImportQueue()
+    const breakdown = `${result.autoCount} auto · ${result.reviewCount} review · ${result.manualCount} manual`
+    setUploadStatus(`Extracted ${result.itemCount} items (${breakdown}). Open Review Queue from Summary tab.`)
+    setUploadPreview([])
+  }
+
+  const confirmDuplicateOverride = async () => {
+    if (!duplicateWarning) return
+    setUploadStatus('Reprocessing with override...')
+    const result = await parseFileWithAI(duplicateWarning.file, duplicateWarning.mode, 'Cam', true)
+    setDuplicateWarning(null)
+    if (result.error) { setUploadStatus('Error: ' + result.error); return }
+    if (!result.items || result.items.length === 0) { setUploadStatus('No data extracted.'); return }
+    fetchImportQueue()
+    setUploadStatus(`Extracted ${result.itemCount} items. Review queue updated.`)
   }
 
   const confirmUpload = async () => {
@@ -734,7 +767,9 @@ export default function ManaSocialApp() {
       payload = { bank_name: formData.bankName, account_type: formData.accountType, account_last4: formData.accountLast4, current_balance: Number(formData.bankBalance), as_of_date: formData.date, notes: formData.notes }
     } else if (t === 'supply_costs') {
       if (!formData.supplyItem || !formData.supplyCost) return alert('Missing fields')
-      payload = { item_name: formData.supplyItem, unit_description: formData.supplyUnit || 'each', cost_per_unit: parseFloat(formData.supplyCost), effective_date: formData.date, notes: formData.notes }
+      const qty = parseFloat((formData as any).supplyQty || '1') || 1
+      const totalCost = parseFloat((formData as any).supplyTotalCost || '0') || (parseFloat(formData.supplyCost) * qty)
+      payload = { item_name: formData.supplyItem, unit_description: formData.supplyUnit || 'each', cost_per_unit: parseFloat(formData.supplyCost), effective_date: formData.date, notes: formData.notes, quantity: qty, total_cost: totalCost, vendor: (formData as any).supplyVendor || null, source: 'manual' }
     }
     if (editingItem.data?.id) {
       const { error } = await supabase.from(t).update(payload).eq('id', editingItem.data.id)
@@ -890,8 +925,13 @@ export default function ManaSocialApp() {
           {t === 'supply_costs' && <>
             <div><span style={lbl}>Supply Item Name</span><input value={formData.supplyItem} onChange={e => setFormData({ ...formData, supplyItem: e.target.value })} placeholder="e.g. Penny Sleeve, Forever Stamp, Bubble Mailer 4x8" style={inp} /></div>
             <div><span style={lbl}>Unit Description</span><input value={formData.supplyUnit} onChange={e => setFormData({ ...formData, supplyUnit: e.target.value })} placeholder="e.g. per sleeve, per stamp, per pack of 100" style={inp} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div><span style={lbl}>Total Cost ($)</span><input type="number" step="0.01" value={(formData as any).supplyTotalCost || ''} onChange={e => { const tc = e.target.value; const qty = parseFloat((formData as any).supplyQty || '1') || 1; setFormData({ ...formData, supplyTotalCost: tc, supplyCost: tc ? (parseFloat(tc)/qty).toFixed(4) : '' } as any) }} placeholder="0.00" style={inp} /></div>
+              <div><span style={lbl}>Quantity</span><input type="number" step="1" value={(formData as any).supplyQty || ''} onChange={e => { const qty = e.target.value; const tc = parseFloat((formData as any).supplyTotalCost || '0'); setFormData({ ...formData, supplyQty: qty, supplyCost: tc && qty ? (tc/parseFloat(qty)).toFixed(4) : '' } as any) }} placeholder="1" style={inp} /></div>
+            </div>
             <div><span style={lbl}>Cost Per Unit ($)</span><input type="number" step="0.0001" value={formData.supplyCost} onChange={e => setFormData({ ...formData, supplyCost: e.target.value })} placeholder="0.0100" style={inp} /></div>
-            <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Source, order #, etc." style={inp} /></div>
+            <div><span style={lbl}>Vendor / Source</span><input value={(formData as any).supplyVendor || ''} onChange={e => setFormData({ ...formData, supplyVendor: e.target.value } as any)} placeholder="e.g. BCW, Amazon, Costco" style={inp} /></div>
+            <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Order #, etc." style={inp} /></div>
           </>}
 
           {t === 'assets' && <>
@@ -1147,6 +1187,19 @@ export default function ManaSocialApp() {
     switch (activeTab) {
       case 'summary': return (
         <div>
+          {(pendingReviewCount > 0 || duplicateWarning) && (
+            <div onClick={() => setImportQueueOpen(true)} style={{ ...card, cursor: 'pointer', background: duplicateWarning ? 'rgba(232,64,122,0.08)' : 'rgba(240,192,64,0.1)', border: `1px solid ${duplicateWarning ? C.pink : C.gold}`, padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontWeight: 700, color: duplicateWarning ? C.pink : '#7A5A00', fontSize: '15px' }}>
+                  {duplicateWarning ? '⚠️ Duplicate File Warning' : `📋 ${pendingReviewCount} import${pendingReviewCount === 1 ? '' : 's'} pending review`}
+                </div>
+                <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>
+                  {duplicateWarning ? duplicateWarning.message : 'Tap to review and approve flagged imports'}
+                </div>
+              </div>
+              <div style={{ color: duplicateWarning ? C.pink : C.gold, fontSize: '20px' }}>→</div>
+            </div>
+          )}
           <div style={{ background: `linear-gradient(135deg,${C.navyDark},${C.navy})`, color: '#fff', padding: '28px', borderRadius: '20px', marginBottom: '12px', fontFamily: FONT }}>
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>GROSS REVENUE</div>
             <div style={{ fontSize: '32px', fontWeight: 900, marginBottom: '16px' }}>{fmtK(gross)}</div>
@@ -1771,6 +1824,88 @@ export default function ManaSocialApp() {
       </nav>
 
       {renderBulkModal()}
+
+      {/* Import Queue Review Modal */}
+      {importQueueOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.92)', display: 'flex', alignItems: 'flex-end', zIndex: 2000, fontFamily: FONT }}>
+          <div style={{ background: C.white, width: '100%', borderRadius: '20px 20px 0 0', padding: '24px', maxHeight: '92vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontWeight: 900, color: C.navy, fontSize: '17px' }}>IMPORT QUEUE</h2>
+              <button onClick={() => setImportQueueOpen(false)} style={{ background: 'none', border: 'none', fontSize: '24px', color: C.muted, cursor: 'pointer' }}>×</button>
+            </div>
+            {importQueue.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No pending imports</div>
+            ) : (
+              <>
+                <div style={{ fontSize: '12px', color: C.muted, marginBottom: '12px' }}>Review items below. Auto-tier items (95%+ confidence) can be batch-approved. Review-tier items (80-94%) should be checked. Manual items need verification.</div>
+                <button onClick={async () => {
+                  const autoIds = importQueue.filter(i => i.confidence_tier === 'auto' && i.validation_passed).map(i => i.id)
+                  if (autoIds.length === 0) return alert('No auto-approvable items')
+                  const res = await fetch('/api/import-queue/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: autoIds, reviewedBy: 'Cam' }) })
+                  const data = await res.json()
+                  if (data.success) { fetchImportQueue(); fetchData(); alert(`Imported ${data.imported} records`) }
+                  else alert('Error: ' + (data.error || 'Unknown'))
+                }} style={{ width: '100%', padding: '12px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', fontFamily: FONT, marginBottom: '12px' }}>
+                  Auto-approve all high-confidence ({importQueue.filter(i => i.confidence_tier === 'auto').length})
+                </button>
+                {importQueue.map(item => {
+                  const c = item.canonical_data || {}
+                  const tier = item.confidence_tier
+                  const tierColor = tier === 'auto' ? C.teal : tier === 'review' ? C.gold : C.pink
+                  const tierLabel = tier === 'auto' ? 'AUTO' : tier === 'review' ? 'REVIEW' : 'MANUAL'
+                  return (
+                    <div key={item.id} style={{ padding: '12px', borderBottom: `1px solid ${C.border}`, fontSize: '13px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 'bold', color: tierColor, background: tier === 'auto' ? 'rgba(45,191,184,0.1)' : tier === 'review' ? 'rgba(240,192,64,0.15)' : 'rgba(232,64,122,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                          {tierLabel} · {Math.round(parseFloat(item.confidence) * 100)}%
+                        </span>
+                        <span style={{ fontSize: '11px', color: C.muted }}>{item.target_table}</span>
+                      </div>
+                      <div style={{ fontWeight: 700, marginBottom: '4px' }}>{c.notes || c.description || c.platform || 'Item'}</div>
+                      <div style={{ fontSize: '12px', color: C.muted, marginBottom: '4px' }}>
+                        {c.category && <>Category: <strong>{c.category}</strong> · </>}
+                        Amount: <strong>${(c.amount || c.cost || c.total_cost || 0).toLocaleString()}</strong>
+                        {c.purchase_date && <> · {c.purchase_date}</>}
+                        {c.sale_date && <> · {c.sale_date}</>}
+                      </div>
+                      {item.validation_errors && item.validation_errors.length > 0 && (
+                        <div style={{ fontSize: '11px', color: C.pink, marginBottom: '4px' }}>⚠️ {item.validation_errors.join(', ')}</div>
+                      )}
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button onClick={async () => {
+                          const res = await fetch('/api/import-queue/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [item.id], reviewedBy: 'Cam' }) })
+                          const data = await res.json()
+                          if (data.success) { fetchImportQueue(); fetchData() }
+                          else alert('Error: ' + (data.error || 'Unknown'))
+                        }} style={{ padding: '5px 12px', background: C.teal, color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Approve</button>
+                        <button onClick={async () => {
+                          await fetch(`/api/import-queue/approve?id=${item.id}`, { method: 'DELETE' })
+                          fetchImportQueue()
+                        }} style={{ padding: '5px 12px', background: 'none', border: `1px solid ${C.pink}`, color: C.pink, borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Reject</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Warning Modal */}
+      {duplicateWarning && !importQueueOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', zIndex: 2100, fontFamily: FONT }}>
+          <div style={{ background: C.white, borderRadius: '16px', padding: '24px', maxWidth: '400px', width: '100%' }}>
+            <h3 style={{ color: C.pink, marginBottom: '12px', fontSize: '17px', fontWeight: 900 }}>⚠️ Duplicate File</h3>
+            <p style={{ fontSize: '14px', color: C.text, marginBottom: '16px' }}>{duplicateWarning.message}</p>
+            <p style={{ fontSize: '13px', color: C.muted, marginBottom: '16px' }}>Do you want to import it anyway?</p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={confirmDuplicateOverride} style={{ flex: 1, padding: '12px', background: C.pink, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Import Anyway</button>
+              <button onClick={() => { setDuplicateWarning(null); setUploadStatus('') }} style={{ flex: 1, padding: '12px', background: 'none', border: `1px solid ${C.border}`, color: C.muted, borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
