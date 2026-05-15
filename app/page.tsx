@@ -126,7 +126,7 @@ function parseTCGplayerXLSX(file: File): Promise<{ records: any[], meta: any }> 
           netTCGTax   += Number(row['Net TCG Tax Amt']  || row['TCG Tax Amt']  || 0)
           numOrders   += Number(row['Number of Orders'] || 0)
         }
-        const derivedFees = parseFloat((grossSales - netSales - netTCGTax - netShipping).toFixed(2))
+        const derivedFees = parseFloat((grossSales - netSales - netTCGTax).toFixed(2))
         const saleDate = periodEnd || new Date().toISOString().split('T')[0]
         resolve({
           records: [{ platform: 'tcgplayer', amount: parseFloat(grossSales.toFixed(2)), fees: derivedFees, shipping: parseFloat(netShipping.toFixed(2)), sale_date: saleDate, period_start: periodStart || saleDate, period_end: periodEnd || saleDate, entity, net_sales: parseFloat(netSales.toFixed(2)), num_orders: numOrders }],
@@ -252,11 +252,19 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
           const amazonCat = row['Amazon-Internal Product Category'] || ''
           const cost = parseFloat(String(row['Item Net Total'] || row['Item Subtotal'] || 0).replace(/[$,]/g, '')) || 0
           const tax = parseFloat(String(row['Item Tax'] || 0).replace(/[$,]/g, '')) || 0
-          const dateRaw = row['Order Date'] || ''
-          let dateStr = new Date().toISOString().split('T')[0]
-          if (dateRaw) {
-            const parts = dateRaw.split('/')
-            if (parts.length === 3) dateStr = `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
+         const dateRaw = row['Order Date']
+let dateStr = new Date().toISOString().split('T')[0]
+if (dateRaw) {
+  if (typeof dateRaw === 'number') {
+    const d = new Date(Math.round((dateRaw - 25569) * 86400 * 1000))
+    dateStr = d.toISOString().split('T')[0]
+  } else {
+    const s = String(dateRaw)
+    const parts = s.includes('/') ? s.split('/') : []
+    if (parts.length === 3) dateStr = `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
+    else if (s.includes('-')) dateStr = s.split('T')[0]
+  }
+}
           }
           const userName = normalizeUser(row['Account User'] || '')
           const { expCat, isInventory } = categorizeAmazonItem(title, amazonCat)
