@@ -1,5 +1,6 @@
 'use client'
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useEffect as _ue } from 'react' // Inter loaded via CSS
+mport React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
 
@@ -8,13 +9,26 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-const FONT = "'Calibri', sans-serif"
-const C = {
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+// Theme colors — computed dynamically based on mode
+const LIGHT_COLORS = {
   navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
   pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
   bg: '#F0F2F8', white: '#FFFFFF', muted: '#8A96B0',
   text: '#1B2A4A', border: 'rgba(27,42,74,0.12)', green: '#10b981',
+  cardBg: '#FFFFFF', inputBg: '#F5F6FA', navBg: '#FFFFFF',
+  summaryText: '#fff',
 }
+const DARK_COLORS = {
+  navy: '#E2E8F4', navyDark: '#0A0F1E', teal: '#2DBFB8',
+  pink: '#E8407A', purple: '#9B6FD0', gold: '#F0C040',
+  bg: '#0F1420', white: '#1A2235', muted: '#6B7A9A',
+  text: '#E2E8F4', border: 'rgba(255,255,255,0.08)', green: '#34D399',
+  cardBg: '#1A2235', inputBg: '#0F1420', navBg: '#111D33',
+  summaryText: '#E2E8F4',
+}
+// C is set dynamically in component — placeholder for module-level refs
+const C = LIGHT_COLORS
 const fmt = (n: number) => {
   if (n < 0) return '-$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -365,6 +379,7 @@ function getMonthDates(dateStr: string): string[] {
 }
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  // Login always uses light mode
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -395,6 +410,20 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 }
 
 export default function ManaSocialApp() {
+  // ─── Theme ────────────────────────────────────────────────────
+  const [themeMode, setThemeMode] = useState<'light'|'dark'|'auto'>(() => {
+    if (typeof window !== 'undefined') return (localStorage.getItem('mana_theme') as any) || 'auto'
+    return 'auto'
+  })
+  const isDark = (() => {
+    if (themeMode === 'dark') return true
+    if (themeMode === 'light') return false
+    // Auto: dark between sunset (~7pm) and sunrise (~7am)
+    const h = new Date().getHours()
+    return h >= 19 || h < 7
+  })()
+  const C = isDark ? DARK_COLORS : LIGHT_COLORS
+
   const [authed, setAuthed] = useState(false)
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [activeTab, setActiveTab] = useState('summary')
@@ -453,6 +482,14 @@ export default function ManaSocialApp() {
   const [supplyCosts, setSupplyCosts] = useState<any[]>([])
   const [allCogsInventory, setAllCogsInventory] = useState<any[]>([])
 
+  // Load Inter font
+  useEffect(() => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'
+    document.head.appendChild(link)
+  }, [])
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setAuthed(!!session); setCheckingAuth(false) })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => setAuthed(!!session))
@@ -484,7 +521,7 @@ export default function ManaSocialApp() {
     // Auto-migrate: backfill Asset records for any Equipment/Furniture expenses > $200 not yet linked
     const unmigrated = (e.data || []).filter(ex =>
       (ex.category === 'Equipment' || ex.category === 'Furniture & Fixtures') &&
-      Number(ex.cost) > 200 &&
+      Number(ex.cost) > 0 &&
       !ex.asset_created
     )
     if (unmigrated.length > 0) {
@@ -528,10 +565,13 @@ export default function ManaSocialApp() {
   const totalFees = totalPlatformFees + totalShippingExpense
   const netSalesAmt = sales.reduce((s, r) => s + Number(r.net_sales || r.amount), 0)
   const expByCategory = EXPENSE_CATEGORIES.reduce((acc, cat) => {
-    acc[cat] = expenses.filter(e => e.category === cat).reduce((s, r) => s + Number(r.cost), 0)
+    // Exclude asset_created expenses to prevent double-counting with depreciation
+    acc[cat] = expenses.filter(e => e.category === cat && !e.asset_created).reduce((s, r) => s + Number(r.cost), 0)
     return acc
   }, {} as Record<string, number>)
   const opExpenses = Object.values(expByCategory).reduce((a, b) => a + b, 0)
+  // Asset-converted expenses (tracked separately via depreciation/Section 179)
+  const assetConvertedExpenses = expenses.filter(e => e.asset_created).reduce((a, e) => a + Number(e.cost), 0)
   const totalAPOwed = accountsPayable.reduce((a, r) => a + Math.max(0, Number(r.total_amount) - Number(r.amount_paid || 0)), 0)
   const staffingCosts = payroll.reduce((s, r) => s + Number(r.amount), 0)
   const totalCosts = totalFees + opExpenses + totalAPOwed + staffingCosts
@@ -622,8 +662,8 @@ export default function ManaSocialApp() {
   const { flow: inventoryFlow, endingBalance } = buildInventoryFlow()
 
   // ─── Styles ───────────────────────────────────────────────────────────
-  const card: React.CSSProperties = { background: C.white, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
-  const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: '#F5F6FA', boxSizing: 'border-box', fontFamily: FONT }
+  const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
+  const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: C.inputBg, boxSizing: 'border-box', fontFamily: FONT, color: C.text }
   const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: FONT }
   const editBtn: React.CSSProperties = { background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '3px 8px', fontSize: '12px', color: C.muted, cursor: 'pointer', fontFamily: FONT }
   const delBtn: React.CSSProperties = { background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '18px', fontFamily: FONT }
@@ -637,6 +677,10 @@ export default function ManaSocialApp() {
   }
 
   useEffect(() => { if (authed) fetchImportQueue() }, [authed])
+  useEffect(() => {
+    document.body.style.background = isDark ? '#0F1420' : '#F0F2F8'
+    document.body.style.transition = 'background 0.2s'
+  }, [isDark])
   useEffect(() => { setBulkDefaults({}); setBulkRows([]) }, [bulkTable])
 
   const handleFileUpload = async (file: File, mode: 'sales' | 'expenses') => {
@@ -776,7 +820,9 @@ export default function ManaSocialApp() {
       payload = { platform: formData.label, amount: Number(formData.amount), fees: Number(formData.fees || 0), shipping: Number(formData.shipping || 0), sale_date: formData.date, period_start: formData.date, period_end: formData.date, entity: getEntity(formData.date), net_sales: Number(formData.amount) - Number(formData.fees || 0), num_orders: editingItem.data?.num_orders ?? 1 }
     } else if (t === 'accounts_payable') {
       if (!formData.apTotal || !formData.apVendor) return alert('Missing fields')
-      payload = { vendor_name: formData.apVendor, description: formData.label, invoice_date: formData.date, due_date: formData.apDue || formData.date, total_amount: Number(formData.apTotal), amount_paid: Number(formData.amountPaid || 0), entity: getEntity(formData.date), notes: formData.notes }
+      const cardCount = parseInt((formData as any).apCardCount || '0') || 0
+      const costPerCard = cardCount > 0 ? parseFloat(formData.apTotal) / cardCount : 0
+      payload = { vendor_name: formData.apVendor, description: formData.label, invoice_date: formData.date, due_date: formData.apDue || formData.date, total_amount: Number(formData.apTotal), amount_paid: Number(formData.amountPaid || 0), entity: getEntity(formData.date), notes: formData.notes + (cardCount > 0 ? ` | ${cardCount.toLocaleString()} cards @ $${costPerCard.toFixed(4)}/card` : '') }
     } else if (t === 'expenses') {
       if (!formData.amount) return alert('Missing amount')
       if (formData.label) saveCorrection(formData.label, formData.category)
@@ -815,8 +861,8 @@ export default function ManaSocialApp() {
     } else {
       const { data: inserted, error } = await supabase.from(t).insert([payload]).select().single()
       if (error) return alert(error.message)
-      // Auto-create asset for Equipment/Furniture expenses over $200
-      if (t === 'expenses' && inserted && (payload.category === 'Equipment' || payload.category === 'Furniture & Fixtures') && Number(payload.cost) > 200) {
+      // Auto-create asset for all Equipment/Furniture expenses
+      if (t === 'expenses' && inserted && (payload.category === 'Equipment' || payload.category === 'Furniture & Fixtures') && true) {
         const life = payload.category === 'Furniture & Fixtures' ? 7 : 5
         await supabase.from('assets').insert({
           purchase_date: payload.purchase_date,
@@ -840,7 +886,7 @@ export default function ManaSocialApp() {
   const startEdit = (table: string, row: any) => {
     const pre: any = { ...emptyForm, date: row.sale_date || row.purchase_date || row.due_date || row.pay_date || row.disbursement_date || row.date || emptyForm.date }
     if (table === 'sales') { pre.label = row.platform; pre.amount = String(row.amount); pre.fees = String(row.fees || 0); pre.shipping = String(row.shipping || 0) }
-    else if (table === 'accounts_payable') { pre.apVendor = row.vendor_name; pre.label = row.description || ''; pre.apTotal = String(row.total_amount); pre.amountPaid = String(row.amount_paid || 0); pre.apDue = row.due_date || ''; pre.notes = row.notes || '' }
+    else if (table === 'accounts_payable') { pre.apVendor = row.vendor_name; pre.label = row.description || ''; pre.apTotal = String(row.total_amount); pre.amountPaid = String(row.amount_paid || 0); pre.apDue = row.due_date || ''; pre.notes = row.notes || ''; (pre as any).apCardCount = '' }
     else if (table === 'expenses') { pre.label = row.notes || ''; pre.amount = String(row.cost); pre.category = row.category || 'Other'; pre.userName = row.user_name || 'Cam'; pre.paidByCompany = row.paid_by_company ?? true }
     else if (table === 'payroll') { pre.label = row.employee_name; pre.amount = String(row.amount); pre.hoursWorked = String(row.hours_worked || ''); pre.hourlyRate = String(row.hourly_rate || 16); pre.payPeriod = row.pay_period || '' }
     else if (table === 'disbursements') { pre.label = row.recipient; pre.amount = String(row.amount); pre.notes = row.notes || '' }
@@ -854,6 +900,13 @@ export default function ManaSocialApp() {
   const handleUpdateSold = async (id: string, sold_units: number) => { await supabase.from('cogs_inventory').update({ sold_units }).eq('id', id); fetchData() }
   const handleDelete = async (table: string, id: string) => { if (!confirm('Delete?')) return; await supabase.from(table).delete().eq('id', id); fetchData() }
   const signOut = async () => { await supabase.auth.signOut() }
+
+  const cycleTheme = () => {
+    const next = themeMode === 'light' ? 'dark' : themeMode === 'dark' ? 'auto' : 'light'
+    setThemeMode(next)
+    localStorage.setItem('mana_theme', next)
+  }
+  const themeIcon = themeMode === 'light' ? '☀️' : themeMode === 'dark' ? '🌙' : '🌓'
 
   // ─── Bulk Add Handler ─────────────────────────────────────────────────
   const generateBulkDates = (): string[] => {
@@ -1035,7 +1088,7 @@ export default function ManaSocialApp() {
 
           {t === 'accounts_payable' && <>
             <div><span style={lbl}>Vendor / Seller Name</span><input value={formData.apVendor} onChange={e => setFormData({ ...formData, apVendor: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} /></div>
-            <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => setFormData({ ...formData, label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 cards" style={inp} /></div>
+            <div><span style={lbl}>Transaction Description</span><input value={formData.label} onChange={e => setFormData({ ...formData, label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} style={inp} /></div>
               <div><span style={lbl}>Due Date</span><input type="date" value={formData.apDue} onChange={e => setFormData({ ...formData, apDue: e.target.value })} style={inp} /></div>
@@ -1044,7 +1097,15 @@ export default function ManaSocialApp() {
               <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => setFormData({ ...formData, apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
               <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => setFormData({ ...formData, amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
             </div>
-            <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Payment terms, context" style={{ ...inp, height: '60px', resize: 'vertical' }} /></div>
+            <div><span style={lbl}>Card Count (optional)</span>
+              <input type="number" step="1" value={(formData as any).apCardCount || ''} onChange={e => setFormData({ ...formData, apCardCount: e.target.value } as any)} placeholder="e.g. 5000" style={inp} />
+              {(formData as any).apCardCount && formData.apTotal && (
+                <div style={{ marginTop: '4px', fontSize: '13px', color: C.teal, fontWeight: 700 }}>
+                  Cost per card: ${(parseFloat(formData.apTotal) / parseInt((formData as any).apCardCount)).toFixed(4)}
+                </div>
+              )}
+            </div>
+            <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Payment terms, card types, condition, context" style={{ ...inp, height: '60px', resize: 'vertical' }} /></div>
           </>}
 
           {t === 'mileage_log' && <>
@@ -1317,7 +1378,7 @@ export default function ManaSocialApp() {
               <div style={{ color: duplicateWarning ? C.pink : C.gold, fontSize: '20px' }}>→</div>
             </div>
           )}
-          <div style={{ background: `linear-gradient(135deg,${C.navyDark},${C.navy})`, color: '#fff', padding: '28px', borderRadius: '20px', marginBottom: '12px', fontFamily: FONT }}>
+          <div style={{ background: isDark ? `linear-gradient(135deg,#0A0F1E,#111D33)` : `linear-gradient(135deg,${C.navyDark},${C.navy})`, color: '#fff', padding: '28px', borderRadius: '20px', marginBottom: '12px', fontFamily: FONT }}>
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>GROSS REVENUE</div>
             <div style={{ fontSize: '32px', fontWeight: 900, marginBottom: '16px' }}>{fmtK(gross)}</div>
             <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '16px' }} />
@@ -1426,6 +1487,71 @@ export default function ManaSocialApp() {
             <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(opExpenses + totalAPOwed)}</div>
           </div>
 
+          {/* Accounts Payable — top of expenses */}
+          {(() => {
+            const totalOwed = accountsPayable.reduce((a, r) => a + Math.max(0, Number(r.total_amount) - Number(r.amount_paid||0)), 0)
+            const totalAP = accountsPayable.reduce((a, r) => a + Number(r.total_amount), 0)
+            const isOpen = (expandedTiles as any)['ap_tile']
+            return (
+              <div style={{ ...card, border: `1px solid rgba(240,192,64,0.4)`, padding: 0, overflow: 'hidden' }}>
+                <div onClick={() => setExpandedTiles(prev => ({ ...prev, ap_tile: !prev.ap_tile }))}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer', background: isOpen ? 'rgba(240,192,64,0.06)' : 'transparent' }}>
+                  <div>
+                    <div style={{ fontWeight: 900, fontSize: '15px', color: '#7A5A00' }}>Accounts Payable</div>
+                    <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{accountsPayable.length} transaction{accountsPayable.length !== 1 ? 's' : ''} · Total {fmt(totalAP)}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: 900, fontSize: '18px', color: totalOwed > 0 ? C.pink : C.teal }}>{fmt(totalOwed)}</div>
+                      <div style={{ fontSize: '11px', color: C.muted }}>outstanding</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <button onClick={e => { e.stopPropagation(); setEditingItem({ table: 'accounts_payable' }) }} style={{ background: C.gold, color: '#7A5A00', border: 'none', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Add</button>
+                      <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div style={{ borderTop: `1px solid rgba(240,192,64,0.3)` }}>
+                    {accountsPayable.length === 0 ? (
+                      <div style={{ padding: '20px', textAlign: 'center', color: C.muted, fontSize: '13px' }}>No accounts payable recorded</div>
+                    ) : accountsPayable.map(b => {
+                      const paid = Number(b.amount_paid||0), owed = Number(b.total_amount) - paid
+                      const pct = Number(b.total_amount) > 0 ? (paid / Number(b.total_amount) * 100) : 0
+                      const notesHasCards = b.notes && b.notes.includes('cards @')
+                      return (
+                        <div key={b.id} style={{ padding: '14px 16px', borderBottom: `1px solid rgba(240,192,64,0.2)` }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: '15px' }}>{b.vendor_name}</div>
+                              {b.description && <div style={{ fontSize: '12px', color: C.muted }}>{b.description}</div>}
+                              {notesHasCards && <div style={{ fontSize: '12px', color: C.purple, fontWeight: 700 }}>{b.notes.split('|')[1]?.trim()}</div>}
+                              <div style={{ fontSize: '11px', color: C.muted }}>{b.invoice_date}{b.due_date && b.due_date !== b.invoice_date ? ` · Due ${b.due_date}` : ''}</div>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                              <div style={{ fontSize: '15px', fontWeight: 700, color: owed > 0 ? C.pink : C.teal }}>{fmt(owed)} {owed <= 0 ? '✓' : 'left'}</div>
+                              <div style={{ fontSize: '11px', color: C.muted }}>of {fmt(Number(b.total_amount))}</div>
+                            </div>
+                          </div>
+                          <div style={{ height: '5px', background: C.border, borderRadius: '3px', margin: '6px 0' }}>
+                            <div style={{ height: '100%', width: `${Math.min(pct,100)}%`, background: pct >= 100 ? C.teal : C.gold, borderRadius: '3px', transition: 'width 0.3s' }} />
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: C.muted, marginBottom: '6px' }}>
+                            <span>Paid: {fmt(paid)}</span><span>{pct.toFixed(0)}% complete</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button onClick={() => startEdit('accounts_payable', b)} style={editBtn}>Update</button>
+                            <button onClick={() => handleDelete('accounts_payable', b.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           {/* Import */}
           <div style={{ ...card, padding: '14px' }}>
             <span style={secHdr}>IMPORT EXPENSES</span>
@@ -1435,71 +1561,69 @@ export default function ManaSocialApp() {
           </div>
           {renderUploadPreview()}
 
-          {/* Supply Cost Tracker */}
-          <div style={{ ...card, border: `1px solid rgba(107,63,160,0.25)` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ ...secHdr, marginBottom: 0, color: C.purple }}>SUPPLY COST TRACKER</span>
-              <button onClick={() => setEditingItem({ table: 'supply_costs' })} style={{ background: C.purple, color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Add</button>
-            </div>
-            {uniqueSupplyItems.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '16px', color: C.muted, fontSize: '13px' }}>No supply costs tracked yet. Add items to calculate shipping costs.</div>
-            ) : (
-              <div>
-                {uniqueSupplyItems.map(item => {
-                  const history = supplyCosts.filter(s => s.item_name === item).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
-                  const latest = history[0]
-                  return (
-                    <div key={item} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '14px' }}>{item}</div>
-                          <div style={{ fontSize: '12px', color: C.muted }}>{latest.unit_description} · as of {latest.effective_date}</div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontWeight: 700, color: C.purple, fontSize: '15px' }}>${parseFloat(latest.cost_per_unit).toFixed(4)}</div>
-                          {history.length > 1 && <div style={{ fontSize: '11px', color: C.muted }}>{history.length} price history</div>}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                        <button onClick={() => startEdit('supply_costs', latest)} style={editBtn}>Update price</button>
-                        <button onClick={() => handleDelete('supply_costs', latest.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
-                      </div>
-                    </div>
-                  )
-                })}
-                {/* Shipping cost calculator */}
-                {uniqueSupplyItems.length > 0 && (
-                  <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(107,63,160,0.06)', borderRadius: '10px' }}>
-                    <div style={{ fontSize: '12px', color: C.purple, fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Shipping Cost Calculator</div>
-                    <div style={{ fontSize: '12px', color: C.muted, marginBottom: '8px' }}>Current cost per single card shipment using tracked supply prices:</div>
-                    {(() => {
-                      const items = ['Penny Sleeve', 'Semi-Rigid Card Saver', 'Team Bag', 'A6 Envelope', 'Forever Stamp', 'LetterTrack Pro']
-                      let total = 0
-                      const rows = items.map(item => {
-                        const cost = getLatestSupplyCost(item)
-                        total += cost
-                        return { item, cost }
-                      }).filter(r => r.cost > 0)
-                      return rows.length > 0 ? (
-                        <div>
-                          {rows.map(r => (
-                            <div key={r.item} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '3px 0' }}>
-                              <span style={{ color: C.muted }}>{r.item}</span>
-                              <span>${r.cost.toFixed(4)}</span>
+          {/* Supply Cost Tracker — MOVED TO BOTTOM, replaced with tile */}
+          {uniqueSupplyItems.length > 0 && (() => {
+            const totalSupplyCost = uniqueSupplyItems.reduce((a, item) => a + getLatestSupplyCost(item), 0)
+            const isOpen = (expandedTiles as any)['supply_tile']
+            const shipItems = ['Penny Sleeve', 'Semi-Rigid Card Saver', 'Team Bag', 'A6 Envelope', 'Forever Stamp', 'LetterTrack Pro']
+            let shipTotal = 0
+            const shipRows = shipItems.map(item => { const cost = getLatestSupplyCost(item); shipTotal += cost; return { item, cost } }).filter(r => r.cost > 0)
+            return (
+              <div style={{ ...card, border: `1px solid rgba(107,63,160,0.25)`, padding: 0, overflow: 'hidden' }}>
+                <div onClick={() => setExpandedTiles(prev => ({ ...prev, supply_tile: !prev.supply_tile }))}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer' }}>
+                  <div>
+                    <span style={{ fontSize: '12px', color: C.purple, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Supply Cost Tracker</span>
+                    <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{uniqueSupplyItems.length} items tracked</div>
+                    {shipTotal > 0 && <div style={{ fontSize: '12px', color: C.purple }}>Per shipment: ${shipTotal.toFixed(4)}</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button onClick={e => { e.stopPropagation(); setEditingItem({ table: 'supply_costs' }) }} style={{ background: C.purple, color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Add</button>
+                    <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div style={{ borderTop: `1px solid ${C.border}`, padding: '12px 16px' }}>
+                    {uniqueSupplyItems.map(item => {
+                      const history = supplyCosts.filter(s => s.item_name === item).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
+                      const latest = history[0]
+                      return (
+                        <div key={item} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: '14px' }}>{item}</div>
+                              <div style={{ fontSize: '12px', color: C.muted }}>{latest.unit_description} · as of {latest.effective_date}</div>
+                              {history.length > 1 && <div style={{ fontSize: '11px', color: C.muted }}>{history.length} price points</div>}
                             </div>
-                          ))}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700, padding: '6px 0 0', borderTop: `1px solid ${C.border}`, marginTop: '4px' }}>
-                            <span>Total per shipment</span>
-                            <span style={{ color: C.purple }}>${total.toFixed(4)}</span>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontWeight: 700, color: C.purple, fontSize: '15px' }}>${parseFloat(latest.cost_per_unit).toFixed(4)}</div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                            <button onClick={() => startEdit('supply_costs', latest)} style={editBtn}>Update price</button>
+                            <button onClick={() => handleDelete('supply_costs', latest.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
                           </div>
                         </div>
-                      ) : <div style={{ fontSize: '12px', color: C.muted }}>Add supply costs above to see calculation</div>
-                    })()}
+                      )
+                    })}
+                    {shipRows.length > 0 && (
+                      <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(107,63,160,0.06)', borderRadius: '10px' }}>
+                        <div style={{ fontSize: '11px', color: C.purple, fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Shipping Cost Calculator</div>
+                        {shipRows.map(r => (
+                          <div key={r.item} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '3px 0' }}>
+                            <span style={{ color: C.muted }}>{r.item}</span><span>${r.cost.toFixed(4)}</span>
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700, padding: '6px 0 0', borderTop: `1px solid ${C.border}`, marginTop: '4px' }}>
+                          <span>Per shipment</span><span style={{ color: C.purple }}>${shipTotal.toFixed(4)}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
+            )
+          })()}
 
           {/* Inventory section */}
           {allCogsInventory.length > 0 && (
@@ -1560,35 +1684,7 @@ export default function ManaSocialApp() {
             </div>
           )}
 
-          {/* Accounts Payable */}
-          {accountsPayable.filter(a => Number(a.total_amount) - Number(a.amount_paid || 0) > 0).length > 0 && (
-            <div style={{ ...card, background: 'rgba(240,192,64,0.08)', border: '1px solid rgba(240,192,64,0.3)', padding: '14px 16px' }}>
-              <div style={{ fontSize: '12px', color: '#7A5A00', fontWeight: 'bold', marginBottom: '10px' }}>ACCOUNTS PAYABLE — OPEN BALANCES</div>
-              {accountsPayable.filter(a => Number(a.total_amount) - Number(a.amount_paid || 0) > 0).map(b => {
-                const paid = Number(b.amount_paid || 0), owed = Number(b.total_amount) - paid
-                const p = Number(b.total_amount) > 0 ? (paid / Number(b.total_amount) * 100) : 0
-                return (
-                  <div key={b.id} style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px solid rgba(240,192,64,0.2)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ fontWeight: 700, fontSize: '15px' }}>{b.vendor_name}</span>
-                      <span style={{ fontSize: '14px', color: C.pink, fontWeight: 700 }}>{fmt(owed)} left</span>
-                    </div>
-                    {b.description && <div style={{ fontSize: '12px', color: C.muted, marginBottom: '4px' }}>{b.description}</div>}
-                    <div style={{ height: '6px', background: 'rgba(27,42,74,0.1)', borderRadius: '3px', marginBottom: '6px' }}>
-                      <div style={{ height: '100%', width: `${Math.min(p, 100)}%`, background: p >= 100 ? C.teal : C.gold, borderRadius: '3px', transition: 'width 0.3s' }} />
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: C.muted, marginBottom: '8px' }}>
-                      <span>Paid: {fmt(paid)}</span><span>Total: {fmt(Number(b.total_amount))}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button onClick={() => startEdit('accounts_payable', b)} style={editBtn}>Update Payment</button>
-                      <button onClick={() => handleDelete('accounts_payable', b.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+
 
           {(() => {
             const cats = EXPENSE_CATEGORIES.filter(cat => expenses.some(e => e.category === cat))
@@ -2076,23 +2172,60 @@ export default function ManaSocialApp() {
             <div style={{ fontSize: '13px', opacity: 0.5, marginTop: '2px' }}>FICA: {fmt(staffingCosts * 0.153)} · FUTA: {fmt(staffingCosts * 0.006)}</div>
             <div style={{ fontSize: '13px', opacity: 0.5 }}>Roth IRA Contributed: {fmt(payroll.reduce((a, r) => a + Number(r.roth_ira_contributed || 0), 0))}</div>
           </div>
-          {payroll.map(p => (
-            <div key={p.id} style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontWeight: 700, marginBottom: '2px', fontSize: '15px' }}>{p.employee_name}</div>
-                <div style={{ fontSize: '13px', color: C.muted }}>{p.pay_date}{p.pay_period ? ` · Period ends ${p.pay_period}` : ''}</div>
-                {p.hours_worked > 0 && <div style={{ fontSize: '13px', color: C.muted }}>{p.hours_worked} hrs @ ${p.hourly_rate}/hr</div>}
-                {p.roth_ira_contributed > 0 && <div style={{ fontSize: '12px', color: C.teal }}>Roth IRA: {fmt(p.roth_ira_contributed)} contributed</div>}
-                <div style={{ fontSize: '12px', color: C.muted }}>FICA: {fmt(Number(p.amount) * 0.153)}</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 700, fontSize: '17px' }}>{fmt(Number(p.amount))}</span>
-                <button onClick={() => startEdit('payroll', p)} style={editBtn}>Edit</button>
-                <button onClick={() => handleDelete('payroll', p.id)} style={delBtn}>×</button>
-              </div>
-            </div>
-          ))}
-          {payroll.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No payroll this period</div>}
+          {(() => {
+            const employees = Array.from(new Set(payroll.map(p => p.employee_name)))
+            if (employees.length === 0) return <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No payroll this period</div>
+            return employees.map(emp => {
+              const empPayroll = payroll.filter(p => p.employee_name === emp)
+              const empTotal = empPayroll.reduce((a, p) => a + Number(p.amount), 0)
+              const empHours = empPayroll.reduce((a, p) => a + Number(p.hours_worked || 0), 0)
+              const empRoth = empPayroll.reduce((a, p) => a + Number(p.roth_ira_contributed || 0), 0)
+              const empFICA = empTotal * 0.153
+              const isOpen = (expandedTiles as any)[`pay_${emp}`]
+              return (
+                <div key={emp} style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                  <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`pay_${emp}`]: !prev[`pay_${emp}`] }))}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : 'transparent' }}>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '15px', color: C.navy }}>{emp}</div>
+                      <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>
+                        {empPayroll.length} payment{empPayroll.length !== 1 ? 's' : ''}
+                        {empHours > 0 && ` · ${empHours.toFixed(1)} hrs`}
+                        {empRoth > 0 && ` · Roth ${fmt(empRoth)}`}
+                      </div>
+                      <div style={{ fontSize: '12px', color: C.muted }}>FICA: {fmt(empFICA)}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontWeight: 900, fontSize: '18px', color: C.text }}>{fmt(empTotal)}</span>
+                      <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div style={{ borderTop: `1px solid ${C.border}` }}>
+                      {empPayroll.map(p => (
+                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 600 }}>{p.pay_date}{p.pay_period ? ` · Period ends ${p.pay_period}` : ''}</div>
+                            {p.hours_worked > 0 && <div style={{ fontSize: '12px', color: C.muted }}>{p.hours_worked} hrs @ ${p.hourly_rate}/hr</div>}
+                            {p.roth_ira_contributed > 0 && <div style={{ fontSize: '12px', color: C.teal }}>Roth IRA: {fmt(p.roth_ira_contributed)}</div>}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 700, fontSize: '15px' }}>{fmt(Number(p.amount))}</span>
+                            <button onClick={() => startEdit('payroll', p)} style={editBtn}>Edit</button>
+                            <button onClick={() => handleDelete('payroll', p.id)} style={delBtn}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ padding: '10px 16px', background: C.inputBg, display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700 }}>
+                        <span>{emp} Total</span>
+                        <span>{fmt(empTotal)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          })()}
         </div>
       )
 
@@ -2112,20 +2245,23 @@ export default function ManaSocialApp() {
     { id: 'summary',    label: 'Summary'    },
     { id: 'income',     label: 'Sales'      },
     { id: 'expense',    label: 'Expenses'   },
-    { id: 'accounting', label: 'Accounting' },
     { id: 'assets',     label: 'Assets'     },
     { id: 'deductions', label: 'Deductions' },
     { id: 'tax',        label: 'Tax'        },
     { id: 'payroll',    label: 'Payroll'    },
+    { id: 'accounting', label: 'Accounting' },
   ]
 
   return (
-    <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px' }}>
+    <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text, transition: 'background 0.2s, color 0.2s' }}>
       <div style={{ maxWidth: '500px', margin: '0 auto', padding: '16px' }}>
         <header style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <div style={{ fontWeight: 900, color: C.navy, fontSize: '17px', letterSpacing: '-0.3px', fontFamily: FONT }}>MANA SOCIAL LLC</div>
-            <button onClick={signOut} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>Sign out</button>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button onClick={cycleTheme} title={`Mode: ${themeMode}`} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 10px', fontSize: '15px', cursor: 'pointer' }}>{themeIcon}</button>
+              <button onClick={signOut} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>Sign out</button>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: `2px solid ${C.border}`, fontWeight: 'bold', background: C.white, fontFamily: FONT, fontSize: '14px' }}>
@@ -2170,9 +2306,9 @@ export default function ManaSocialApp() {
         )}
       </div>
 
-      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: C.white, borderTop: `2px solid ${C.border}`, display: 'flex', zIndex: 400, height: '72px' }}>
+      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: isDark ? '#111D33' : '#FFFFFF', borderTop: `2px solid ${C.border}`, display: 'flex', zIndex: 400, height: '80px' }}>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ flex: 1, border: 'none', background: 'none', fontSize: '11px', fontWeight: 900, color: activeTab === t.id ? C.teal : C.muted, padding: '8px 2px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: FONT, borderTop: activeTab === t.id ? `3px solid ${C.teal}` : '3px solid transparent', minWidth: 0 }}>
+          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ flex: 1, border: 'none', background: 'none', fontSize: '13px', fontWeight: 900, color: activeTab === t.id ? C.teal : C.muted, padding: '8px 2px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: FONT, borderTop: activeTab === t.id ? `3px solid ${C.teal}` : '3px solid transparent', minWidth: 0 }}>
             {t.label}
           </button>
         ))}
