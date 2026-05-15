@@ -230,7 +230,6 @@ function parseManaPoolCSV(file: File): Promise<{ records: any[], meta: any }> {
     reader.readAsText(file)
   })
 }
-
 function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -253,31 +252,18 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
           const cost = parseFloat(String(row['Item Net Total'] || row['Item Subtotal'] || 0).replace(/[$,]/g, '')) || 0
           const tax = parseFloat(String(row['Item Tax'] || 0).replace(/[$,]/g, '')) || 0
           const dateRaw = row['Order Date']
-          const dateStr = (() => {
-            if (!dateRaw) return new Date().toISOString().split('T')[0]
-            if (typeof dateRaw === 'number') {
-              return new Date(Math.round((dateRaw - 25569) * 86400 * 1000)).toISOString().split('T')[0]
-            }
-          const userName = normalizeUser(row['Account User'] || '')
-          const { expCat, isInventory } = categorizeAmazonItem(title, amazonCat)
-          const entity = new Date(dateStr) < LLC_START ? 'sole_prop' : 'llc'
-          records.push({
-            _type: isInventory ? 'inventory' : 'expense',
-            expCat, isInventory, title, cost, tax, dateStr, userName, entity,
-            orderId, asin
-          })
-        }
-        resolve({ records, meta: { rows: records.length } })
-      } catch (err: any) {
-        reject(new Error('Amazon parse failed: ' + err.message))
-      }
-    }
-    reader.onerror = () => reject(new Error('File read error'))
-    reader.readAsText(file)
-  })
-}
- })()
-          }
+const dateStr = (() => {
+  if (!dateRaw) return new Date().toISOString().split('T')[0]
+  if (typeof dateRaw === 'number') {
+    return new Date(Math.round((dateRaw - 25569) * 86400 * 1000)).toISOString().split('T')[0]
+  }
+  const s = String(dateRaw)
+  if (s.includes('/')) {
+    const parts = s.split('/')
+    if (parts.length === 3) return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
+  }
+  return s.split('T')[0]
+})()
           const userName = normalizeUser(row['Account User'] || '')
           const { expCat, isInventory } = categorizeAmazonItem(title, amazonCat)
           const entity = new Date(dateStr) < LLC_START ? 'sole_prop' : 'llc'
