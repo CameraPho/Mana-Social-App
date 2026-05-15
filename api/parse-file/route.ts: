@@ -1,0 +1,43 @@
+import { NextRequest, NextResponse } from 'next/server'
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const { content, mode, categories } = body
+
+    const prompt = mode === 'sales'
+      ? `Sales receipt or report. Extract all sales transactions. Return ONLY a JSON array, no markdown:\n[{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","num_orders":1}]`
+      : `Expense receipt or invoice. Extract all line items. Return ONLY a JSON array, no markdown:\n[{"category":"${categories}","cost":0,"date":"YYYY-MM-DD","notes":"item description","user_name":"Cam"}]`
+
+    const messages = [
+      {
+        role: 'user',
+        content: [
+          ...content,
+          { type: 'text', text: prompt }
+        ]
+      }
+    ]
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages,
+      }),
+    })
+
+    const data = await res.json()
+    const text = data.content?.[0]?.text || '[]'
+    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim())
+    return NextResponse.json({ result: parsed })
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
+}
