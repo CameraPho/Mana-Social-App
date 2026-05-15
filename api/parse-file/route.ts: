@@ -1,42 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { content, mode, categories } = body
 
-    const prompt = mode === 'sales'
-      ? `Sales receipt or report. Extract all sales transactions. Return ONLY a JSON array, no markdown:\n[{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","num_orders":1}]`
-      : `Expense receipt or invoice. Extract all line items. Return ONLY a JSON array, no markdown:\n[{"category":"${categories}","cost":0,"date":"YYYY-MM-DD","notes":"item description","user_name":"Cam"}]`
-
-    const messages = [
-      {
-        role: 'user',
-        content: [
-          ...content,
-          { type: 'text', text: prompt }
-        ]
-      }
-    ]
-
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': process.env.ANTHROPIC_API_KEY!,
-        'anthropic-version': '2023-06-01',
+        'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        messages,
-      }),
+        max_tokens: 4000,
+        system: body.systemPrompt,
+        messages: [{ role: 'user', content: body.content }]
+      })
     })
 
-    const data = await res.json()
-    const text = data.content?.[0]?.text || '[]'
-    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim())
-    return NextResponse.json({ result: parsed })
+    const data = await response.json()
+
+    if (data.error) {
+      return NextResponse.json({ error: data.error.message || 'Anthropic error' }, { status: 500 })
+    }
+
+    const raw = data.content?.[0]?.text || '{}'
+    const clean = raw.replace(/```json|```/g, '').trim()
+    const parsed = JSON.parse(clean)
+    return NextResponse.json(parsed)
+
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
