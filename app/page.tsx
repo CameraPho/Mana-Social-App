@@ -319,15 +319,18 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses', uploadedB
 
     const fileHash = await hashFile(file)
 
+    console.log('Calling /api/smart-parse with:', { fileName: file.name, fileHash, fileSize: file.size, contentLength: content.length })
     const res = await fetch('/api/smart-parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content, fileName: file.name, fileHash, fileSize: file.size, uploadedBy, override })
     })
     const data = await res.json()
+    console.log('smart-parse response:', data)
     return data
   } catch (err: any) {
-    return { error: err.message }
+    console.error('parseFileWithAI error:', err)
+    return { error: err.message || 'Unknown error in parseFileWithAI' }
   }
 }
 
