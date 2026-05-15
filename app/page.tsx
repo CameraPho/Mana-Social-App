@@ -276,8 +276,12 @@ const dateStr = (() => {
           })
         }
         resolve({ records, meta: { rows: records.length } })
-      } catch (err: any) { reject(new Error('Amazon parse failed: ' + err.message)) }
-    }
+        } catch (err: any) { reject(new Error('Amazon parse failed: ' + err.message)) }
+      }
+    reader.onerror = () => reject(new Error('File read error'))
+    reader.readAsText(file)
+  })
+}
     reader.onerror = () => reject(new Error('File read error'))
     reader.readAsText(file)
   })
