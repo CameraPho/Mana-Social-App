@@ -253,18 +253,18 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
           const cost = parseFloat(String(row['Item Net Total'] || row['Item Subtotal'] || 0).replace(/[$,]/g, '')) || 0
           const tax = parseFloat(String(row['Item Tax'] || 0).replace(/[$,]/g, '')) || 0
          const dateRaw = row['Order Date']
-let dateStr = new Date().toISOString().split('T')[0]
-if (dateRaw) {
+const dateStr = (() => {
+  if (!dateRaw) return new Date().toISOString().split('T')[0]
   if (typeof dateRaw === 'number') {
-    const d = new Date(Math.round((dateRaw - 25569) * 86400 * 1000))
-    dateStr = d.toISOString().split('T')[0]
-  } else {
-    const s = String(dateRaw)
-    const parts = s.includes('/') ? s.split('/') : []
-    if (parts.length === 3) dateStr = `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
-    else if (s.includes('-')) dateStr = s.split('T')[0]
+    return new Date(Math.round((dateRaw - 25569) * 86400 * 1000)).toISOString().split('T')[0]
   }
-}
+  const s = String(dateRaw)
+  if (s.includes('/')) {
+    const parts = s.split('/')
+    if (parts.length === 3) return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
+  }
+  return s.split('T')[0]
+})()
           }
           const userName = normalizeUser(row['Account User'] || '')
           const { expCat, isInventory } = categorizeAmazonItem(title, amazonCat)
