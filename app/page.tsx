@@ -311,7 +311,7 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses', uploadedB
         reader.readAsDataURL(file)
       })
       content = [
-        { type: isPDF ? 'document' : 'image', source: { type: 'base64', media_type: file.type || 'application/pdf', data: base64 } }
+        { type: isPDF ? 'document' : 'image', source: { type: 'base64', media_type: isPDF ? 'application/pdf' : (file.type || 'image/jpeg'), data: base64 } }
       ]
     } else {
       return { error: 'Unsupported file type' }
@@ -661,9 +661,15 @@ export default function ManaSocialApp() {
         return
       }
     }
-    // AI universal parser
+    // Hybrid routing: CSV/XLSX use deterministic parsers above; only PDFs/images use AI
+    const isImageOrPDF = file.type.startsWith('image/') || file.type === 'application/pdf'
+    if (!isImageOrPDF) {
+      setUploadStatus('Unrecognized file format. CSV/XLSX should be from a known platform (TCGplayer, eBay, ManaPool, or Amazon). PDFs and photos use AI.')
+      return
+    }
+
     setUploadMode(mode)
-    setUploadStatus('Reading file with AI... (this may take 10-20 seconds)')
+    setUploadStatus('Reading file with AI... (10-20 seconds)')
     const result = await parseFileWithAI(file, mode, 'Cam', false)
 
     if (result.error) { setUploadStatus('Error: ' + result.error); return }
