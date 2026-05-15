@@ -293,11 +293,12 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
     const isCSV = file.name.endsWith('.csv') || file.type === 'text/csv'
     const isXLSX = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
     let content: any[] = []
+
     if (isCSV || isXLSX) {
       const text = await file.text()
       const prompt = mode === 'sales'
-        ? `Sales report. Extract all sales. Return ONLY JSON array:\n[{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","num_orders":1}]\n\n${text.slice(0,8000)}`
-        : `Expense receipt or report. Extract all expenses. Return ONLY JSON array:\n[{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"vendor/item","user_name":"Cam"}]\n\n${text.slice(0,8000)}`
+        ? `Sales report. Extract all sales. Return ONLY JSON array:\n[{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD","num_orders":1}]\n\n${text.slice(0, 8000)}`
+        : `Expense receipt or report. Extract all expenses. Return ONLY JSON array:\n[{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"vendor/item","user_name":"Cam"}]\n\n${text.slice(0, 8000)}`
       content = [{ type: 'text', text: prompt }]
     } else if (isImage || isPDF) {
       const base64 = await new Promise<string>((res, rej) => {
@@ -306,21 +307,27 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses'): Promise<
         reader.onerror = rej
         reader.readAsDataURL(file)
       })
-      const prompt = mode === 'sales'
-        ? 'Sales receipt. Return ONLY JSON array: [{"platform":"tcgplayer|ebay|manapool|other","amount":0,"fees":0,"shipping":0,"date":"YYYY-MM-DD"}]'
-        : `Expense receipt or invoice. Extract all line items. Return ONLY JSON array: [{"category":"${EXPENSE_CATEGORIES.join('|')}","cost":0,"date":"YYYY-MM-DD","notes":"item description","user_name":"Cam"}]`
       content = [
-        { type: isImage ? 'image' : 'document', source: { type: 'base64', media_type: file.type || 'application/pdf', data: base64 } },
-        { type: 'text', text: prompt }
+        {
+          type: isPDF ? 'document' : 'image',
+          source: { type: 'base64', media_type: file.type || 'application/pdf', data: base64 }
+        }
       ]
     } else return []
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2000, messages: [{ role: 'user', content }] })
+
+    const res = await fetch('/api/parse-file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+        mode,
+        categories: EXPENSE_CATEGORIES.join('|')
+      })
     })
+
     const data = await res.json()
-    const text = data.content?.[0]?.text || '[]'
-    return JSON.parse(text.replace(/```json|```/g, '').trim())
+    if (data.error) throw new Error(data.error)
+    return data.result || []
   } catch { return [] }
 }
 
