@@ -319,17 +319,14 @@ async function parseFileWithAI(file: File, mode: 'sales' | 'expenses', uploadedB
 
     const fileHash = await hashFile(file)
 
-    console.log('Calling /api/smart-parse with:', { fileName: file.name, fileHash, fileSize: file.size, contentLength: content.length })
     const res = await fetch('/api/smart-parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content, fileName: file.name, fileHash, fileSize: file.size, uploadedBy, override })
     })
     const data = await res.json()
-    console.log('smart-parse response:', data)
     return data
   } catch (err: any) {
-    console.error('parseFileWithAI error:', err)
     return { error: err.message || 'Unknown error in parseFileWithAI' }
   }
 }
@@ -414,6 +411,7 @@ export default function ManaSocialApp() {
   const [syncStatus, setSyncStatus] = useState('')
   const [acctDrilldown, setAcctDrilldown] = useState<string | null>(null)
   const [bulkAddOpen, setBulkAddOpen] = useState(false)
+  const [expandedTiles, setExpandedTiles] = useState<Record<string, boolean>>({})
   const [pendingReviewCount, setPendingReviewCount] = useState(0)
   const [importQueueOpen, setImportQueueOpen] = useState(false)
   const [importQueue, setImportQueue] = useState<any[]>([])
@@ -751,9 +749,10 @@ export default function ManaSocialApp() {
       payload = { vendor_name: formData.apVendor, description: formData.label, invoice_date: formData.date, due_date: formData.apDue || formData.date, total_amount: Number(formData.apTotal), amount_paid: Number(formData.amountPaid || 0), entity: getEntity(formData.date), notes: formData.notes }
     } else if (t === 'expenses') {
       if (!formData.amount) return alert('Missing amount')
-      // Save AI correction for future auto-fill
       if (formData.label) saveCorrection(formData.label, formData.category)
       payload = { category: formData.category, cost: Number(formData.amount), purchase_date: formData.date, notes: formData.label, entity: getEntity(formData.date), user_name: formData.userName || 'Cam', paid_by_company: formData.paidByCompany }
+      // Flag for asset auto-creation after save
+      const willAutoCreateAsset = (formData.category === 'Equipment' || formData.category === 'Furniture & Fixtures') && Number(formData.amount) > 200
     } else if (t === 'payroll') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
       payload = { employee_name: formData.label, amount: Number(formData.amount), pay_date: formData.date, hours_worked: Number(formData.hoursWorked || 0), hourly_rate: Number(formData.hourlyRate || 0), pay_period: formData.payPeriod || formData.date, roth_ira_eligible: Number(formData.rothEligible || 0), roth_ira_contributed: Number(formData.rothContributed || 0) }
@@ -784,8 +783,26 @@ export default function ManaSocialApp() {
       const { error } = await supabase.from(t).update(payload).eq('id', editingItem.data.id)
       if (error) return alert(error.message)
     } else {
-      const { error } = await supabase.from(t).insert([payload])
+      const { data: inserted, error } = await supabase.from(t).insert([payload]).select().single()
       if (error) return alert(error.message)
+      // Auto-create asset for Equipment/Furniture expenses over $200
+      if (t === 'expenses' && inserted && (payload.category === 'Equipment' || payload.category === 'Furniture & Fixtures') && Number(payload.cost) > 200) {
+        const life = payload.category === 'Furniture & Fixtures' ? 7 : 5
+        await supabase.from('assets').insert({
+          purchase_date: payload.purchase_date,
+          description: payload.notes || 'Auto-created from expense',
+          category: payload.category,
+          cost: Number(payload.cost),
+          tax_paid: 0,
+          useful_life_yrs: life,
+          depreciation_method: 'both',
+          entity: payload.entity,
+          user_name: payload.user_name || 'Cam',
+          source_expense_id: inserted.id,
+          is_auto_created: true
+        })
+        await supabase.from('expenses').update({ asset_created: true }).eq('id', inserted.id)
+      }
     }
     setEditingItem(null); setFormData(emptyForm); fetchData()
   }
@@ -1162,24 +1179,47 @@ export default function ManaSocialApp() {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
                 <input type="checkbox" checked={row.selected} onChange={e => { const updated = [...bulkRows]; updated[i].selected = e.target.checked; setBulkRows(updated) }} style={{ width: '18px', height: '18px', flexShrink: 0 }} />
                 <span style={{ fontSize: '12px', color: C.muted, minWidth: '70px' }}>{row.date} {new Date(row.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short'})}</span>
-                {bulkTable === 'mileage_log' && <>
-                  <input value={row.purpose} onChange={e => { const u=[...bulkRows]; u[i].purpose=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', flex: 2 }} placeholder="Purpose" />
-                  <input type="number" step="0.1" value={row.miles} onChange={e => { const u=[...bulkRows]; u[i].miles=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', width: '60px', flex: 0 }} placeholder="mi" />
-                </>}
-                {bulkTable === 'expenses' && <>
-                  <select value={row.category} onChange={e => { const u=[...bulkRows]; u[i].category=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', flex: 2 }}>
-                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <input type="number" step="0.01" value={row.cost} onChange={e => { const u=[...bulkRows]; u[i].cost=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', width: '80px', flex: 0 }} placeholder="$" />
-                </>}
-                {bulkTable === 'sales' && <>
-                  <input value={row.platform} onChange={e => { const u=[...bulkRows]; u[i].platform=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', flex: 1 }} placeholder="Platform" />
-                  <input type="number" step="0.01" value={row.amount} onChange={e => { const u=[...bulkRows]; u[i].amount=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', width: '80px', flex: 0 }} placeholder="$" />
-                </>}
-                {bulkTable === 'payroll' && <>
-                  <input value={row.employee_name} onChange={e => { const u=[...bulkRows]; u[i].employee_name=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', flex: 1 }} placeholder="Employee" />
-                  <input type="number" step="0.5" value={row.hours_worked} onChange={e => { const u=[...bulkRows]; u[i].hours_worked=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '6px 8px', fontSize: '12px', width: '60px', flex: 0 }} placeholder="hrs" />
-                </>}
+                {bulkTable === 'mileage_log' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', flex: 1 }}>
+                    <input value={row.purpose} onChange={e => { const u=[...bulkRows]; u[i].purpose=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Purpose" />
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <input value={row.from_location} onChange={e => { const u=[...bulkRows]; u[i].from_location=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="From" />
+                      <input value={row.to_location} onChange={e => { const u=[...bulkRows]; u[i].to_location=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="To" />
+                    </div>
+                    <input type="number" step="0.1" value={row.miles} onChange={e => { const u=[...bulkRows]; u[i].miles=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Miles" />
+                    <select value={row.user_name||'Cam'} onChange={e => { const u=[...bulkRows]; u[i].user_name=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }}>
+                      <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
+                    </select>
+                  </div>
+                )}
+                {bulkTable === 'expenses' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', flex: 1 }}>
+                    <select value={row.category} onChange={e => { const u=[...bulkRows]; u[i].category=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }}>
+                      {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <input value={row.notes||''} onChange={e => { const u=[...bulkRows]; u[i].notes=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Description" />
+                    <input type="number" step="0.01" value={row.cost} onChange={e => { const u=[...bulkRows]; u[i].cost=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Amount $" />
+                    <select value={row.user_name||'Cam'} onChange={e => { const u=[...bulkRows]; u[i].user_name=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }}>
+                      <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
+                    </select>
+                  </div>
+                )}
+                {bulkTable === 'sales' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', flex: 1 }}>
+                    <input value={row.platform} onChange={e => { const u=[...bulkRows]; u[i].platform=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Platform" />
+                    <input type="number" step="0.01" value={row.amount} onChange={e => { const u=[...bulkRows]; u[i].amount=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Amount $" />
+                    <input type="number" step="0.01" value={row.fees||''} onChange={e => { const u=[...bulkRows]; u[i].fees=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Fees $" />
+                    <input type="number" step="0.01" value={row.shipping||''} onChange={e => { const u=[...bulkRows]; u[i].shipping=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Shipping $" />
+                  </div>
+                )}
+                {bulkTable === 'payroll' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', flex: 1 }}>
+                    <input value={row.employee_name} onChange={e => { const u=[...bulkRows]; u[i].employee_name=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Employee" />
+                    <input type="number" step="0.5" value={row.hours_worked} onChange={e => { const u=[...bulkRows]; u[i].hours_worked=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Hours" />
+                    <input type="number" step="0.01" value={row.hourly_rate||16} onChange={e => { const u=[...bulkRows]; u[i].hourly_rate=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Rate $/hr" />
+                    <input value={row.pay_period||''} onChange={e => { const u=[...bulkRows]; u[i].pay_period=e.target.value; setBulkRows(u) }} style={{ ...inp, padding: '5px 8px', fontSize: '12px' }} placeholder="Pay period" />
+                  </div>
+                )}
               </div>
             ))}
             <button onClick={saveBulkRows} style={{ width: '100%', marginTop: '16px', padding: '14px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, cursor: 'pointer', fontSize: '15px', fontFamily: FONT }}>
@@ -1265,23 +1305,49 @@ export default function ManaSocialApp() {
             {syncStatus && <div style={{ marginTop: '8px', fontSize: '13px', color: C.teal }}>{syncStatus}</div>}
           </div>
           {renderUploadPreview()}
-          {sales.map(s => (
-            <div key={s.id} style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontWeight: 700, marginBottom: '2px', fontSize: '15px' }}>{s.platform}</div>
-                <div style={{ fontSize: '13px', color: C.muted }}>{s.sale_date} · Fees {fmt(Number(s.fees||0)+Number(s.shipping||0))}</div>
-                {s.period_start && s.period_start !== s.sale_date && <div style={{ fontSize: '12px', color: C.muted }}>Period: {s.period_start} – {s.period_end}</div>}
-                {s.num_orders > 0 && <div style={{ fontSize: '12px', color: C.muted }}>{s.num_orders} orders</div>}
-                <div style={{ fontSize: '12px', color: s.entity === 'llc' ? C.teal : C.gold }}>{s.entity === 'llc' ? 'LLC' : 'Sole Prop'}</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 700, color: C.green, fontSize: '17px' }}>{fmt(Number(s.amount))}</span>
-                <button onClick={() => startEdit('sales', s)} style={editBtn}>Edit</button>
-                <button onClick={() => handleDelete('sales', s.id)} style={delBtn}>×</button>
-              </div>
-            </div>
-          ))}
-          {sales.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No sales this period</div>}
+          {(() => {
+            const platforms = Array.from(new Set(sales.map(s => s.platform)))
+            if (platforms.length === 0) return <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No sales this period</div>
+            return platforms.map(platform => {
+              const platformSales = sales.filter(s => s.platform === platform)
+              const platformTotal = platformSales.reduce((a, s) => a + Number(s.amount), 0)
+              const platformFees = platformSales.reduce((a, s) => a + Number(s.fees||0) + Number(s.shipping||0), 0)
+              const isOpen = (expandedTiles as any)[`sales_${platform}`]
+              return (
+                <div key={platform} style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                  <div onClick={() => setExpandedTiles((prev: any) => ({ ...prev, [`sales_${platform}`]: !prev[`sales_${platform}`] }))}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : 'transparent' }}>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '15px', textTransform: 'capitalize', color: C.navy }}>{platform}</div>
+                      <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{platformSales.length} record{platformSales.length !== 1 ? 's' : ''} · Fees {fmt(platformFees)}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontWeight: 900, color: C.green, fontSize: '18px' }}>{fmt(platformTotal)}</span>
+                      <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div style={{ borderTop: `1px solid ${C.border}` }}>
+                      {platformSales.map(s => (
+                        <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 600 }}>{s.period_start && s.period_start !== s.sale_date ? `${s.period_start} – ${s.period_end}` : s.sale_date}</div>
+                            <div style={{ fontSize: '12px', color: C.muted }}>Fees {fmt(Number(s.fees||0)+Number(s.shipping||0))} · {s.num_orders||1} orders</div>
+                            <div style={{ fontSize: '11px', color: s.entity === 'llc' ? C.teal : C.gold }}>{s.entity === 'llc' ? 'LLC' : 'Sole Prop'}</div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 700, color: C.green, fontSize: '15px' }}>{fmt(Number(s.amount))}</span>
+                            <button onClick={() => startEdit('sales', s)} style={editBtn}>Edit</button>
+                            <button onClick={() => handleDelete('sales', s.id)} style={delBtn}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          })()}
         </div>
       )
 
@@ -1397,27 +1463,59 @@ export default function ManaSocialApp() {
             </div>
           )}
 
-          {expenses.map(e => (
-            <div key={e.id} style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontWeight: 700, marginBottom: '2px', fontSize: '15px' }}>{e.category}</div>
-                {e.notes && <div style={{ fontSize: '13px', color: C.muted }}>{e.notes}</div>}
-                <div style={{ fontSize: '13px', color: C.muted }}>{e.purchase_date}</div>
-                <div style={{ display: 'flex', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
-                  {DEDUCTIBILITY[e.category] && <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', background: DEDUCTIBILITY[e.category].pct === 100 ? '#E1F5EE' : '#FEF3E2', color: DEDUCTIBILITY[e.category].pct === 100 ? '#085041' : '#7A5A00' }}>{DEDUCTIBILITY[e.category].label}</div>}
-                  <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', background: e.paid_by_company ? 'rgba(16,185,129,0.12)' : 'rgba(240,192,64,0.15)', color: e.paid_by_company ? '#085041' : '#7A5A00' }}>
-                    {e.user_name || 'Cam'}{e.paid_by_company ? ' — LLC paid' : ' — personal funds'}
+          {(() => {
+            const cats = EXPENSE_CATEGORIES.filter(cat => expenses.some(e => e.category === cat))
+            if (cats.length === 0) return <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No expenses this period</div>
+            return cats.map(cat => {
+              const catExpenses = expenses.filter(e => e.category === cat)
+              const catTotal = catExpenses.reduce((a, e) => a + Number(e.cost), 0)
+              const isOpen = (expandedTiles as any)[`exp_${cat}`]
+              const rule = DEDUCTIBILITY[cat]
+              return (
+                <div key={cat} style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                  <div onClick={() => setExpandedTiles((prev: any) => ({ ...prev, [`exp_${cat}`]: !prev[`exp_${cat}`] }))}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer', background: isOpen ? 'rgba(232,64,122,0.03)' : 'transparent' }}>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '15px', color: C.navy }}>{cat}</div>
+                      <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>
+                        {catExpenses.length} item{catExpenses.length !== 1 ? 's' : ''}
+                        {rule && <span style={{ marginLeft: '6px', padding: '1px 5px', borderRadius: '3px', background: rule.pct === 100 ? '#E1F5EE' : '#FEF3E2', color: rule.pct === 100 ? '#085041' : '#7A5A00', fontSize: '11px' }}>{rule.label}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontWeight: 900, color: '#ef4444', fontSize: '18px' }}>{fmt(-catTotal)}</span>
+                      <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
                   </div>
+                  {isOpen && (
+                    <div style={{ borderTop: `1px solid ${C.border}` }}>
+                      {catExpenses.map(e => (
+                        <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+                          <div>
+                            {e.notes && <div style={{ fontSize: '13px', fontWeight: 600 }}>{e.notes}</div>}
+                            <div style={{ fontSize: '12px', color: C.muted }}>{e.purchase_date}</div>
+                            <div style={{ fontSize: '11px', padding: '1px 5px', borderRadius: '3px', display: 'inline-block', marginTop: '2px', background: e.paid_by_company ? 'rgba(16,185,129,0.12)' : 'rgba(240,192,64,0.15)', color: e.paid_by_company ? '#085041' : '#7A5A00' }}>
+                              {e.user_name || 'Cam'}{e.paid_by_company ? ' — LLC' : ' — personal'}
+                            </div>
+                          {e.asset_created && <div style={{ fontSize: '11px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(107,63,160,0.12)', color: C.purple, display: 'inline-block', marginLeft: '4px' }}>→ Asset</div>}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: '8px' }}>
+                            <span style={{ fontWeight: 700, color: '#ef4444', fontSize: '15px' }}>{fmt(-Number(e.cost))}</span>
+                            <button onClick={() => startEdit('expenses', e)} style={editBtn}>Edit</button>
+                            <button onClick={() => handleDelete('expenses', e.id)} style={delBtn}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ padding: '10px 16px', background: '#F5F6FA', display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700 }}>
+                        <span>{cat} Total</span>
+                        <span style={{ color: '#ef4444' }}>{fmt(-catTotal)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 700, color: '#ef4444', fontSize: '17px' }}>{fmt(-Number(e.cost))}</span>
-                <button onClick={() => startEdit('expenses', e)} style={editBtn}>Edit</button>
-                <button onClick={() => handleDelete('expenses', e.id)} style={delBtn}>×</button>
-              </div>
-            </div>
-          ))}
-          {expenses.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No expenses this period</div>}
+              )
+            })
+          })()}
         </div>
       )
 
@@ -1537,8 +1635,56 @@ export default function ManaSocialApp() {
 
       case 'assets': return (
         <div>
+          {/* Inventory Tile — top priority */}
+          <div style={{ ...card, background: `linear-gradient(135deg,${C.purple},#4A2070)`, color: '#fff', padding: '20px', marginBottom: '12px' }}>
+            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>INVENTORY VALUE (COST BASIS)</div>
+            <div style={{ fontSize: '32px', fontWeight: 900 }}>{fmt(endingInventory)}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '14px' }}>
+              <div><div style={{ fontSize: '10px', opacity: 0.6 }}>TOTAL LOTS</div><div style={{ fontSize: '18px', fontWeight: 700 }}>{allCogsInventory.length}</div></div>
+              <div><div style={{ fontSize: '10px', opacity: 0.6 }}>COGS RECOGNIZED</div><div style={{ fontSize: '18px', fontWeight: 700, color: '#fda4af' }}>{fmt(cogsRecognized)}</div></div>
+              <div><div style={{ fontSize: '10px', opacity: 0.6 }}>EST. MARGIN</div><div style={{ fontSize: '18px', fontWeight: 700, color: '#4ade80' }}>{endingInventory > 0 ? ((allCogsInventory.reduce((a,r) => a + parseFloat(r.est_sell_value||0), 0) - endingInventory) / endingInventory * 100).toFixed(0) + '%' : '—'}</div></div>
+            </div>
+          </div>
+
+          {/* Inventory lots drilldown */}
+          {allCogsInventory.length > 0 && (
+            <div style={card}>
+              <div onClick={() => setExpandedTiles(prev => ({ ...prev, inv_lots: !prev.inv_lots }))}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+                <span style={secHdr}>INVENTORY LOTS</span>
+                <span style={{ color: C.muted, fontSize: '14px', marginTop: '-10px' }}>{expandedTiles.inv_lots ? '▲' : '▼'}</span>
+              </div>
+              {expandedTiles.inv_lots && allCogsInventory.map(r => {
+                const ratio = r.total_units > 0 ? Math.min((r.sold_units||0)/r.total_units, 1) : 0
+                const remaining = parseFloat(r.total_cost||0) * (1 - ratio)
+                const pct = Math.round(ratio * 100)
+                return (
+                  <div key={r.id} style={{ padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 700 }}>{r.description}</div>
+                        <div style={{ fontSize: '11px', color: C.muted }}>{r.date} · {r.inventory_type} · {r.total_units} units</div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: C.purple }}>{fmt(remaining)}</div>
+                        <div style={{ fontSize: '11px', color: C.muted }}>{pct}% sold</div>
+                      </div>
+                    </div>
+                    <div style={{ height: '4px', background: 'rgba(27,42,74,0.1)', borderRadius: '2px' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: pct >= 100 ? C.teal : C.purple, borderRadius: '2px' }} />
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                      <button onClick={() => startEdit('cogs_inventory', r)} style={editBtn}>Edit</button>
+                      <button onClick={() => handleDelete('cogs_inventory', r.id)} style={delBtn}>×</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
-            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL ASSETS (COST)</div>
+            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>FIXED ASSETS (COST)</div>
             <div style={{ fontSize: '30px', fontWeight: 900 }}>{fmt(totalAssetCost)}</div>
             <div style={{ display: 'flex', gap: '16px', marginTop: '8px', fontSize: '13px', opacity: 0.7 }}>
               <span>Book Value: {fmt(totalBookValue)}</span><span>Acc. Dep: {fmt(totalAccumulatedDep)}</span>
@@ -1660,18 +1806,51 @@ export default function ManaSocialApp() {
                 <button onClick={() => setEditingItem({ table: 'mileage_log' })} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Trip</button>
               </div>
             </div>
-            {mileageLog.map(r => (
-              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: `1px solid ${C.border}` }}>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: 500 }}>{r.purpose}</div>
-                  <div style={{ fontSize: '12px', color: C.muted }}>{r.date} · {r.from_location} → {r.to_location} · {r.user_name || 'Cam'}</div>
-                  <div style={{ fontSize: '12px', color: C.teal }}>{parseFloat(r.miles).toFixed(1)} mi · {fmt(parseFloat(r.miles) * MILEAGE_RATE)}</div>
-                </div>
-                <button onClick={() => handleDelete('mileage_log', r.id)} style={delBtn}>×</button>
-              </div>
-            ))}
-            {mileageLog.length === 0 && <div style={{ textAlign: 'center', padding: '20px', color: C.muted }}>No trips logged yet</div>}
-            {mileageLog.length > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', fontSize: '14px', fontWeight: 700 }}><span>{totalMiles.toFixed(1)} total miles</span><span style={{ color: C.teal }}>{fmt(mileageDeduction)}</span></div>}
+            {(() => {
+              const users = Array.from(new Set(mileageLog.map(r => r.user_name || 'Cam')))
+              if (mileageLog.length === 0) return <div style={{ textAlign: 'center', padding: '20px', color: C.muted }}>No trips logged yet</div>
+              return (
+                <>
+                  {users.map(user => {
+                    const userTrips = mileageLog.filter(r => (r.user_name || 'Cam') === user)
+                    const userMiles = userTrips.reduce((a, r) => a + parseFloat(r.miles||0), 0)
+                    const isOpen = (expandedTiles as any)[`mile_${user}`]
+                    return (
+                      <div key={user} style={{ marginBottom: '8px', border: `1px solid ${C.border}`, borderRadius: '10px', overflow: 'hidden' }}>
+                        <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`mile_${user}`]: !prev[`mile_${user}`] }))}
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : '#F5F6FA' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '14px' }}>{user}</div>
+                            <div style={{ fontSize: '12px', color: C.muted }}>{userTrips.length} trips · {userMiles.toFixed(1)} mi</div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 700, color: C.teal }}>{fmt(userMiles * MILEAGE_RATE)}</span>
+                            <span style={{ color: C.muted }}>{isOpen ? '▲' : '▼'}</span>
+                          </div>
+                        </div>
+                        {isOpen && userTrips.map(r => (
+                          <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderTop: `1px solid ${C.border}` }}>
+                            <div>
+                              <div style={{ fontSize: '13px', fontWeight: 600 }}>{r.purpose}</div>
+                              <div style={{ fontSize: '12px', color: C.muted }}>{r.date} · {r.from_location} → {r.to_location}</div>
+                              <div style={{ fontSize: '12px', color: C.teal }}>{parseFloat(r.miles).toFixed(1)} mi · {fmt(parseFloat(r.miles) * MILEAGE_RATE)}</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <button onClick={() => startEdit('mileage_log', r)} style={editBtn}>Edit</button>
+                              <button onClick={() => handleDelete('mileage_log', r.id)} style={delBtn}>×</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', fontSize: '14px', fontWeight: 700 }}>
+                    <span>{totalMiles.toFixed(1)} total miles</span>
+                    <span style={{ color: C.teal }}>{fmt(mileageDeduction)}</span>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       )
