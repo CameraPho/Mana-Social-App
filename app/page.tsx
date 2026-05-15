@@ -554,7 +554,7 @@ export default function ManaSocialApp() {
     const matches = supplyCosts.filter(s => s.item_name === itemName).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
     return matches.length > 0 ? parseFloat(matches[0].cost_per_unit) : 0
   }
-  const uniqueSupplyItems = [...new Set(supplyCosts.map(s => s.item_name))]
+  const uniqueSupplyItems = Array.from(new Set(supplyCosts.map(s => s.item_name)))
 
   const quarters = [
     { label: 'Q1', start: '2026-01-01', end: '2026-03-31', due941: 'Apr 30', due1040: 'Apr 15' },
