@@ -189,11 +189,9 @@ function parseManaPoolCSV(file: File): Promise<{ records: any[], meta: any }> {
         for (const row of rows) {
           const period = row['Period'] || row['period']
           if (!period) continue
-          // Handle Excel serial date numbers
           let dateStr = ''
           if (typeof period === 'number') {
-            const d = new Date(Math.round((period - 25569) * 86400 * 1000))
-            dateStr = d.toISOString().split('T')[0]
+            dateStr = new Date(Math.round((period - 25569) * 86400 * 1000)).toISOString().split('T')[0]
           } else {
             dateStr = String(period).split('T')[0]
           }
@@ -230,6 +228,7 @@ function parseManaPoolCSV(file: File): Promise<{ records: any[], meta: any }> {
     reader.readAsText(file)
   })
 }
+
 function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -239,25 +238,35 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
         const wb = XLSX.read(text, { type: 'string', raw: false })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows: any[] = XLSX.utils.sheet_to_json(ws)
-        const seen = new Set<string>()
+        const seenKeys: Record<string, boolean> = {}
         const records: any[] = []
         for (const row of rows) {
           const orderId = row['Order ID'] || ''
           const asin = row['ASIN'] || ''
-          const key = `${orderId}_${asin}`
-          if (seen.has(key)) continue
-          seen.add(key)
+          const key = orderId + '_' + asin
+          if (seenKeys[key]) continue
+          seenKeys[key] = true
           const title = row['Title'] || ''
           const amazonCat = row['Amazon-Internal Product Category'] || ''
           const cost = parseFloat(String(row['Item Net Total'] || row['Item Subtotal'] || 0).replace(/[$,]/g, '')) || 0
           const tax = parseFloat(String(row['Item Tax'] || 0).replace(/[$,]/g, '')) || 0
           const dateRaw = row['Order Date']
-          const dateStr = (() => {
-            if (!dateRaw) return new Date().toISOString().split('T')[0]
+          let dateStr = new Date().toISOString().split('T')[0]
+          if (dateRaw !== undefined && dateRaw !== null && dateRaw !== '') {
             if (typeof dateRaw === 'number') {
-              return new Date(Math.round((dateRaw - 25569) * 86400 * 1000)).toISOString().split('T')[0]
+              dateStr = new Date(Math.round((dateRaw - 25569) * 86400 * 1000)).toISOString().split('T')[0]
+            } else {
+              const s = String(dateRaw)
+              if (s.includes('/')) {
+                const parts = s.split('/')
+                if (parts.length === 3) {
+                  dateStr = parts[2] + '-' + parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0')
+                }
+              } else if (s.includes('-')) {
+                dateStr = s.split('T')[0]
+              }
             }
-            
+          }
           const userName = normalizeUser(row['Account User'] || '')
           const { expCat, isInventory } = categorizeAmazonItem(title, amazonCat)
           const entity = new Date(dateStr) < LLC_START ? 'sole_prop' : 'llc'
@@ -272,33 +281,6 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
         reject(new Error('Amazon parse failed: ' + err.message))
       }
     }
-    reader.onerror = () => reject(new Error('File read error'))
-    reader.readAsText(file)
-  })
-}
-  const s = String(dateRaw)
-  if (s.includes('/')) {
-    const parts = s.split('/')
-    if (parts.length === 3) return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
-  }
-  return s.split('T')[0]
-})()
-          const userName = normalizeUser(row['Account User'] || '')
-          const { expCat, isInventory } = categorizeAmazonItem(title, amazonCat)
-          const entity = new Date(dateStr) < LLC_START ? 'sole_prop' : 'llc'
-          records.push({
-            _type: isInventory ? 'inventory' : 'expense',
-            expCat, isInventory, title, cost, tax, dateStr, userName, entity,
-            orderId, asin
-          })
-        }
-        resolve({ records, meta: { rows: records.length } })
-        } catch (err: any) { reject(new Error('Amazon parse failed: ' + err.message)) }
-      }
-    reader.onerror = () => reject(new Error('File read error'))
-    reader.readAsText(file)
-  })
-}
     reader.onerror = () => reject(new Error('File read error'))
     reader.readAsText(file)
   })
@@ -561,7 +543,7 @@ export default function ManaSocialApp() {
     const matches = supplyCosts.filter(s => s.item_name === itemName).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
     return matches.length > 0 ? parseFloat(matches[0].cost_per_unit) : 0
   }
-  const uniqueSupplyItems = Array.from(new Set(supplyCosts.map(s => s.item_name)))
+  const uniqueSupplyItems = [...new Set(supplyCosts.map(s => s.item_name))]
 
   const quarters = [
     { label: 'Q1', start: '2026-01-01', end: '2026-03-31', due941: 'Apr 30', due1040: 'Apr 15' },
