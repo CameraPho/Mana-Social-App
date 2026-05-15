@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-
+ 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
-
+ 
 const EXPENSE_CATEGORIES = [
   'Shipping & Postage', 'Selling Fees & Commissions', 'Software & Subscriptions',
   'Supplies & Packaging', 'Advertising & Marketing', 'Professional Services',
@@ -13,21 +13,21 @@ const EXPENSE_CATEGORIES = [
   'Travel & Conventions', 'Trade Shows & Conventions', 'Meals & Entertainment',
   'Internet & Phone', 'Education & Training', 'Home Office', 'Inventory Purchase', 'Other'
 ]
-
+ 
 const ASSET_CATEGORIES = ['Equipment', 'Furniture & Fixtures', 'Vehicle']
-
+ 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const { content, fileName, fileHash, fileSize, uploadedBy } = body
-
+ 
     // Check for duplicate by hash
     const { data: existingDoc } = await supabase
       .from('canonical_documents')
       .select('*')
       .eq('file_hash', fileHash)
       .maybeSingle()
-
+ 
     if (existingDoc && !body.override) {
       return NextResponse.json({
         duplicate: true,
@@ -35,37 +35,37 @@ export async function POST(req: NextRequest) {
         message: `This file was previously uploaded on ${new Date(existingDoc.created_at).toLocaleDateString()}`
       })
     }
-
+ 
     // Fetch vendor mappings for context
     const { data: vendors } = await supabase.from('vendor_mappings').select('*')
     const vendorContext = (vendors || []).map((v: any) =>
       `- ${v.vendor_name} (${v.platform || 'general'}): keywords=[${(v.vendor_keywords || []).join(', ')}] → category="${v.default_category}", table="${v.default_table}"`
     ).join('\n')
-
+ 
     const systemPrompt = `You are an AI accounting assistant for Mana Social LLC, a California TCG resale business.
-
+ 
 BUSINESS CONTEXT:
 - Mana Social LLC (multi-member LLC, members: Cam Pho and Kenny Diep)
 - Previously operated as Camera Pho sole proprietorship (anything before March 18, 2026 = sole_prop entity, on/after = llc)
 - Products sold: Magic the Gathering, Pokemon, Yu-Gi-Oh, One Piece, Funko Pop, TCG supplies
 - Platforms used: TCGplayer, eBay, ManaPool, Amazon (for purchases)
-
+ 
 YOUR JOB: Analyze the uploaded document and extract structured accounting data.
-
+ 
 DOCUMENT TYPES:
 1. Sales reports (TCGplayer XLSX, eBay CSV, ManaPool CSV) → output type="sales"
 2. Purchase invoices/receipts (Amazon, BCW, Costco) → output type="expenses" or type="inventory"
 3. Asset purchases (scanners, shelving, equipment) → output type="assets"
 4. Mileage logs → output type="mileage"
-
+ 
 EXPENSE CATEGORIES (use exactly one):
 ${EXPENSE_CATEGORIES.join(', ')}
-
+ 
 ASSET CATEGORIES: ${ASSET_CATEGORIES.join(', ')}
-
+ 
 KNOWN VENDOR MAPPINGS (use these when matching):
 ${vendorContext}
-
+ 
 OUTPUT FORMAT (return ONLY this JSON, no markdown):
 {
   "documentType": "sales_report" | "expense_receipt" | "expense_invoice" | "amazon_orders" | "mixed",
@@ -97,25 +97,26 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown):
     }
   ]
 }
-
+ 
 CONFIDENCE SCORING:
 - 0.95+: Clear vendor match, all fields confidently extracted, no ambiguity
 - 0.80-0.94: Most fields clear, category inference, minor ambiguity
 - below 0.80: Significant uncertainty, missing data, unusual format — flag for manual review
-
+ 
 VALIDATION:
 - Dates must be valid and not in the future
 - Amounts must be positive numbers
 - Entity must be 'sole_prop' if date < 2026-03-18, else 'llc'
 - For assets (Equipment, Furniture & Fixtures with cost > $200), set isAsset=true
 - For TCG products, set isInventory=true and category="Inventory Purchase"`
-
+ 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': process.env.ANTHROPIC_API_KEY!,
-        'anthropic-version': '2023-06-01'
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'pdfs-2024-09-25'
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
@@ -124,18 +125,23 @@ VALIDATION:
         messages: [{ role: 'user', content }]
       })
     })
-
+ 
     const data = await response.json()
     if (data.error) {
-      return NextResponse.json({ error: data.error.message || 'Anthropic error' }, { status: 500 })
+      console.error('Anthropic error:', JSON.stringify(data.error))
+      return NextResponse.json({ error: data.error.message || JSON.stringify(data.error) }, { status: 500 })
     }
-
+    if (!data.content || !Array.isArray(data.content) || data.content.length === 0) {
+      console.error('Bad Anthropic response:', JSON.stringify(data))
+      return NextResponse.json({ error: 'No content from AI: ' + JSON.stringify(data).slice(0, 300) }, { status: 500 })
+    }
+ 
     const raw = data.content?.[0]?.text || '{}'
     const clean = raw.replace(/```json|```/g, '').trim()
     let parsed
     try { parsed = JSON.parse(clean) }
     catch { return NextResponse.json({ error: 'Failed to parse AI response', raw: clean }, { status: 500 }) }
-
+ 
     // Save to canonical_documents
     const { data: doc, error: docErr } = await supabase
       .from('canonical_documents')
@@ -152,14 +158,14 @@ VALIDATION:
       })
       .select()
       .single()
-
+ 
     if (docErr && !docErr.message?.includes('duplicate key')) {
       return NextResponse.json({ error: docErr.message, parsed }, { status: 500 })
     }
-
+ 
     // Run validation + confidence tiering on each item
     const validated = (parsed.items || []).map((item: any) => validateItem(item))
-
+ 
     // Stage items in import_queue
     const queueRows = validated.map((item: any) => ({
       document_id: doc?.id,
@@ -173,11 +179,11 @@ VALIDATION:
       validation_passed: item.validationPassed,
       target_table: item.targetTable
     }))
-
+ 
     if (queueRows.length > 0) {
       await supabase.from('import_queue').insert(queueRows)
     }
-
+ 
     return NextResponse.json({
       success: true,
       documentId: doc?.id,
@@ -194,29 +200,29 @@ VALIDATION:
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
-
+ 
 function validateItem(item: any) {
   const errors: string[] = []
   const today = new Date().toISOString().split('T')[0]
   const LLC_START = '2026-03-18'
-
+ 
   // Date validation
   if (!item.date || isNaN(new Date(item.date).getTime())) {
     errors.push('Invalid or missing date')
   } else if (item.date > today) {
     errors.push('Date is in the future')
   }
-
+ 
   // Amount validation
   if (item.amount == null || isNaN(Number(item.amount)) || Number(item.amount) < 0) {
     errors.push('Invalid or missing amount')
   }
-
+ 
   // Fees can't exceed amount for sales
   if (item.type === 'sale' && Number(item.fees || 0) > Number(item.amount || 0)) {
     errors.push('Fees exceed gross sales')
   }
-
+ 
   // Entity auto-correction
   if (item.date) {
     const correctEntity = item.date < LLC_START ? 'sole_prop' : 'llc'
@@ -224,22 +230,22 @@ function validateItem(item: any) {
       item.entity = correctEntity
     }
   }
-
+ 
   // Confidence tiering
   let confidenceTier = 'manual'
   if (item.confidence >= 0.95 && errors.length === 0) confidenceTier = 'auto'
   else if (item.confidence >= 0.80 && errors.length === 0) confidenceTier = 'review'
-
+ 
   // Determine target table
   let targetTable = 'expenses'
   if (item.type === 'sale') targetTable = 'sales'
   else if (item.type === 'inventory' || item.isInventory) targetTable = 'cogs_inventory'
   else if (item.type === 'asset' || item.isAsset) targetTable = 'assets'
   else if (item.type === 'mileage') targetTable = 'mileage_log'
-
+ 
   // Build canonical record
   const canonical = buildCanonical(item, targetTable)
-
+ 
   return {
     ...item,
     confidenceTier,
@@ -249,10 +255,10 @@ function validateItem(item: any) {
     canonical
   }
 }
-
+ 
 function buildCanonical(item: any, targetTable: string): any {
   const entity = item.date < '2026-03-18' ? 'sole_prop' : 'llc'
-
+ 
   if (targetTable === 'sales') {
     return {
       platform: item.platform || 'other',
@@ -268,7 +274,7 @@ function buildCanonical(item: any, targetTable: string): any {
       confidence: item.confidence
     }
   }
-
+ 
   if (targetTable === 'cogs_inventory') {
     const qty = Number(item.quantity || 1)
     const totalCost = Number(item.amount || 0)
@@ -289,7 +295,7 @@ function buildCanonical(item: any, targetTable: string): any {
       entity
     }
   }
-
+ 
   if (targetTable === 'assets') {
     return {
       purchase_date: item.date,
@@ -304,7 +310,7 @@ function buildCanonical(item: any, targetTable: string): any {
       is_auto_created: true
     }
   }
-
+ 
   if (targetTable === 'mileage_log') {
     return {
       date: item.date,
@@ -315,7 +321,7 @@ function buildCanonical(item: any, targetTable: string): any {
       user_name: item.userName || 'Cam'
     }
   }
-
+ 
   // expenses (default)
   return {
     category: item.category || 'Other',
@@ -329,3 +335,4 @@ function buildCanonical(item: any, targetTable: string): any {
     confidence: item.confidence
   }
 }
+ 
