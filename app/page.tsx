@@ -422,6 +422,7 @@ export default function ManaSocialApp() {
   const [bulkDateFrom, setBulkDateFrom] = useState(new Date().toISOString().split('T')[0])
   const [bulkDateTo, setBulkDateTo] = useState(new Date().toISOString().split('T')[0])
   const [bulkUser, setBulkUser] = useState('Cam')
+  const [bulkDefaults, setBulkDefaults] = useState<any>({})
   const salesFileRef = useRef<HTMLInputElement>(null)
   const expFileRef = useRef<HTMLInputElement>(null)
 
@@ -479,6 +480,34 @@ export default function ManaSocialApp() {
     ])
     setSales(fd(s.data || [], 'sale_date'))
     setExpenses(fd(e.data || [], 'purchase_date'))
+
+    // Auto-migrate: backfill Asset records for any Equipment/Furniture expenses > $200 not yet linked
+    const unmigrated = (e.data || []).filter(ex =>
+      (ex.category === 'Equipment' || ex.category === 'Furniture & Fixtures') &&
+      Number(ex.cost) > 200 &&
+      !ex.asset_created
+    )
+    if (unmigrated.length > 0) {
+      for (const ex of unmigrated) {
+        const life = ex.category === 'Furniture & Fixtures' ? 7 : 5
+        await supabase.from('assets').insert({
+          purchase_date: ex.purchase_date,
+          description: ex.notes || 'Auto-migrated from expense',
+          category: ex.category,
+          cost: Number(ex.cost),
+          tax_paid: 0,
+          useful_life_yrs: life,
+          depreciation_method: 'both',
+          entity: ex.entity,
+          user_name: ex.user_name || 'Cam',
+          source_expense_id: ex.id,
+          is_auto_created: true
+        })
+        await supabase.from('expenses').update({ asset_created: true }).eq('id', ex.id)
+      }
+      const { data: refreshed } = await supabase.from('assets').select('*').order('purchase_date', { ascending: false })
+      setAssets(refreshed || [])
+    }
     setAccountsPayable(ap.data || [])
     setPayroll(fd(p.data || [], 'pay_date'))
     setDisbursements(fd(d.data || [], 'disbursement_date'))
@@ -608,6 +637,7 @@ export default function ManaSocialApp() {
   }
 
   useEffect(() => { if (authed) fetchImportQueue() }, [authed])
+  useEffect(() => { setBulkDefaults({}); setBulkRows([]) }, [bulkTable])
 
   const handleFileUpload = async (file: File, mode: 'sales' | 'expenses') => {
     setUploadPreview([])
@@ -836,16 +866,17 @@ export default function ManaSocialApp() {
 
   const initBulkRows = () => {
     const dates = generateBulkDates()
+    const d = bulkDefaults
     if (bulkTable === 'mileage_log') {
-      setBulkRows(dates.map(d => ({ date: d, purpose: 'USPS drop-off', from_location: 'Home', to_location: 'USPS Moreno Valley', miles: '3', user_name: bulkUser, selected: true })))
+      setBulkRows(dates.map(dt => ({ date: dt, purpose: d.purpose || 'USPS drop-off', from_location: d.from_location || 'Home', to_location: d.to_location || 'USPS Moreno Valley', miles: d.miles || '3', user_name: bulkUser, selected: true })))
     } else if (bulkTable === 'expenses') {
-      setBulkRows(dates.map(d => ({ date: d, category: 'Supplies & Packaging', notes: '', cost: '', user_name: bulkUser, selected: true })))
+      setBulkRows(dates.map(dt => ({ date: dt, category: d.category || 'Supplies & Packaging', notes: d.notes || '', cost: '', user_name: bulkUser, selected: true })))
     } else if (bulkTable === 'sales') {
-      setBulkRows(dates.map(d => ({ date: d, platform: '', amount: '', fees: '', shipping: '', selected: true })))
+      setBulkRows(dates.map(dt => ({ date: dt, platform: d.platform || '', amount: '', fees: '', shipping: '', selected: true })))
     } else if (bulkTable === 'payroll') {
-      setBulkRows(dates.map(d => ({ date: d, employee_name: '', amount: '', hours_worked: '', hourly_rate: '16', selected: true })))
+      setBulkRows(dates.map(dt => ({ date: dt, employee_name: d.employee_name || '', amount: '', hours_worked: '', hourly_rate: d.hourly_rate || '16', selected: true })))
     } else {
-      setBulkRows(dates.map(d => ({ date: d, selected: true })))
+      setBulkRows(dates.map(dt => ({ date: dt, selected: true })))
     }
   }
 
@@ -1152,6 +1183,43 @@ export default function ManaSocialApp() {
                 <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
               </select>
             </div>
+
+            {/* Shared defaults — pre-fill all generated rows */}
+            <div style={{ padding: '12px', background: 'rgba(45,191,184,0.05)', borderRadius: '10px', border: `1px dashed ${C.teal}` }}>
+              <div style={{ fontSize: '11px', color: C.teal, fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Defaults — apply to all generated rows</div>
+              {bulkTable === 'mileage_log' && (
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  <input value={bulkDefaults.purpose||''} onChange={e => setBulkDefaults({ ...bulkDefaults, purpose: e.target.value })} placeholder="Purpose (e.g. USPS drop-off)" style={inp} />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                    <input value={bulkDefaults.from_location||''} onChange={e => setBulkDefaults({ ...bulkDefaults, from_location: e.target.value })} placeholder="From (Home)" style={inp} />
+                    <input value={bulkDefaults.to_location||''} onChange={e => setBulkDefaults({ ...bulkDefaults, to_location: e.target.value })} placeholder="To (USPS Moreno Valley)" style={inp} />
+                  </div>
+                  <input type="number" step="0.1" value={bulkDefaults.miles||''} onChange={e => setBulkDefaults({ ...bulkDefaults, miles: e.target.value })} placeholder="Miles per trip (3.0)" style={inp} />
+                </div>
+              )}
+              {bulkTable === 'expenses' && (
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  <select value={bulkDefaults.category||'Supplies & Packaging'} onChange={e => setBulkDefaults({ ...bulkDefaults, category: e.target.value })} style={inp}>
+                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input value={bulkDefaults.notes||''} onChange={e => setBulkDefaults({ ...bulkDefaults, notes: e.target.value })} placeholder="Default description (optional)" style={inp} />
+                </div>
+              )}
+              {bulkTable === 'sales' && (
+                <input value={bulkDefaults.platform||''} onChange={e => setBulkDefaults({ ...bulkDefaults, platform: e.target.value })} placeholder="Platform (tcgplayer, ebay, manapool)" style={inp} />
+              )}
+              {bulkTable === 'payroll' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                  <select value={bulkDefaults.employee_name||''} onChange={e => setBulkDefaults({ ...bulkDefaults, employee_name: e.target.value })} style={inp}>
+                    <option value="">Select employee</option>
+                    <option value="Kiedan">Kiedan</option>
+                    <option value="Kayliana">Kayliana</option>
+                  </select>
+                  <input type="number" step="0.01" value={bulkDefaults.hourly_rate||'16'} onChange={e => setBulkDefaults({ ...bulkDefaults, hourly_rate: e.target.value })} placeholder="Hourly rate" style={inp} />
+                </div>
+              )}
+            </div>
+
             <div><span style={lbl}>Date Selection</span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '6px', marginBottom: '8px' }}>
                 {(['single','range','week','month'] as const).map(m => (
@@ -1173,7 +1241,7 @@ export default function ManaSocialApp() {
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <button onClick={() => setBulkRows(bulkRows.map(r => ({ ...r, selected: true })))} style={editBtn}>Select All</button>
               <button onClick={() => setBulkRows(bulkRows.map(r => ({ ...r, selected: false })))} style={editBtn}>Deselect All</button>
-              {bulkTable === 'mileage_log' && <button onClick={() => setBulkRows(bulkRows.filter(r => { const d = new Date(r.date).getDay(); return d !== 0 && d !== 6 }).map(r => ({ ...r, selected: true })).concat(bulkRows.filter(r => { const d = new Date(r.date).getDay(); return d === 0 || d === 6 }).map(r => ({ ...r, selected: false }))))} style={editBtn}>Weekdays Only</button>}
+              {bulkTable === 'mileage_log' && <button onClick={() => setBulkRows(bulkRows.map(r => { const d = new Date(r.date + 'T12:00:00').getDay(); return { ...r, selected: d !== 0 && d !== 6 } }))} style={editBtn}>Weekdays Only</button>}
             </div>
             {bulkRows.map((row, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
@@ -1433,6 +1501,65 @@ export default function ManaSocialApp() {
             )}
           </div>
 
+          {/* Inventory section */}
+          {allCogsInventory.length > 0 && (
+            <div style={{ ...card, border: `1px solid rgba(107,63,160,0.25)` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ ...secHdr, marginBottom: 0, color: C.purple }}>INVENTORY (COGS)</span>
+                <span style={{ fontSize: '10px', color: C.gold, fontWeight: 'bold', padding: '2px 6px', background: 'rgba(240,192,64,0.12)', borderRadius: '4px' }}>WIP — singles tracking coming soon</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                <div style={{ padding: '10px', background: '#F5F6FA', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold' }}>COST BASIS</div>
+                  <div style={{ fontSize: '16px', fontWeight: 900, color: C.purple }}>{fmt(endingInventory)}</div>
+                </div>
+                <div style={{ padding: '10px', background: '#F5F6FA', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold' }}>COGS YTD</div>
+                  <div style={{ fontSize: '16px', fontWeight: 900, color: '#ef4444' }}>{fmt(cogsRecognized)}</div>
+                </div>
+                <div style={{ padding: '10px', background: '#F5F6FA', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold' }}>LOTS</div>
+                  <div style={{ fontSize: '16px', fontWeight: 900, color: C.navy }}>{allCogsInventory.length}</div>
+                </div>
+              </div>
+              <div onClick={() => setExpandedTiles(prev => ({ ...prev, exp_inv: !prev.exp_inv }))}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(107,63,160,0.06)', borderRadius: '8px', cursor: 'pointer' }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: C.purple }}>View all lots</span>
+                <span style={{ color: C.muted, fontSize: '14px' }}>{expandedTiles.exp_inv ? '▲' : '▼'}</span>
+              </div>
+              {expandedTiles.exp_inv && (
+                <div style={{ marginTop: '8px' }}>
+                  {allCogsInventory.map(r => {
+                    const ratio = r.total_units > 0 ? Math.min((r.sold_units||0)/r.total_units, 1) : 0
+                    const remaining = parseFloat(r.total_cost||0) * (1 - ratio)
+                    const pct = Math.round(ratio * 100)
+                    return (
+                      <div key={r.id} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 700 }}>{r.description}</div>
+                            <div style={{ fontSize: '11px', color: C.muted }}>{r.date} · {r.inventory_type} · {r.total_units} units</div>
+                          </div>
+                          <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: C.purple }}>{fmt(remaining)}</div>
+                            <div style={{ fontSize: '11px', color: C.muted }}>{pct}% sold</div>
+                          </div>
+                        </div>
+                        <div style={{ height: '4px', background: 'rgba(27,42,74,0.1)', borderRadius: '2px' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: pct >= 100 ? C.teal : C.purple, borderRadius: '2px' }} />
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                          <button onClick={() => startEdit('cogs_inventory', r)} style={editBtn}>Edit</button>
+                          <button onClick={() => handleDelete('cogs_inventory', r.id)} style={delBtn}>×</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Accounts Payable */}
           {accountsPayable.filter(a => Number(a.total_amount) - Number(a.amount_paid || 0) > 0).length > 0 && (
             <div style={{ ...card, background: 'rgba(240,192,64,0.08)', border: '1px solid rgba(240,192,64,0.3)', padding: '14px 16px' }}>
@@ -1636,7 +1763,8 @@ export default function ManaSocialApp() {
       case 'assets': return (
         <div>
           {/* Inventory Tile — top priority */}
-          <div style={{ ...card, background: `linear-gradient(135deg,${C.purple},#4A2070)`, color: '#fff', padding: '20px', marginBottom: '12px' }}>
+          <div style={{ ...card, background: `linear-gradient(135deg,${C.purple},#4A2070)`, color: '#fff', padding: '20px', marginBottom: '12px', position: 'relative' }}>
+            <div style={{ position: 'absolute', top: '12px', right: '12px', fontSize: '10px', fontWeight: 'bold', padding: '3px 8px', background: 'rgba(240,192,64,0.25)', color: '#FFD96B', borderRadius: '4px', letterSpacing: '0.05em' }}>WIP — singles tracking coming soon</div>
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>INVENTORY VALUE (COST BASIS)</div>
             <div style={{ fontSize: '32px', fontWeight: 900 }}>{fmt(endingInventory)}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '14px' }}>
@@ -1776,27 +1904,66 @@ export default function ManaSocialApp() {
               <div><div style={{ fontSize: '11px', opacity: 0.6 }}>EST CA SAVINGS</div><div style={{ fontSize: '20px', fontWeight: 700, color: '#a78bfa' }}>{fmt(caSavings)}</div></div>
             </div>
           </div>
-          <div style={card}>
-            <span style={secHdr}>EXPENSE DEDUCTIBILITY</span>
-            {expenses.map(e => {
-              const rule = DEDUCTIBILITY[e.category] || DEDUCTIBILITY['Other']
-              const amt = Number(e.cost)
-              const ded = rule.pct === 100 ? amt : rule.pct === 50 ? amt * 0.5 : e.category === 'Home Office' ? amt * (homeOfficePct / 100) : e.category === 'Internet & Phone' ? amt * (internetPct / 100) : 0
-              return (
-                <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '9px 0', borderBottom: `1px solid ${C.border}` }}>
-                  <div>
-                    <div style={{ fontSize: '14px', fontWeight: 500 }}>{e.category}</div>
-                    {e.notes && <div style={{ fontSize: '12px', color: C.muted }}>{e.notes}</div>}
-                    <div style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginTop: '2px', background: rule.pct === 100 ? '#E1F5EE' : rule.pct === 50 ? '#FEF3C7' : '#FEF3E2', color: rule.pct === 100 ? '#085041' : '#7A5A00' }}>{rule.label} · {rule.line}</div>
+          <div>
+            <span style={{ ...secHdr, paddingLeft: '4px' }}>EXPENSE DEDUCTIBILITY</span>
+            {(() => {
+              const cats = EXPENSE_CATEGORIES.filter(cat => expenses.some(e => e.category === cat))
+              if (cats.length === 0) return <div style={{ ...card, textAlign: 'center', padding: '30px', color: C.muted }}>No expenses logged yet</div>
+              return cats.map(cat => {
+                const catExpenses = expenses.filter(e => e.category === cat)
+                const rule = DEDUCTIBILITY[cat] || DEDUCTIBILITY['Other']
+                const catTotal = catExpenses.reduce((a, e) => a + Number(e.cost), 0)
+                const catDeductible = catExpenses.reduce((a, e) => {
+                  const amt = Number(e.cost)
+                  if (rule.pct === 100) return a + amt
+                  if (rule.pct === 50) return a + amt * 0.5
+                  if (cat === 'Home Office') return a + amt * (homeOfficePct / 100)
+                  if (cat === 'Internet & Phone') return a + amt * (internetPct / 100)
+                  return a
+                }, 0)
+                const isOpen = (expandedTiles as any)[`ded_${cat}`]
+                return (
+                  <div key={cat} style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                    <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`ded_${cat}`]: !prev[`ded_${cat}`] }))}
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : 'transparent' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 900, fontSize: '14px', color: C.navy }}>{cat}</div>
+                        <div style={{ fontSize: '11px', padding: '1px 5px', borderRadius: '3px', display: 'inline-block', marginTop: '3px', background: rule.pct === 100 ? '#E1F5EE' : rule.pct === 50 ? '#FEF3C7' : '#FEF3E2', color: rule.pct === 100 ? '#085041' : '#7A5A00' }}>{rule.label} · {rule.line}</div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                        <div style={{ fontSize: '15px', fontWeight: 900, color: C.teal }}>{fmt(catDeductible)}</div>
+                        <div style={{ fontSize: '11px', color: C.muted }}>saves {fmt(catDeductible * 0.313)}</div>
+                        <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{isOpen ? '▲' : '▼'}</div>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div style={{ borderTop: `1px solid ${C.border}` }}>
+                        {catExpenses.map(e => {
+                          const amt = Number(e.cost)
+                          const ded = rule.pct === 100 ? amt : rule.pct === 50 ? amt * 0.5 : cat === 'Home Office' ? amt * (homeOfficePct/100) : cat === 'Internet & Phone' ? amt * (internetPct/100) : 0
+                          return (
+                            <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '10px 16px', borderBottom: `1px solid ${C.border}` }}>
+                              <div>
+                                {e.notes && <div style={{ fontSize: '13px', fontWeight: 600 }}>{e.notes}</div>}
+                                <div style={{ fontSize: '11px', color: C.muted }}>{e.purchase_date} · {e.user_name || 'Cam'}</div>
+                              </div>
+                              <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700, color: '#ef4444' }}>{fmt(-amt)}</div>
+                                <div style={{ fontSize: '11px', color: C.teal }}>→ {fmt(ded)} ded.</div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                        <div style={{ padding: '10px 16px', background: '#F5F6FA', display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700 }}>
+                          <span>Total</span>
+                          <span>{fmt(catTotal)} → <span style={{ color: C.teal }}>{fmt(catDeductible)} deductible</span></span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '12px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 700, color: C.teal }}>{fmt(ded)}</div>
-                    <div style={{ fontSize: '12px', color: C.muted }}>saves {fmt(ded * 0.313)}</div>
-                  </div>
-                </div>
-              )
-            })}
-            {expenses.length === 0 && <div style={{ textAlign: 'center', padding: '20px', color: C.muted }}>No expenses logged yet</div>}
+                )
+              })
+            })()}
           </div>
           <div style={card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
