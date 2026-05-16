@@ -8,7 +8,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+link.href = 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap'
 const LIGHT_COLORS = {
   navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
   pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
@@ -1378,10 +1378,10 @@ export default function ManaSocialApp() {
           )}
           <div style={{ background: isDark ? `linear-gradient(135deg,#0A0F1E,#111D33)` : `linear-gradient(135deg,${C.navyDark},${C.navy})`, color: '#fff', padding: '28px', borderRadius: '20px', marginBottom: '12px', fontFamily: FONT }}>
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>GROSS REVENUE</div>
-            <div style={{ fontSize: '46px', fontWeight: 900, color: netRevenue >= 0 ? '#4ade80' : '#fda4af' }}>{fmtK(netRevenue)}</div>
+            <div style={{ fontSize: '46px', fontWeight: 600, color: netRevenue >= 0 ? '#4ade80' : '#fda4af' }}>{fmtK(netRevenue)}</div>
             <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '16px' }} />
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>TOTAL COSTS</div>
-            <div style={{ fontSize: '32px', fontWeight: 900, color: '#fda4af', marginBottom: '16px' }}>{fmtK(-totalCosts)}</div>
+            <div style={{ fontSize: '32px', fontWeight: 600, color: '#fda4af', marginBottom: '16px' }}>{fmtK(-totalCosts)}</div>
             <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '16px' }} />
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>NET REVENUE</div>
             <div style={{ fontSize: '46px', fontWeight: 900, color: netRevenue >= 0 ? '#4ade80' : '#fda4af' }}>{fmtK(netRevenue)}</div>
@@ -1860,7 +1860,7 @@ export default function ManaSocialApp() {
           <div style={{ ...card, background: `linear-gradient(135deg,${C.purple},#4A2070)`, color: '#fff', padding: '20px', marginBottom: '12px', position: 'relative' }}>
             <div style={{ position: 'absolute', top: '12px', right: '12px', fontSize: '10px', fontWeight: 'bold', padding: '3px 8px', background: 'rgba(240,192,64,0.25)', color: '#FFD96B', borderRadius: '4px', letterSpacing: '0.05em' }}>WIP — singles tracking coming soon</div>
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>INVENTORY VALUE (COST BASIS)</div>
-            <div style={{ fontSize: '32px', fontWeight: 900 }}>{fmt(endingInventory)}</div>
+            <div style={{ fontSize: '32px', fontWeight: 600 }}>{fmt(endingInventory)}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '14px' }}>
               <div><div style={{ fontSize: '10px', opacity: 0.6 }}>TOTAL LOTS</div><div style={{ fontSize: '18px', fontWeight: 700 }}>{allCogsInventory.length}</div></div>
               <div><div style={{ fontSize: '10px', opacity: 0.6 }}>COGS RECOGNIZED</div><div style={{ fontSize: '18px', fontWeight: 700, color: '#fda4af' }}>{fmt(cogsRecognized)}</div></div>
