@@ -8,7 +8,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-link.href = 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap'
+const FONT = "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 const LIGHT_COLORS = {
   navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
   pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
@@ -484,7 +484,7 @@ export default function ManaSocialApp() {
   useEffect(() => {
     const link = document.createElement('link')
     link.rel = 'stylesheet'
-    link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'
+    link.href = 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap'
     document.head.appendChild(link)
   }, [])
 
