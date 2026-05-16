@@ -1378,7 +1378,7 @@ export default function ManaSocialApp() {
           )}
           <div style={{ background: isDark ? `linear-gradient(135deg,#0A0F1E,#111D33)` : `linear-gradient(135deg,${C.navyDark},${C.navy})`, color: '#fff', padding: '28px', borderRadius: '20px', marginBottom: '12px', fontFamily: FONT }}>
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>GROSS REVENUE</div>
-            <div style={{ fontSize: '32px', fontWeight: 900, marginBottom: '16px' }}>{fmtK(gross)}</div>
+            <div style={{ fontSize: '46px', fontWeight: 900, color: netRevenue >= 0 ? '#4ade80' : '#fda4af' }}>{fmtK(netRevenue)}</div>
             <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '16px' }} />
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>TOTAL COSTS</div>
             <div style={{ fontSize: '32px', fontWeight: 900, color: '#fda4af', marginBottom: '16px' }}>{fmtK(-totalCosts)}</div>
