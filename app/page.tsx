@@ -9,12 +9,6 @@ const supabase = createClient(
 )
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-// Theme colors — computed dynamically based on mode
-const LIGHT_COLORS = {
-  navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
-  pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
-  bg: '#F0F2F8', white: '#FFFFFF', muted: '#8A96B0',
-  text: '#1B2A4A', border: 'rgba(27,42,74,0.12)', green: '#10b981',
 const LIGHT_COLORS = {
   navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
   pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
@@ -23,10 +17,7 @@ const LIGHT_COLORS = {
   cardBg: '#FFFFFF', inputBg: '#F5F6FA', navBg: '#FFFFFF',
   summaryText: '#fff',
 }
-const DARK_COLORS = {
-  summaryText: '#fff',
-}
-const DARK_COLORS = {
+  const DARK_COLORS = {
   navy: '#E2E8F4', navyDark: '#0A0F1E', teal: '#2DBFB8',
   pink: '#E8407A', purple: '#9B6FD0', gold: '#F0C040',
   bg: '#0F1420', white: '#1A2235', muted: '#6B7A9A',
