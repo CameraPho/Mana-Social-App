@@ -12,19 +12,19 @@ const FONT = "'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif"
 const BODY = "'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif"
 // Theme colors — computed dynamically based on mode
 const LIGHT_COLORS = {
-  navy: '#243C8B', navyDark: '#0B132B', teal: '#2DD4BF',
-  pink: '#EC4899', purple: '#7C3AED', gold: '#F0C040',
-  bg: '#F0F4FF', white: '#FFFFFF', muted: '#6B7A9A',
-  text: '#0B132B', border: 'rgba(36,60,139,0.12)', green: '#10b981',
+  navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
+  pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
+  bg: '#F0F2F8', white: '#FFFFFF', muted: '#8A96B0',
+  text: '#1B2A4A', border: 'rgba(27,42,74,0.12)', green: '#10b981',
   cardBg: '#FFFFFF', inputBg: '#F5F6FA', navBg: '#FFFFFF',
   summaryText: '#fff',
 }
 const DARK_COLORS = {
   navy: '#E2E8F4', navyDark: '#0A0F1E', teal: '#2DBFB8',
   pink: '#E8407A', purple: '#9B6FD0', gold: '#F0C040',
-  bg: '#0F1420', white: '#1A2235', muted: '#6B7A9A',
+  bg: '#232D42', white: '#1E2A3E', muted: '#6B7A9A',
   text: '#E2E8F4', border: 'rgba(255,255,255,0.08)', green: '#34D399',
-  cardBg: '#1A2235', inputBg: '#0F1420', navBg: '#111D33',
+  cardBg: '#1E2A3E', inputBg: '#232D42', navBg: '#111D33',
   summaryText: '#E2E8F4',
 }
 // C is set dynamically in component — placeholder for module-level refs
@@ -396,8 +396,8 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
       <div style={{ background: C.white, borderRadius: '20px', padding: '40px 32px', width: '100%', maxWidth: '360px', boxShadow: '0 24px 64px rgba(0,0,0,0.3)', textAlign: 'center' }}>
         <h1 style={{ fontFamily: FONT, fontSize: '22px', color: C.navy, marginBottom: '28px', fontWeight: 700 }}>Mana Social</h1>
         <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '10px', textAlign: 'left' }}>
-          <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required style={{ padding: '12px 14px', border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', background: '#F5F6FA', width: '100%', fontFamily: FONT }} />
-          <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required style={{ padding: '12px 14px', border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', background: '#F5F6FA', width: '100%', fontFamily: FONT }} />
+          <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required style={{ padding: '12px 14px', border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', background: '#C.inputBg', width: '100%', fontFamily: FONT }} />
+          <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required style={{ padding: '12px 14px', border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', background: '#C.inputBg', width: '100%', fontFamily: FONT }} />
           {error && <div style={{ padding: '8px 12px', background: '#FEE8EF', color: '#C0254A', borderRadius: '8px', fontSize: '13px' }}>{error}</div>}
           <button type="submit" disabled={loading} style={{ marginTop: '8px', padding: '14px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '10px', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
             {loading ? 'Signing in...' : 'Sign In'}
@@ -678,7 +678,7 @@ export default function ManaSocialApp() {
 
   useEffect(() => { if (authed) fetchImportQueue() }, [authed])
   useEffect(() => {
-    document.body.style.background = isDark ? '#0F1420' : '#F0F2F8'
+    document.body.style.background = isDark ? '#232D42' : '#F0F2F8'
     document.body.style.transition = 'background 0.2s'
   }, [isDark])
   useEffect(() => { setBulkDefaults({}); setBulkRows([]) }, [bulkTable])
@@ -1129,7 +1129,7 @@ export default function ManaSocialApp() {
             <div><span style={lbl}>Inventory Type</span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
                 {[['collection','Collection'],['booster_box','Box'],['precon','Precon'],['sealed','Sealed'],['singles','Singles']].map(([id,l]) => (
-                  <button key={id} onClick={() => setFormData({ ...formData, cogsType: id })} style={{ padding: '8px', borderRadius: '8px', border: `1px solid ${formData.cogsType===id?C.teal:C.border}`, background: formData.cogsType===id?'rgba(45,191,184,0.1)':'#F5F6FA', fontSize: '12px', fontWeight: formData.cogsType===id?'bold':'normal', cursor: 'pointer', color: formData.cogsType===id?'#1A7A75':C.text, fontFamily: FONT }}>{l}</button>
+                  <button key={id} onClick={() => setFormData({ ...formData, cogsType: id })} style={{ padding: '8px', borderRadius: '8px', border: `1px solid ${formData.cogsType===id?C.teal:C.border}`, background: formData.cogsType===id?'rgba(45,191,184,0.1)':'#C.inputBg', fontSize: '12px', fontWeight: formData.cogsType===id?'bold':'normal', cursor: 'pointer', color: formData.cogsType===id?'#1A7A75':C.text, fontFamily: FONT }}>{l}</button>
                 ))}
               </div>
             </div>
@@ -1212,7 +1212,7 @@ export default function ManaSocialApp() {
       </span>
     </div>
   )
-  const DD = ({ children }: any) => <div style={{ background: '#F5F6FA', borderRadius: '8px', padding: '10px', marginBottom: '4px' }}>{children}</div>
+  const DD = ({ children }: any) => <div style={{ background: '#C.inputBg', borderRadius: '8px', padding: '10px', marginBottom: '4px' }}>{children}</div>
   const DDRow = ({ label, value, neg = false }: any) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '4px 0', borderBottom: `1px solid ${C.border}` }}>
       <span style={{ color: C.muted }}>{label}</span>
@@ -1284,7 +1284,7 @@ export default function ManaSocialApp() {
             <div><span style={lbl}>Date Selection</span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '6px', marginBottom: '8px' }}>
                 {(['single','range','week','month'] as const).map(m => (
-                  <button key={m} onClick={() => setBulkDateMode(m)} style={{ padding: '8px 4px', borderRadius: '8px', border: `1px solid ${bulkDateMode===m?C.teal:C.border}`, background: bulkDateMode===m?'rgba(45,191,184,0.1)':'#F5F6FA', fontSize: '12px', fontWeight: bulkDateMode===m?'bold':'normal', cursor: 'pointer', color: bulkDateMode===m?'#1A7A75':C.text, fontFamily: FONT, textTransform: 'capitalize' }}>{m}</button>
+                  <button key={m} onClick={() => setBulkDateMode(m)} style={{ padding: '8px 4px', borderRadius: '8px', border: `1px solid ${bulkDateMode===m?C.teal:C.border}`, background: bulkDateMode===m?'rgba(45,191,184,0.1)':'#C.inputBg', fontSize: '12px', fontWeight: bulkDateMode===m?'bold':'normal', cursor: 'pointer', color: bulkDateMode===m?'#1A7A75':C.text, fontFamily: FONT, textTransform: 'capitalize' }}>{m}</button>
                 ))}
               </div>
               {bulkDateMode === 'single' && <input type="date" value={bulkDateFrom} onChange={e => setBulkDateFrom(e.target.value)} style={inp} />}
@@ -1426,7 +1426,7 @@ export default function ManaSocialApp() {
           <div style={{ ...card, padding: '14px' }}>
             <span style={secHdr}>IMPORT SALES</span>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-              <button onClick={() => salesFileRef.current?.click()} style={{ padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: '#F5F6FA', fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload file</button>
+              <button onClick={() => salesFileRef.current?.click()} style={{ padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: '#C.inputBg', fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload file</button>
               <button onClick={syncManaPool} style={{ padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>Sync ManaPool</button>
             </div>
             <input ref={salesFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'sales'); e.target.value = '' }} />
@@ -1555,7 +1555,7 @@ export default function ManaSocialApp() {
           {/* Import */}
           <div style={{ ...card, padding: '14px' }}>
             <span style={secHdr}>IMPORT EXPENSES</span>
-            <button onClick={() => expFileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: '#F5F6FA', fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload receipt / Amazon CSV / photo</button>
+            <button onClick={() => expFileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: '#C.inputBg', fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload receipt / Amazon CSV / photo</button>
             <input ref={expFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'expenses'); e.target.value = '' }} />
             <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Amazon orders .csv · receipts · PDFs — AI auto-categorizes. Manual edits are remembered.</div>
           </div>
@@ -1633,15 +1633,15 @@ export default function ManaSocialApp() {
                 <span style={{ fontSize: '10px', color: C.gold, fontWeight: 'bold', padding: '2px 6px', background: 'rgba(240,192,64,0.12)', borderRadius: '4px' }}>WIP — singles tracking coming soon</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-                <div style={{ padding: '10px', background: '#F5F6FA', borderRadius: '8px', textAlign: 'center' }}>
+                <div style={{ padding: '10px', background: '#C.inputBg', borderRadius: '8px', textAlign: 'center' }}>
                   <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold' }}>COST BASIS</div>
                   <div style={{ fontSize: '16px', fontWeight: 900, color: C.purple }}>{fmt(endingInventory)}</div>
                 </div>
-                <div style={{ padding: '10px', background: '#F5F6FA', borderRadius: '8px', textAlign: 'center' }}>
+                <div style={{ padding: '10px', background: '#C.inputBg', borderRadius: '8px', textAlign: 'center' }}>
                   <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold' }}>COGS YTD</div>
                   <div style={{ fontSize: '16px', fontWeight: 900, color: '#ef4444' }}>{fmt(cogsRecognized)}</div>
                 </div>
-                <div style={{ padding: '10px', background: '#F5F6FA', borderRadius: '8px', textAlign: 'center' }}>
+                <div style={{ padding: '10px', background: '#C.inputBg', borderRadius: '8px', textAlign: 'center' }}>
                   <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold' }}>LOTS</div>
                   <div style={{ fontSize: '16px', fontWeight: 900, color: C.navy }}>{allCogsInventory.length}</div>
                 </div>
@@ -1729,7 +1729,7 @@ export default function ManaSocialApp() {
                           </div>
                         </div>
                       ))}
-                      <div style={{ padding: '10px 16px', background: '#F5F6FA', display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700 }}>
+                      <div style={{ padding: '10px 16px', background: '#C.inputBg', display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700 }}>
                         <span>{cat} Total</span>
                         <span style={{ color: '#ef4444' }}>{fmt(-catTotal)}</span>
                       </div>
@@ -1917,11 +1917,11 @@ export default function ManaSocialApp() {
           <div style={{ ...card, padding: '14px' }}>
             <span style={secHdr}>DEPRECIATION SUMMARY · {selectedYear}</span>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <div style={{ padding: '12px', background: '#F5F6FA', borderRadius: '8px', textAlign: 'center' }}>
+              <div style={{ padding: '12px', background: '#C.inputBg', borderRadius: '8px', textAlign: 'center' }}>
                 <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>STRAIGHT-LINE / YR</div>
                 <div style={{ fontSize: '22px', fontWeight: 900, color: C.purple }}>{fmt(totalDepreciation)}</div>
               </div>
-              <div style={{ padding: '12px', background: '#F5F6FA', borderRadius: '8px', textAlign: 'center' }}>
+              <div style={{ padding: '12px', background: '#C.inputBg', borderRadius: '8px', textAlign: 'center' }}>
                 <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>SECTION 179 (FULL)</div>
                 <div style={{ fontSize: '22px', fontWeight: 900, color: C.teal }}>{fmt(totalAssetCost)}</div>
               </div>
@@ -2050,7 +2050,7 @@ export default function ManaSocialApp() {
                             </div>
                           )
                         })}
-                        <div style={{ padding: '10px 16px', background: '#F5F6FA', display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700 }}>
+                        <div style={{ padding: '10px 16px', background: '#C.inputBg', display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700 }}>
                           <span>Total</span>
                           <span>{fmt(catTotal)} → <span style={{ color: C.teal }}>{fmt(catDeductible)} deductible</span></span>
                         </div>
@@ -2081,7 +2081,7 @@ export default function ManaSocialApp() {
                     return (
                       <div key={user} style={{ marginBottom: '8px', border: `1px solid ${C.border}`, borderRadius: '10px', overflow: 'hidden' }}>
                         <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`mile_${user}`]: !prev[`mile_${user}`] }))}
-                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : '#F5F6FA' }}>
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : '#C.inputBg' }}>
                           <div>
                             <div style={{ fontWeight: 700, fontSize: '14px' }}>{user}</div>
                             <div style={{ fontSize: '12px', color: C.muted }}>{userTrips.length} trips · {userMiles.toFixed(1)} mi</div>
@@ -2139,7 +2139,7 @@ export default function ManaSocialApp() {
                   <div style={{ textAlign: 'right' }}><span style={{ fontWeight: 700, color: C.pink, marginRight: '8px' }}>{v}</span><span style={{ fontSize: '12px', color: C.muted }}>{d}</span></div>
                 </div>
               ))}
-              <div style={{ marginTop: '10px', padding: '8px 10px', background: '#F5F6FA', borderRadius: '8px', fontSize: '12px', color: C.muted, display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ marginTop: '10px', padding: '8px 10px', background: '#C.inputBg', borderRadius: '8px', fontSize: '12px', color: C.muted, display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                 <span>Net rev: <strong style={{ color: C.text }}>{fmt(q.netRev)}</strong></span>
                 <span>Exp: <strong style={{ color: C.text }}>{fmt(q.exp)}</strong></span>
                 <span>Payroll: <strong style={{ color: C.text }}>{fmt(q.grossPay)}</strong></span>
