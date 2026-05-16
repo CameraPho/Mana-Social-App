@@ -15,30 +15,15 @@ const LIGHT_COLORS = {
   pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
   bg: '#F0F2F8', white: '#FFFFFF', muted: '#8A96B0',
   text: '#1B2A4A', border: 'rgba(27,42,74,0.12)', green: '#10b981',
-  17:40:15.743 
-Failed to compile.
-17:40:15.744 
-17:40:15.745 
-./app/page.tsx:18:31
-17:40:15.745 
-Type error: Block-scoped variable 'C' used before its declaration.
-17:40:15.745 
-17:40:15.745 
-  16 |   bg: '#F0F2F8', white: '#FFFFFF', muted: '#8A96B0',
-17:40:15.745 
-  17 |   text: '#1B2A4A', border: 'rgba(27,42,74,0.12)', green: '#10b981',
-17:40:15.745 
-> 18 |   cardBg: '#FFFFFF', inputBg: C.inputBg, navBg: '#FFFFFF',
-17:40:15.746 
-     |                               ^
-17:40:15.746 
-  19 |   summaryText: '#fff',
-17:40:15.746 
-  20 | }
-17:40:15.746 
-  21 | const DARK_COLORS = {
-17:40:15.811 
-Error: Command "npm run build" exited with 1
+const LIGHT_COLORS = {
+  navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
+  pink: '#E8407A', purple: '#6B3FA0', gold: '#F0C040',
+  bg: '#F0F2F8', white: '#FFFFFF', muted: '#8A96B0',
+  text: '#1B2A4A', border: 'rgba(27,42,74,0.12)', green: '#10b981',
+  cardBg: '#FFFFFF', inputBg: '#F5F6FA', navBg: '#FFFFFF',
+  summaryText: '#fff',
+}
+const DARK_COLORS = {
   summaryText: '#fff',
 }
 const DARK_COLORS = {
