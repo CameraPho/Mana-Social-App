@@ -1380,10 +1380,10 @@ export default function ManaSocialApp() {
           )}
           <div style={{ background: isDark ? `linear-gradient(135deg,#0A0F1E,#111D33)` : `linear-gradient(135deg,${C.navyDark},${C.navy})`, color: '#fff', padding: '28px', borderRadius: '20px', marginBottom: '12px', fontFamily: FONT }}>
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>GROSS REVENUE</div>
-            <div style={{ fontSize: '32px', fontWeight: 900, marginBottom: '16px' }}>{fmtK(gross)}</div>
+            <div style={{ fontSize: '32px', fontWeight: 400, marginBottom: '16px' }}>{fmtK(gross)}</div>
             <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '16px' }} />
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>TOTAL COSTS</div>
-            <div style={{ fontSize: '32px', fontWeight: 900, color: '#fda4af', marginBottom: '16px' }}>{fmtK(-totalCosts)}</div>
+            <div style={{ fontSize: '32px', fontWeight: 400, color: '#fda4af', marginBottom: '16px' }}>{fmtK(-totalCosts)}</div>
             <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '16px' }} />
             <div style={{ opacity: 0.6, fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>NET REVENUE</div>
             <div style={{ fontSize: '46px', fontWeight: 900, color: netRevenue >= 0 ? '#4ade80' : '#fda4af' }}>{fmtK(netRevenue)}</div>
@@ -1862,7 +1862,7 @@ export default function ManaSocialApp() {
           <div style={{ ...card, background: `linear-gradient(135deg,${C.purple},#4A2070)`, color: '#fff', padding: '20px', marginBottom: '12px', position: 'relative' }}>
             <div style={{ position: 'absolute', top: '12px', right: '12px', fontSize: '10px', fontWeight: 'bold', padding: '3px 8px', background: 'rgba(240,192,64,0.25)', color: '#FFD96B', borderRadius: '4px', letterSpacing: '0.05em' }}>WIP — singles tracking coming soon</div>
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>INVENTORY VALUE (COST BASIS)</div>
-            <div style={{ fontSize: '32px', fontWeight: 900 }}>{fmt(endingInventory)}</div>
+            <div style={{ fontSize: '32px', fontWeight: 400 }}>{fmt(endingInventory)}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '14px' }}>
               <div><div style={{ fontSize: '10px', opacity: 0.6 }}>TOTAL LOTS</div><div style={{ fontSize: '18px', fontWeight: 700 }}>{allCogsInventory.length}</div></div>
               <div><div style={{ fontSize: '10px', opacity: 0.6 }}>COGS RECOGNIZED</div><div style={{ fontSize: '18px', fontWeight: 700, color: '#fda4af' }}>{fmt(cogsRecognized)}</div></div>
