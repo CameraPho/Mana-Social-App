@@ -2253,7 +2253,7 @@ export default function ManaSocialApp() {
   ]
 
   return (
-    <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text, transition: 'background 0.2s, color 0.2s' }}>
+    <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text, transition: 'background 0.2s, color 0.2s', letterSpacing: '0.06em' }}>
       <div style={{ maxWidth: '500px', margin: '0 auto', padding: '16px' }}>
         <header style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
