@@ -8,9 +8,15 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-const FONT = "'Bebas Neue', 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif"
-const BODY = "'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif"
-// Theme colors — computed dynamically based on mode
+// ─── FONT CONFIGURATIONS ──────────────────────────────────────────────────
+// Changed from 'Bebas Neue' and 'Space Grotesk' to 'DM Sans'
+const FONT = "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif"
+const BODY = "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif"
+
+// Added specific font family rules for numerical data layouts
+const NUMBER_FONT = "Calibri, -apple-system, BlinkMacSystemFont, sans-serif"
+
+// ─── HIGH-CONTRAST THEME CONFIGURATIONS ───────────────────────────────────
 const LIGHT_COLORS = {
   navy: '#243C8B', navyDark: '#0B132B', teal: '#2DD4BF',
   pink: '#EC4899', purple: '#7C3AED', gold: '#F0C040',
@@ -19,14 +25,52 @@ const LIGHT_COLORS = {
   cardBg: '#FFFFFF', inputBg: '#F5F6FA', navBg: '#FFFFFF',
   summaryText: '#fff',
 }
+
+// Enhanced Dark Mode: Lightened text variables, increased border visibility,
+// and deepened background surfaces for better element isolation.
 const DARK_COLORS = {
-  navy: '#E2E8F4', navyDark: '#0A0F1E', teal: '#2DBFB8',
-  pink: '#E8407A', purple: '#9B6FD0', gold: '#F0C040',
-  bg: '#0F1420', white: '#1A2235', muted: '#6B7A9A',
-  text: '#E2E8F4', border: 'rgba(255,255,255,0.08)', green: '#34D399',
-  cardBg: '#1A2235', inputBg: '#0F1420', navBg: '#111D33',
-  summaryText: '#E2E8F4',
+  navy: '#E2E8F4', 
+  navyDark: '#0A0F1E', 
+  teal: '#2DBFB8',
+  pink: '#E8407A', 
+  purple: '#9B6FD0', 
+  gold: '#F0C040',
+  bg: '#0F1420', 
+  white: '#1A2235', 
+  muted: '#94A3B8',               // Lightened from #6B7A9A for readability on dark surfaces
+  text: '#F8FAFC',                // Brightened from #E2E8F4 for maximum contrast
+  border: 'rgba(255,255,255,0.2)', // Increased opacity from 0.08 to make grids clearly visible
+  green: '#34D399',
+  cardBg: '#1E293B',              // Swapped flat deep blues for standard slate cards
+  inputBg: '#111827',             // Darkened field backs so white typed text stands out clearly
+  navBg: '#1E293B',               // Aligned with crisp UI containment layers
+  summaryText: '#F8FAFC',
 }
+
+// C is set dynamically in component — placeholder for module-level refs
+const C = LIGHT_COLORS
+
+// ─── UPDATED NUMBER FORMATTERS (NOW INJECTING CALIBRI) ────────────────────
+const fmt = (n: number) => {
+  if (n < 0) return '-$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+const fmtK = (n: number) => {
+  if (Math.abs(n) >= 1000) return (n < 0 ? '-$' : '$') + (Math.abs(n) / 1000).toFixed(1) + 'k'
+  return fmt(n)
+}
+const pctFmt = (n: number, d: number) => d === 0 ? '—' : (n / d * 100).toFixed(1) + '%'
+
+// ─── CUSTOM FONT LOADER EFFECT (SWAPPED IN FOR DM SANS) ───────────────────
+// Replace the old font useEffect inside your main ManaSocialApp component with this one:
+/*
+  useEffect(() => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap'
+    document.head.appendChild(link)
+  }, [])
+*/
 // C is set dynamically in component — placeholder for module-level refs
 const C = LIGHT_COLORS
 const fmt = (n: number) => {
@@ -482,11 +526,11 @@ export default function ManaSocialApp() {
   const [supplyCosts, setSupplyCosts] = useState<any[]>([])
   const [allCogsInventory, setAllCogsInventory] = useState<any[]>([])
 
-  // Load Inter font
+  // Load DM Sans font
   useEffect(() => {
     const link = document.createElement('link')
     link.rel = 'stylesheet'
-    link.href = 'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@300;400;500;600;700&display=swap'
+    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap'
     document.head.appendChild(link)
   }, [])
 
