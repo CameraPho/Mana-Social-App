@@ -2122,7 +2122,12 @@ export default function ManaSocialApp() {
       case 'tax': return (
         <div>
           <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(240,192,64,0.1)', border: '1px solid rgba(240,192,64,0.3)', marginBottom: '12px', fontSize: '13px', color: '#7A5A00', fontFamily: FONT }}>
+            <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(240,192,64,0.1)', border: '1px solid rgba(240,192,64,0.3)', marginBottom: '8px', fontSize: '13px', color: '#7A5A00', fontFamily: FONT }}>
             Estimates only — 22% federal. Confirm with Kannie before paying.
+          </div>
+          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)', marginBottom: '12px', fontSize: '13px', color: '#5B21B6', fontFamily: FONT }}>
+            <strong>PTE Elective Tax (AB 150):</strong> LLC pays 9.3% CA tax on members behalf. LLC gets federal deduction — saves ~2% vs paying personally. Elect by filing FTB 3893. Confirm with Kannie.
+          </div>
           </div>
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '20px', marginBottom: '12px' }}>
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>YTD EST. TOTAL TAX</div>
@@ -2148,6 +2153,37 @@ export default function ManaSocialApp() {
               </div>
             </div>
           ))}
+          <div style={{ ...card, border: `1px solid rgba(45,191,184,0.25)` }}>
+            <span style={secHdr}>CA LLC FEE (ANNUAL)</span>
+            {(() => {
+              const annualGross = sales.reduce((a, r) => a + Number(r.amount), 0)
+              let llcFee = 0
+              let feeLabel = 'No fee (under $250k gross)'
+              if (annualGross >= 5000000) { llcFee = 11790; feeLabel = '$11,790 (over $5M)' }
+              else if (annualGross >= 1000000) { llcFee = 6000; feeLabel = '$6,000 ($1M–$4.99M)' }
+              else if (annualGross >= 500000) { llcFee = 2500; feeLabel = '$2,500 ($500k–$999k)' }
+              else if (annualGross >= 250000) { llcFee = 900; feeLabel = '$900 ($250k–$499k)' }
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700 }}>LLC Fee — gross receipts based</div>
+                    <div style={{ fontSize: '12px', color: C.muted }}>Due April 15 · FTB 3536 · Current gross: {fmt(annualGross)}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 900, color: llcFee > 0 ? C.pink : C.teal }}>{llcFee > 0 ? fmt(llcFee) : '$0'}</div>
+                    <div style={{ fontSize: '11px', color: C.muted }}>{feeLabel}</div>
+                  </div>
+                </div>
+              )
+            })()}
+            <div style={{ marginTop: '8px', fontSize: '12px', color: C.muted, padding: '8px', background: 'rgba(45,191,184,0.06)', borderRadius: '6px' }}>
+              Separate from the $800 franchise tax already paid. Kicks in at $250k gross — flag for Kannie as revenue grows.
+            </div>
+          </div>
+
+          {disbursements.length > 0 && (
+            <div style={card}>
+              <span style={secHdr}>OWNER DRAWS</span>
           {disbursements.length > 0 && (
             <div style={card}>
               <span style={secHdr}>OWNER DRAWS</span>
