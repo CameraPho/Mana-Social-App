@@ -28,7 +28,7 @@ const DARK_COLORS = {
   summaryText: '#E2E8F4',
 }
 // C is set dynamically in component — placeholder for module-level refs
-const C = LIGHT_COLORS
+let C = LIGHT_COLORS
 const fmt = (n: number) => {
   if (n < 0) return '-$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -422,7 +422,7 @@ export default function ManaSocialApp() {
     const h = new Date().getHours()
     return h >= 19 || h < 7
   })()
-  const C = isDark ? DARK_COLORS : LIGHT_COLORS
+  C = isDark ? DARK_COLORS : LIGHT_COLORS
 
   const [authed, setAuthed] = useState(false)
   const [checkingAuth, setCheckingAuth] = useState(true)
@@ -1684,8 +1684,6 @@ export default function ManaSocialApp() {
               )}
             </div>
           )}
-
-
 
           {(() => {
             const cats = EXPENSE_CATEGORIES.filter(cat => expenses.some(e => e.category === cat))
