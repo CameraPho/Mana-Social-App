@@ -1229,10 +1229,11 @@ export default function ManaSocialApp() {
             <div><div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>SOLE PROP</div><div style={{ fontSize: '14px', fontWeight: 700, color: C.gold }}>Jan 1 – Mar 17</div></div>
             <div style={{ color: C.border, fontSize: '20px' }}>→</div>
             <div style={{ textAlign: 'right' }}><div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>MANA SOCIAL LLC</div><div style={{ fontSize: '14px', fontWeight: 700, color: C.teal }}>Mar 18 – Dec 31</div></div>
-          </div>
+                    </div>
         </div>
+      </div>
       )
-
+        
       case 'income': return (
         <div>
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
