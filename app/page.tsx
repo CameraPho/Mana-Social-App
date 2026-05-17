@@ -1966,7 +1966,6 @@ export default function ManaSocialApp() {
           })}
           {assets.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No assets logged yet</div>}
         </div>
-      </div>
     )
 
       case 'deductions': return (
