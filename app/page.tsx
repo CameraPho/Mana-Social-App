@@ -2121,13 +2121,11 @@ export default function ManaSocialApp() {
 
       case 'tax': return (
         <div>
-          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(240,192,64,0.1)', border: '1px solid rgba(240,192,64,0.3)', marginBottom: '12px', fontSize: '13px', color: '#7A5A00', fontFamily: FONT }}>
             <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(240,192,64,0.1)', border: '1px solid rgba(240,192,64,0.3)', marginBottom: '8px', fontSize: '13px', color: '#7A5A00', fontFamily: FONT }}>
             Estimates only — 22% federal. Confirm with Kannie before paying.
           </div>
           <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)', marginBottom: '12px', fontSize: '13px', color: '#5B21B6', fontFamily: FONT }}>
             <strong>PTE Elective Tax (AB 150):</strong> LLC pays 9.3% CA tax on members behalf. LLC gets federal deduction — saves ~2% vs paying personally. Elect by filing FTB 3893. Confirm with Kannie.
-          </div>
           </div>
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '20px', marginBottom: '12px' }}>
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>YTD EST. TOTAL TAX</div>
