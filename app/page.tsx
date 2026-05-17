@@ -639,8 +639,9 @@ export default function ManaSocialApp() {
     const grossPay = qP.reduce((a, r) => a + Number(r.amount), 0)
     const taxable = Math.max(0, netRev - exp - grossPay)
     const fica = grossPay * 0.153, futa = grossPay * 0.006, caUI = grossPay * 0.034
-    const fedEst = taxable * 0.22, caEst = taxable * 0.093
-    return { ...q, netRev, exp, grossPay, taxable, fica, futa, caUI, fedEst, caEst, grand: fica + futa + caUI + fedEst + caEst }
+    const fedEst = taxable * 0.22
+    const pte = taxable * 0.093
+    return { ...q, netRev, exp, grossPay, taxable, fica, futa, caUI, fedEst, pte, grand: fica + futa + caUI + fedEst + pte }
   })
   const ytdTax = quarters.reduce((a, q) => a + q.grand, 0)
 
@@ -2121,7 +2122,7 @@ export default function ManaSocialApp() {
       case 'tax': return (
         <div>
           <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(240,192,64,0.1)', border: '1px solid rgba(240,192,64,0.3)', marginBottom: '12px', fontSize: '13px', color: '#7A5A00', fontFamily: FONT }}>
-            Estimates only — 22% federal, 9.3% CA. Confirm with Kannie before paying.
+            Estimates only — 22% federal. Confirm with Kannie before paying.
           </div>
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '20px', marginBottom: '12px' }}>
             <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>YTD EST. TOTAL TAX</div>
@@ -2133,7 +2134,7 @@ export default function ManaSocialApp() {
                 <div><div style={{ fontWeight: 900, fontSize: '17px', color: C.navy }}>{q.label} 2026</div><div style={{ fontSize: '12px', color: C.muted }}>{q.start} – {q.end}</div></div>
                 <div style={{ textAlign: 'right' }}><div style={{ fontSize: '21px', fontWeight: 900, color: C.pink }}>{fmt(q.grand)}</div><div style={{ fontSize: '12px', color: C.muted }}>est. total</div></div>
               </div>
-              {[['Form 941 — FICA', fmt(q.fica), `Due ${q.due941}`], ['Form 940 — FUTA', fmt(q.futa), 'Due Jan 31'], ['CA UI/ETT', fmt(q.caUI), `Due ${q.due941}`], ['1040-ES Federal', fmt(q.fedEst), `Due ${q.due1040}`], ['100-ES California', fmt(q.caEst), `Due ${q.due1040}`]].map(([l, v, d]) => (
+              {[['Form 941 — FICA', fmt(q.fica), `Due ${q.due941}`], ['Form 940 — FUTA', fmt(q.futa), 'Due Jan 31'], ['CA UI/ETT', fmt(q.caUI), `Due ${q.due941}`], ['1040-ES Federal', fmt(q.fedEst), `Due ${q.due1040}`], ['PTE Elective Tax (CA)', fmt(q.pte), `Due ${q.due1040}`]].map(([l, v, d]) => (
                 <div key={String(l)} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: `1px solid ${C.border}`, fontSize: '14px' }}>
                   <span>{l}</span>
                   <div style={{ textAlign: 'right' }}><span style={{ fontWeight: 700, color: C.pink, marginRight: '8px' }}>{v}</span><span style={{ fontSize: '12px', color: C.muted }}>{d}</span></div>
