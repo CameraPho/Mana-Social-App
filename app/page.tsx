@@ -2112,7 +2112,7 @@ export default function ManaSocialApp() {
                     <span>{totalMiles.toFixed(1)} total miles</span>
                     <span style={{ color: C.teal }}>{fmt(mileageDeduction)}</span>
                   </div>
-                </>
+                </div>
               )
             })()}
           </div>
