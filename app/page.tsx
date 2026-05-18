@@ -1,7 +1,7 @@
 'use client'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf'
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import * as XLSX from 'xlsx'
 
 if (typeof window !== 'undefined') {
