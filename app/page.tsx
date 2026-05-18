@@ -260,6 +260,7 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
     reader.readAsText(file)
   })
 }
+
 async function parseChaseStatementPDF(file: File): Promise<{ records: any[], meta: any }> {
   const arrayBuf = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise
@@ -306,6 +307,7 @@ async function parseChaseStatementPDF(file: File): Promise<{ records: any[], met
   }
   return { records, meta: { rows: records.length, year: stmtYear, fileName: file.name } }
 }
+
 async function hashFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer()
   const hashBuf = await crypto.subtle.digest('SHA-256', buf)
@@ -775,6 +777,7 @@ const handleReconPdfUpload = async (file: File) => {
     fetchData()
     setTimeout(() => setReconUploadStatus(''), 4000)
   }
+  
   const syncManaPool = async () => {
     setSyncStatus('Syncing ManaPool...')
     try {
@@ -1978,7 +1981,7 @@ case 'reconcile': return (
           <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
             🏦 Bank Reconciliation — manually enter transactions from your bank statements and categorize them.
           </div>
-<div style={{ ...card, padding: '14px' }}>
+        <div style={{ ...card, padding: '14px' }}>
             <span style={secHdr}>UPLOAD BANK STATEMENT</span>
             <button onClick={() => reconFileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>
               Upload Chase Checking PDF
