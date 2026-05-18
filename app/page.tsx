@@ -398,7 +398,6 @@ export default function ManaSocialApp() {
     return h >= 19 || h < 7
   })()
   const C = isDark ? DARK_COLORS : LIGHT_COLORS
-
   const [authed, setAuthed] = useState(false)
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [activeTab, setActiveTab] = useState('summary')
@@ -424,8 +423,7 @@ export default function ManaSocialApp() {
 function parseChaseStatement(text: string) {
   const lines = text.split('\n')
   const txns: any[] = []
-  } 
-  
+
   // Pattern: MM/DD  DESCRIPTION  -$123.45
   const regex = /(\d{2}\/\d{2})\s+(.+?)\s+(-?\$[\d,]+\.\d{2})/
 
@@ -456,24 +454,12 @@ function convertChaseDate(mmdd: string) {
   return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
 }
 
-    const parsed = parseChaseStatement(text)
-
-    setReconUploadPreview(parsed.map(r => ({ ...r, _selected: true })))
-    setReconUploadStatus(`Parsed ${parsed.length} transactions`)
-  } catch (err: any) {
-    console.error(err)
-    setReconUploadStatus('Error reading PDF')
-  }
-}
-
 // --- PDF Upload Handler ---
 async function handleReconPdfUpload(file: File) {
   try {
     setReconUploadStatus('Reading PDF…')
-
     const arrayBuffer = await file.arrayBuffer()
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-
     let text = ''
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i)
@@ -481,58 +467,50 @@ async function handleReconPdfUpload(file: File) {
       text += content.items.map((it: any) => it.str).join(' ') + '\n'
     }
 
-    const parsed = parseChaseStatement(text)
-
-    setReconUploadPreview(parsed.map(r => ({ ...r, _selected: true })))
-    setReconUploadStatus(`Parsed ${parsed.length} transactions`)
-  } catch (err: any) {
-    console.error(err)
-    setReconUploadStatus('Error reading PDF')
-  }
-}
-  
-  const [duplicateWarning, setDuplicateWarning] = useState<any>(null)
-  const [bulkTable, setBulkTable] = useState('mileage_log')
-  const [bulkRows, setBulkRows] = useState<any[]>([])
-  const [bulkDateMode, setBulkDateMode] = useState<'single'|'range'|'week'|'month'>('single')
-  const [bulkDateFrom, setBulkDateFrom] = useState(new Date().toISOString().split('T')[0])
-  const [bulkDateTo, setBulkDateTo] = useState(new Date().toISOString().split('T')[0])
-  const [bulkUser, setBulkUser] = useState('Cam')
-  const [bulkDefaults, setBulkDefaults] = useState<any>({})
-  const [reconTransactions, setReconTransactions] = useState<any[]>([])
-  const [reconAccount, setReconAccount] = useState('All')
-  const [reconShowReconciled, setReconShowReconciled] = useState(false)
-  const [reconShowAddForm, setReconShowAddForm] = useState(false)
-  const [reconUploadPreview, setReconUploadPreview] = useState<any[]>([])
-  const [reconUploadStatus, setReconUploadStatus] = useState('')
-  const reconFileRef = useRef<HTMLInputElement>(null)
-  const [reconNewTxn, setReconNewTxn] = useState({
-  account_name: 'Chase Business Checking',
-  transaction_date: new Date().toISOString().split('T')[0],
-  description: '',
+const emptyForm = {
+  label: '',
   amount: '',
-  category: 'Other',
-  is_business: true,
+  date: new Date().toISOString().split('T')[0],
+  fees: '',
+  shipping: '',
   notes: '',
-})
-  const salesFileRef = useRef<HTMLInputElement>(null)
-  const expFileRef = useRef<HTMLInputElement>(null)
+  itemCount: '',
+  category: 'Supplies & Packaging',
+  miles: '',
+  mileFrom: '',
+  mileTo: '',
+  milePurpose: '',
+  cogsType: 'collection',
+  cogsSet: '',
+  cogsCost: '',
+  cogsQty: '1',
+  cogsCards: '',
+  cogsCardsPerBox: '',
+  cogsEstValue: '',
+  amountPaid: '',
+  userName: 'Cam',
+  paidByCompany: true,
+  assetCategory: 'Equipment',
+  assetLife: '5',
+  payPeriod: '',
+  hoursWorked: '',
+  hourlyRate: '16',
+  rothEligible: '',
+  rothContributed: '',
+  bankName: 'Chase',
+  accountType: 'Checking',
+  accountLast4: '',
+  bankBalance: '',
+  apVendor: '',
+  apTotal: '',
+  apPaid: '',
+  apDue: '',
+  supplyItem: '',
+  supplyUnit: '',
+  supplyCost: '',
+}
 
-  const emptyForm = {
-    label: '', amount: '', date: new Date().toISOString().split('T')[0],
-    fees: '', shipping: '', notes: '', itemCount: '', category: 'Supplies & Packaging',
-    miles: '', mileFrom: '', mileTo: '', milePurpose: '',
-    cogsType: 'collection', cogsSet: '', cogsCost: '', cogsQty: '1',
-    cogsCards: '', cogsCardsPerBox: '', cogsEstValue: '', amountPaid: '',
-    userName: 'Cam', paidByCompany: true,
-    assetCategory: 'Equipment', assetLife: '5',
-    payPeriod: '', hoursWorked: '', hourlyRate: '16', rothEligible: '', rothContributed: '',
-    bankName: 'Chase', accountType: 'Checking', accountLast4: '', bankBalance: '',
-    apVendor: '', apTotal: '', apPaid: '', apDue: '',
-    supplyItem: '', supplyUnit: '', supplyCost: '',
-  }
   const [formData, setFormData] = useState(emptyForm)
-
   const [sales, setSales] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [accountsPayable, setAccountsPayable] = useState<any[]>([])
