@@ -2,6 +2,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
+import * as pdfjsLib from 'pdfjs-dist'
+if (typeof window !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs`
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -256,7 +260,52 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
     reader.readAsText(file)
   })
 }
+async function parseChaseStatementPDF(file: File): Promise<{ records: any[], meta: any }> {
+  const arrayBuf = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise
+  let fullText = ''
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p)
+    const content = await page.getTextContent()
+    let lastY: number | null = null
+    for (const item of content.items as any[]) {
+      const y = item.transform[5]
+      if (lastY !== null && Math.abs(y - lastY) > 2) fullText += '\n'
+      else if (fullText.length && !fullText.endsWith('\n')) fullText += ' '
+      fullText += item.str
+      lastY = y
+    }
+    fullText += '\n'
+  }
 
+  // Detect statement year from "through Month DD, YYYY"
+  const yearMatch = fullText.match(/through\s+\w+\s+\d{1,2},\s+(\d{4})/)
+  const stmtYear = yearMatch ? yearMatch[1] : String(new Date().getFullYear())
+
+  const records: any[] = []
+  const lines = fullText.split('\n')
+  // Chase rows start with MM/DD and contain an amount + running balance
+  const rowRegex = /^(\d{2})\/(\d{2})\s+(.+?)\s+(-?[\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/
+  for (const line of lines) {
+    const m = line.trim().match(rowRegex)
+    if (!m) continue
+    const [, mm, dd, descRaw, amtRaw] = m
+    const desc = descRaw.replace(/\s+/g, ' ').trim()
+    if (/Beginning Balance|Ending Balance/i.test(desc)) continue
+    let amount = parseFloat(amtRaw.replace(/,/g, ''))
+    // Chase shows withdrawals with a leading minus; deposits are positive
+    const isDebit = amtRaw.trim().startsWith('-')
+    if (!isDebit && amount > 0) amount = Math.abs(amount)
+    const txnDate = `${stmtYear}-${mm}-${dd}`
+    records.push({
+      transaction_date: txnDate,
+      description: desc.slice(0, 200),
+      amount: amount,
+      account_name: 'Chase Business Checking',
+    })
+  }
+  return { records, meta: { rows: records.length, year: stmtYear, fileName: file.name } }
+}
 async function hashFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer()
   const hashBuf = await crypto.subtle.digest('SHA-256', buf)
@@ -377,6 +426,9 @@ export default function ManaSocialApp() {
   const [reconAccount, setReconAccount] = useState('All')
   const [reconShowReconciled, setReconShowReconciled] = useState(false)
   const [reconShowAddForm, setReconShowAddForm] = useState(false)
+  const [reconUploadPreview, setReconUploadPreview] = useState<any[]>([])
+  const [reconUploadStatus, setReconUploadStatus] = useState('')
+  const reconFileRef = useRef<HTMLInputElement>(null)
   const [reconNewTxn, setReconNewTxn] = useState({
   account_name: 'Chase Business Checking',
   transaction_date: new Date().toISOString().split('T')[0],
@@ -686,7 +738,43 @@ export default function ManaSocialApp() {
     setUploadPreview([]); setUploadStatus('Saved!'); fetchData()
     setTimeout(() => setUploadStatus(''), 3000)
   }
+const handleReconPdfUpload = async (file: File) => {
+    setReconUploadPreview([])
+    if (file.type !== 'application/pdf') { setReconUploadStatus('Please upload a PDF bank statement'); return }
+    setReconUploadStatus('Reading Chase statement...')
+    try {
+      const { records, meta } = await parseChaseStatementPDF(file)
+      if (records.length === 0) { setReconUploadStatus('No transactions found — is this a Chase Checking statement?'); return }
+      setReconUploadPreview(records.map(r => ({ ...r, category: 'Other', is_business: true, _selected: true })))
+      setReconUploadStatus(`Found ${records.length} transactions from ${meta.year}. Review and import below.`)
+    } catch (err: any) {
+      setReconUploadStatus('Parse error: ' + err.message)
+    }
+  }
 
+  const confirmReconImport = async () => {
+    const toImport = reconUploadPreview.filter(r => r._selected)
+    if (toImport.length === 0) return alert('No transactions selected')
+    setReconUploadStatus('Importing...')
+    const { error } = await supabase.from('bank_statement_transactions').insert(
+      toImport.map(r => ({
+        account_name: r.account_name,
+        transaction_date: r.transaction_date,
+        description: r.description,
+        amount: r.amount,
+        category: r.category || 'Other',
+        is_business: r.is_business,
+        is_reconciled: false,
+        entity: getEntity(r.transaction_date),
+        notes: '',
+      }))
+    )
+    if (error) { setReconUploadStatus('Error: ' + error.message); return }
+    setReconUploadPreview([])
+    setReconUploadStatus(`Imported ${toImport.length} transactions ✓`)
+    fetchData()
+    setTimeout(() => setReconUploadStatus(''), 4000)
+  }
   const syncManaPool = async () => {
     setSyncStatus('Syncing ManaPool...')
     try {
@@ -1890,7 +1978,41 @@ case 'reconcile': return (
           <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
             🏦 Bank Reconciliation — manually enter transactions from your bank statements and categorize them.
           </div>
+<div style={{ ...card, padding: '14px' }}>
+            <span style={secHdr}>UPLOAD BANK STATEMENT</span>
+            <button onClick={() => reconFileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>
+              Upload Chase Checking PDF
+            </button>
+            <input ref={reconFileRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleReconPdfUpload(f); e.target.value = '' }} />
+            <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Chase Total Checking statements · AI parsing for other banks coming soon</div>
+            {reconUploadStatus && <div style={{ marginTop: '8px', fontSize: '13px', color: C.teal }}>{reconUploadStatus}</div>}
+          </div>
 
+          {reconUploadPreview.length > 0 && (
+            <div style={{ ...card, border: `1px solid ${C.teal}` }}>
+              <div style={{ fontSize: '12px', fontWeight: 'bold', color: C.teal, marginBottom: '8px', textTransform: 'uppercase' }}>Import Preview — {reconUploadPreview.filter(r => r._selected).length} selected</div>
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                <button onClick={() => setReconUploadPreview(reconUploadPreview.map(r => ({ ...r, _selected: true })))} style={editBtn}>Select All</button>
+                <button onClick={() => setReconUploadPreview(reconUploadPreview.map(r => ({ ...r, _selected: false })))} style={editBtn}>Deselect All</button>
+              </div>
+              <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                {reconUploadPreview.map((r, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
+                    <input type="checkbox" checked={r._selected} onChange={e => { const u = [...reconUploadPreview]; u[i]._selected = e.target.checked; setReconUploadPreview(u) }} style={{ width: '16px', height: '16px', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.description}</div>
+                      <div style={{ fontSize: '11px', color: C.muted }}>{r.transaction_date}</div>
+                    </div>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: r.amount >= 0 ? C.green : '#ef4444', flexShrink: 0 }}>{fmt(r.amount)}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button onClick={confirmReconImport} style={{ padding: '10px 18px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Import Selected</button>
+                <button onClick={() => { setReconUploadPreview([]); setReconUploadStatus('') }} style={{ padding: '10px 14px', background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', color: C.muted, cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Cancel</button>
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
             <div style={{ fontSize: '13px', color: C.muted }}>
               {reconTransactions.length} transaction{reconTransactions.length !== 1 ? 's' : ''} · {reconTransactions.filter(t => t.is_reconciled).length} reconciled
