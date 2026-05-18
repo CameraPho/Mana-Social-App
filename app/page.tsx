@@ -373,6 +373,10 @@ export default function ManaSocialApp() {
   const [bulkDateTo, setBulkDateTo] = useState(new Date().toISOString().split('T')[0])
   const [bulkUser, setBulkUser] = useState('Cam')
   const [bulkDefaults, setBulkDefaults] = useState<any>({})
+  const [reconTransactions, setReconTransactions] = useState<any[]>([])
+  const [reconAccount, setReconAccount] = useState('All')
+  const [reconShowReconciled, setReconShowReconciled] = useState(false)
+  const salesFileRef = useRef<HTMLInputElement>(null)
   const salesFileRef = useRef<HTMLInputElement>(null)
   const expFileRef = useRef<HTMLInputElement>(null)
 
@@ -422,7 +426,7 @@ export default function ManaSocialApp() {
       const d = new Date(i[key])
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth)
     })
-    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc] = await Promise.all([
+    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst] = await Promise.all([
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
       supabase.from('accounts_payable').select('*').order('invoice_date', { ascending: false }),
@@ -434,6 +438,8 @@ export default function ManaSocialApp() {
       supabase.from('assets').select('*').order('purchase_date', { ascending: false }),
       supabase.from('bank_accounts').select('*'),
       supabase.from('supply_costs').select('*').order('effective_date', { ascending: false }),
+      supabase.from('supply_costs').select('*').order('effective_date', { ascending: false }),
+      supabase.from('bank_statement_transactions').select('*').order('transaction_date', { ascending: false }),
     ])
     setSales(fd(s.data || [], 'sale_date'))
     setExpenses(fd(e.data || [], 'purchase_date'))
@@ -457,6 +463,7 @@ export default function ManaSocialApp() {
     setAssets(ast.data || [])
     setBankAccounts(ba.data || [])
     setSupplyCosts(sc.data || [])
+    setReconTransactions(bst.data || [])
   }, [authed, selectedYear, selectedMonth])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -1869,7 +1876,227 @@ export default function ManaSocialApp() {
           })()}
         </div>
       )
+        
+case 'reconcile': return (
+        <div>
+          <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
+            🏦 Bank Reconciliation — manually enter transactions from your bank statements and categorize them.
+          </div>
 
+          {/* Add Transaction Form */}
+          {(() => {
+            const [showAddForm, setShowAddForm] = React.useState(false)
+            const [newTxn, setNewTxn] = React.useState({
+              account_name: 'Chase Business Checking',
+              transaction_date: new Date().toISOString().split('T')[0],
+              description: '',
+              amount: '',
+              category: 'Other',
+              is_business: true,
+              notes: '',
+            })
+            const saveTransaction = async () => {
+              if (!newTxn.description || !newTxn.amount) return alert('Missing description or amount')
+              const { error } = await supabase.from('bank_statement_transactions').insert([{
+                account_name: newTxn.account_name,
+                transaction_date: newTxn.transaction_date,
+                description: newTxn.description,
+                amount: parseFloat(newTxn.amount),
+                category: newTxn.category,
+                is_business: newTxn.is_business,
+                is_reconciled: false,
+                entity: getEntity(newTxn.transaction_date),
+                notes: newTxn.notes,
+              }])
+              if (error) return alert(error.message)
+              setShowAddForm(false)
+              setNewTxn({ account_name: 'Chase Business Checking', transaction_date: new Date().toISOString().split('T')[0], description: '', amount: '', category: 'Other', is_business: true, notes: '' })
+              fetchData()
+            }
+            return (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '13px', color: C.muted }}>
+                    {reconTransactions.length} transaction{reconTransactions.length !== 1 ? 's' : ''} · {reconTransactions.filter(t => t.is_reconciled).length} reconciled
+                  </div>
+                  <button onClick={() => setShowAddForm(!showAddForm)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
+                    {showAddForm ? 'Cancel' : '+ Add Transaction'}
+                  </button>
+                </div>
+
+                {showAddForm && (
+                  <div style={{ ...card, border: `1px solid ${C.teal}`, marginBottom: '12px' }}>
+                    <div style={{ display: 'grid', gap: '10px' }}>
+                      <div><span style={lbl}>Account</span>
+                        <select value={newTxn.account_name} onChange={e => setNewTxn({ ...newTxn, account_name: e.target.value })} style={inp}>
+                          <option value="Chase Business Checking">Chase Business Checking</option>
+                          <option value="Wells Fargo Business Checking">Wells Fargo Business Checking</option>
+                          <option value="Chase Credit Card">Chase Credit Card</option>
+                          <option value="Other Credit Card">Other Credit Card</option>
+                        </select>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div><span style={lbl}>Date</span><input type="date" value={newTxn.transaction_date} onChange={e => setNewTxn({ ...newTxn, transaction_date: e.target.value })} style={inp} /></div>
+                        <div><span style={lbl}>Amount ($)</span><input type="number" step="0.01" value={newTxn.amount} onChange={e => setNewTxn({ ...newTxn, amount: e.target.value })} placeholder="Use - for debits" style={inp} /></div>
+                      </div>
+                      <div><span style={lbl}>Description</span><input value={newTxn.description} onChange={e => setNewTxn({ ...newTxn, description: e.target.value })} placeholder="e.g. Amazon, USPS, TCGplayer deposit" style={inp} /></div>
+                      <div><span style={lbl}>Category</span>
+                        <select value={newTxn.category} onChange={e => setNewTxn({ ...newTxn, category: e.target.value })} style={inp}>
+                          {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          <option value="Income">Income / Deposit</option>
+                        </select>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div><span style={lbl}>Business or Personal</span>
+                          <select value={String(newTxn.is_business)} onChange={e => setNewTxn({ ...newTxn, is_business: e.target.value === 'true' })} style={inp}>
+                            <option value="true">Business</option>
+                            <option value="false">Personal</option>
+                          </select>
+                        </div>
+                        <div><span style={lbl}>Notes</span><input value={newTxn.notes} onChange={e => setNewTxn({ ...newTxn, notes: e.target.value })} placeholder="Optional" style={inp} /></div>
+                      </div>
+                      <button onClick={saveTransaction} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '14px', borderRadius: '12px', fontWeight: 900, border: 'none', fontSize: '15px', cursor: 'pointer', fontFamily: FONT }}>
+                        SAVE TRANSACTION
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+            {['All', 'Chase Business Checking', 'Wells Fargo Business Checking', 'Chase Credit Card', 'Other Credit Card'].map(acct => (
+              <button key={acct} onClick={() => setReconAccount(acct)} style={{ padding: '6px 12px', borderRadius: '20px', border: `1px solid ${reconAccount === acct ? C.teal : C.border}`, background: reconAccount === acct ? 'rgba(45,191,184,0.12)' : C.inputBg, fontSize: '12px', fontWeight: reconAccount === acct ? 'bold' : 'normal', color: reconAccount === acct ? C.teal : C.muted, cursor: 'pointer', fontFamily: FONT }}>
+                {acct === 'All' ? 'All Accounts' : acct}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+            <input type="checkbox" id="showReconciled" checked={reconShowReconciled} onChange={e => setReconShowReconciled(e.target.checked)} style={{ width: '16px', height: '16px' }} />
+            <label htmlFor="showReconciled" style={{ fontSize: '13px', color: C.muted, cursor: 'pointer' }}>Show reconciled transactions</label>
+          </div>
+
+          {/* Summary bar */}
+          {(() => {
+            const filtered = reconTransactions.filter(t => reconAccount === 'All' || t.account_name === reconAccount)
+            const debits = filtered.filter(t => t.amount < 0).reduce((a, t) => a + t.amount, 0)
+            const credits = filtered.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0)
+            const unreconciled = filtered.filter(t => !t.is_reconciled).length
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                <div style={{ ...card, padding: '12px', marginBottom: 0, textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>CREDITS</div>
+                  <div style={{ fontSize: '16px', fontWeight: 900, color: C.green }}>{fmt(credits)}</div>
+                </div>
+                <div style={{ ...card, padding: '12px', marginBottom: 0, textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>DEBITS</div>
+                  <div style={{ fontSize: '16px', fontWeight: 900, color: '#ef4444' }}>{fmt(debits)}</div>
+                </div>
+                <div style={{ ...card, padding: '12px', marginBottom: 0, textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>UNREVIEWED</div>
+                  <div style={{ fontSize: '16px', fontWeight: 900, color: unreconciled > 0 ? C.gold : C.teal }}>{unreconciled}</div>
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Transaction list */}
+          {(() => {
+            const filtered = reconTransactions
+              .filter(t => reconAccount === 'All' || t.account_name === reconAccount)
+              .filter(t => reconShowReconciled || !t.is_reconciled)
+            if (filtered.length === 0) return (
+              <div style={{ textAlign: 'center', padding: '40px', color: C.muted, fontSize: '14px' }}>
+                No transactions yet — tap + Add Transaction to get started
+              </div>
+            )
+            return filtered.map(txn => (
+              <div key={txn.id} style={{ ...card, padding: '14px', border: `1px solid ${txn.is_reconciled ? 'rgba(16,185,129,0.2)' : C.border}`, background: txn.is_reconciled ? 'rgba(16,185,129,0.04)' : C.cardBg }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                  <div style={{ flex: 1, paddingRight: '8px' }}>
+                    <div style={{ fontWeight: 700, fontSize: '14px' }}>{txn.description}</div>
+                    <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{txn.transaction_date} · {txn.account_name}</div>
+                    {txn.notes && <div style={{ fontSize: '11px', color: C.muted }}>{txn.notes}</div>}
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontSize: '16px', fontWeight: 900, color: txn.amount >= 0 ? C.green : '#ef4444' }}>{fmt(txn.amount)}</div>
+                    <div style={{ fontSize: '11px', color: txn.is_business ? C.teal : C.gold }}>{txn.is_business ? 'Business' : 'Personal'}</div>
+                  </div>
+                </div>
+
+                {/* Category + Business/Personal toggles */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '8px' }}>
+                  <select
+                    value={txn.category || 'Other'}
+                    onChange={async e => {
+                      await supabase.from('bank_statement_transactions').update({ category: e.target.value }).eq('id', txn.id)
+                      fetchData()
+                    }}
+                    style={{ ...inp, padding: '6px 8px', fontSize: '12px' }}
+                  >
+                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    <option value="Income">Income / Deposit</option>
+                  </select>
+                  <select
+                    value={String(txn.is_business)}
+                    onChange={async e => {
+                      await supabase.from('bank_statement_transactions').update({ is_business: e.target.value === 'true' }).eq('id', txn.id)
+                      fetchData()
+                    }}
+                    style={{ ...inp, padding: '6px 8px', fontSize: '12px' }}
+                  >
+                    <option value="true">Business</option>
+                    <option value="false">Personal</option>
+                  </select>
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={async () => {
+                      await supabase.from('bank_statement_transactions').update({ is_reconciled: !txn.is_reconciled }).eq('id', txn.id)
+                      fetchData()
+                    }}
+                    style={{ padding: '5px 12px', borderRadius: '6px', border: `1px solid ${txn.is_reconciled ? C.teal : C.border}`, background: txn.is_reconciled ? 'rgba(45,191,184,0.1)' : 'none', fontSize: '12px', fontWeight: 'bold', color: txn.is_reconciled ? C.teal : C.muted, cursor: 'pointer', fontFamily: FONT }}
+                  >
+                    {txn.is_reconciled ? '✓ Reconciled' : 'Mark Reconciled'}
+                  </button>
+                  {txn.is_business && txn.amount < 0 && !txn.linked_expense_id && (
+                    <button
+                      onClick={async () => {
+                        const { data: inserted, error } = await supabase.from('expenses').insert([{
+                          category: txn.category || 'Other',
+                          cost: Math.abs(txn.amount),
+                          purchase_date: txn.transaction_date,
+                          notes: txn.description,
+                          entity: txn.entity || 'llc',
+                          user_name: 'Cam',
+                          paid_by_company: true,
+                        }]).select().single()
+                        if (error) return alert(error.message)
+                        await supabase.from('bank_statement_transactions').update({ linked_expense_id: inserted.id, is_reconciled: true }).eq('id', txn.id)
+                        fetchData()
+                        alert('Pushed to Expenses ✓')
+                      }}
+                      style={{ padding: '5px 12px', borderRadius: '6px', border: `1px solid ${C.purple}`, background: 'rgba(107,63,160,0.08)', fontSize: '12px', fontWeight: 'bold', color: C.purple, cursor: 'pointer', fontFamily: FONT }}
+                    >
+                      → Push to Expenses
+                    </button>
+                  )}
+                  {txn.linked_expense_id && (
+                    <span style={{ padding: '5px 12px', fontSize: '12px', color: C.teal }}>✓ In Expenses</span>
+                  )}
+                  <button onClick={async () => { if (!confirm('Delete?')) return; await supabase.from('bank_statement_transactions').delete().eq('id', txn.id); fetchData() }} style={{ ...editBtn, color: C.pink, marginLeft: 'auto' }}>Delete</button>
+                </div>
+              </div>
+            ))
+          })()}
+        </div>
+      )
+        
       case 'accounting': return (
         <div>
           <div style={{ padding: '8px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
@@ -2005,6 +2232,7 @@ export default function ManaSocialApp() {
     { id: 'deductions', label: 'Deductions' },
     { id: 'tax',        label: 'Tax'        },
     { id: 'payroll',    label: 'Payroll'    },
+    { id: 'reconcile', label: 'Reconcile' }
     { id: 'accounting', label: 'Accounting' },
   ]
 
