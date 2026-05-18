@@ -418,7 +418,7 @@ export default function ManaSocialApp() {
   const [pendingReviewCount, setPendingReviewCount] = useState(0)
   const [importQueueOpen, setImportQueueOpen] = useState(false)
   const [importQueue, setImportQueue] = useState<any[]>([])
-  // --- PDF Upload & Parsing for Reconcile Tab ---
+  
 // --- PDF Upload & Parsing for Reconcile Tab ---
 async function handleReconPdfUpload(file: File) {
   try {
@@ -479,15 +479,8 @@ function convertChaseDate(mmdd: string) {
   }
 }
 
-  return txns
-}
-
-function convertChaseDate(mmdd: string) {
-  const [m, d] = mmdd.split('/')
-  const year = new Date().getFullYear()
-  return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
-}
-
+// --- PDF Upload Handler ---
+async function handleReconPdfUpload(file: File) {
   try {
     setReconUploadStatus('Reading PDF…')
 
@@ -510,7 +503,7 @@ function convertChaseDate(mmdd: string) {
     setReconUploadStatus('Error reading PDF')
   }
 }
-
+  
   const [duplicateWarning, setDuplicateWarning] = useState<any>(null)
   const [bulkTable, setBulkTable] = useState('mileage_log')
   const [bulkRows, setBulkRows] = useState<any[]>([])
