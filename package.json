@@ -15,7 +15,7 @@
     "xlsx": "0.18.5",
     "@supabase/supabase-js": "^2.43.2",
 
-    "pdfjs-dist": "4.0.379"   ← ⭐ Add this line
+    "pdfjs-dist": "4.0.379"
   },
   "devDependencies": {
     "typescript": "^5",
