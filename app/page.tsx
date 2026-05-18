@@ -2232,7 +2232,7 @@ case 'reconcile': return (
     { id: 'deductions', label: 'Deductions' },
     { id: 'tax',        label: 'Tax'        },
     { id: 'payroll',    label: 'Payroll'    },
-    { id: 'reconcile', label: 'Reconcile' }
+    { id: 'reconcile', label: 'Reconcile'   },
     { id: 'accounting', label: 'Accounting' },
   ]
 
