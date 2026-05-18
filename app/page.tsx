@@ -377,7 +377,6 @@ export default function ManaSocialApp() {
   const [reconAccount, setReconAccount] = useState('All')
   const [reconShowReconciled, setReconShowReconciled] = useState(false)
   const salesFileRef = useRef<HTMLInputElement>(null)
-  const salesFileRef = useRef<HTMLInputElement>(null)
   const expFileRef = useRef<HTMLInputElement>(null)
 
   const emptyForm = {
