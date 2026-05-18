@@ -1,10 +1,12 @@
 'use client'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import * as XLSX from 'xlsx'
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf'
+import * as XLSX from 'xlsx'
+
 if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs`
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
 }
 
 const supabase = createClient(
@@ -416,6 +418,99 @@ export default function ManaSocialApp() {
   const [pendingReviewCount, setPendingReviewCount] = useState(0)
   const [importQueueOpen, setImportQueueOpen] = useState(false)
   const [importQueue, setImportQueue] = useState<any[]>([])
+  // --- PDF Upload & Parsing for Reconcile Tab ---
+// --- PDF Upload & Parsing for Reconcile Tab ---
+async function handleReconPdfUpload(file: File) {
+  try {
+    setReconUploadStatus('Reading PDF…')
+
+    const arrayBuffer = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+
+    let text = ''
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const content = await page.getTextContent()
+      text += content.items.map((it: any) => it.str).join(' ') + '\n'
+    }
+    
+// --- Chase PDF Parsing Helpers ---
+function parseChaseStatement(text: string) {
+  const lines = text.split('\n')
+  const txns: any[] = []
+
+  // Pattern: MM/DD  DESCRIPTION  -$123.45
+  const regex = /(\d{2}\/\d{2})\s+(.+?)\s+(-?\$[\d,]+\.\d{2})/
+
+  for (const raw of lines) {
+    const line = raw.trim()
+    const m = line.match(regex)
+    if (!m) continue
+
+    const [, mmdd, desc, amtStr] = m
+
+    txns.push({
+      transaction_date: convertChaseDate(mmdd),
+      description: desc.trim(),
+      amount: parseFloat(amtStr.replace(/[$,]/g, '')),
+      account_name: 'Chase Business Checking',
+      category: 'Other',
+      is_business: true,
+      notes: '',
+    })
+  }
+
+  return txns
+}
+
+function convertChaseDate(mmdd: string) {
+  const [m, d] = mmdd.split('/')
+  const year = new Date().getFullYear()
+  return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+}
+
+    const parsed = parseChaseStatement(text)
+
+    setReconUploadPreview(parsed.map(r => ({ ...r, _selected: true })))
+    setReconUploadStatus(`Parsed ${parsed.length} transactions`)
+  } catch (err: any) {
+    console.error(err)
+    setReconUploadStatus('Error reading PDF')
+  }
+}
+
+  return txns
+}
+
+function convertChaseDate(mmdd: string) {
+  const [m, d] = mmdd.split('/')
+  const year = new Date().getFullYear()
+  return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+}
+
+  try {
+    setReconUploadStatus('Reading PDF…')
+
+    const arrayBuffer = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+
+    let text = ''
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const content = await page.getTextContent()
+      text += content.items.map((it: any) => it.str).join(' ') + '\n'
+    }
+
+    const parsed = parseChaseStatement(text)
+
+    setReconUploadPreview(parsed.map(r => ({ ...r, _selected: true })))
+    setReconUploadStatus(`Parsed ${parsed.length} transactions`)
+  } catch (err: any) {
+    console.error(err)
+    setReconUploadStatus('Error reading PDF')
+  }
+}
+
   const [duplicateWarning, setDuplicateWarning] = useState<any>(null)
   const [bulkTable, setBulkTable] = useState('mileage_log')
   const [bulkRows, setBulkRows] = useState<any[]>([])
