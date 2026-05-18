@@ -447,7 +447,6 @@ export default function ManaSocialApp() {
       supabase.from('assets').select('*').order('purchase_date', { ascending: false }),
       supabase.from('bank_accounts').select('*'),
       supabase.from('supply_costs').select('*').order('effective_date', { ascending: false }),
-      supabase.from('supply_costs').select('*').order('effective_date', { ascending: false }),
       supabase.from('bank_statement_transactions').select('*').order('transaction_date', { ascending: false }),
     ])
     setSales(fd(s.data || [], 'sale_date'))
