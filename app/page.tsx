@@ -454,31 +454,6 @@ function convertChaseDate(mmdd: string) {
   return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
 }
 
-// --- PDF Upload Handler ---
-async function handleReconPdfUpload(file: File) {
-  try {
-    setReconUploadStatus('Reading PDF…')
-
-    const arrayBuffer = await file.arrayBuffer()
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-
-    let text = ''
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i)
-      const content = await page.getTextContent()
-      text += content.items.map((it: any) => it.str).join(' ') + '\n'
-    }
-
-    const parsed = parseChaseStatement(text)
-
-    setReconUploadPreview(parsed.map(r => ({ ...r, _selected: true })))
-    setReconUploadStatus(`Parsed ${parsed.length} transactions`)
-  } catch (err: any) {
-    console.error(err)
-    setReconUploadStatus('Error reading PDF')
-  }
-}
-
 const emptyForm = {
   label: '',
   amount: '',
@@ -804,6 +779,44 @@ const emptyForm = {
     }
     setUploadPreview([]); setUploadStatus('Saved!'); fetchData()
     setTimeout(() => setUploadStatus(''), 3000)
+  }
+
+  const confirmReconImport = async () => {
+    const toImport = reconUploadPreview.filter(r => r._selected)
+    if (toImport.length === 0) return alert('No transactions selected')
+    setReconUploadStatus('Importing...')
+    const { error } = await supabase.from('bank_statement_transactions').insert(
+      toImport.map(r => ({
+        account_name: r.account_name,
+        transaction_date: r.transaction_date,
+        description: r.description,
+        amount: r.amount,
+        category: r.category || 'Other',
+        is_business: r.is_business,
+        is_reconciled: false,
+        entity: getEntity(r.transaction_date),
+        notes: '',
+      }))
+    )
+    if (error) { setReconUploadStatus('Error: ' + error.message); return }
+    setReconUploadPreview([])
+    setReconUploadStatus(`Imported ${toImport.length} transactions ✓`)
+    fetchData()
+    setTimeout(() => setReconUploadStatus(''), 4000)
+  }
+  
+  const handleReconPdfUpload = async (file: File) => {
+    setReconUploadPreview([])
+    if (file.type !== 'application/pdf') { setReconUploadStatus('Please upload a PDF bank statement'); return }
+    setReconUploadStatus('Reading Chase statement...')
+    try {
+      const { records, meta } = await parseChaseStatementPDF(file)
+      if (records.length === 0) { setReconUploadStatus('No transactions found — is this a Chase Checking statement?'); return }
+      setReconUploadPreview(records.map(r => ({ ...r, category: 'Other', is_business: true, _selected: true })))
+      setReconUploadStatus(`Found ${records.length} transactions from ${meta.year}. Review and import below.`)
+    } catch (err: any) {
+      setReconUploadStatus('Parse error: ' + err.message)
+    }
   }
 
   const confirmReconImport = async () => {
