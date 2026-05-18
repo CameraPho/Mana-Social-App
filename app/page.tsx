@@ -1,13 +1,7 @@
 'use client'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import * as XLSX from 'xlsx'
-
-if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
-}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -264,6 +258,8 @@ function parseAmazonCSV(file: File): Promise<{ records: any[], meta: any }> {
 }
 
 async function parseChaseStatementPDF(file: File): Promise<{ records: any[], meta: any }> {
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
   const arrayBuf = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise
   let fullText = ''
@@ -280,14 +276,10 @@ async function parseChaseStatementPDF(file: File): Promise<{ records: any[], met
     }
     fullText += '\n'
   }
-
-  // Detect statement year from "through Month DD, YYYY"
   const yearMatch = fullText.match(/through\s+\w+\s+\d{1,2},\s+(\d{4})/)
   const stmtYear = yearMatch ? yearMatch[1] : String(new Date().getFullYear())
-
   const records: any[] = []
   const lines = fullText.split('\n')
-  // Chase rows start with MM/DD and contain an amount + running balance
   const rowRegex = /^(\d{2})\/(\d{2})\s+(.+?)\s+(-?[\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/
   for (const line of lines) {
     const m = line.trim().match(rowRegex)
@@ -295,17 +287,8 @@ async function parseChaseStatementPDF(file: File): Promise<{ records: any[], met
     const [, mm, dd, descRaw, amtRaw] = m
     const desc = descRaw.replace(/\s+/g, ' ').trim()
     if (/Beginning Balance|Ending Balance/i.test(desc)) continue
-    let amount = parseFloat(amtRaw.replace(/,/g, ''))
-    // Chase shows withdrawals with a leading minus; deposits are positive
-    const isDebit = amtRaw.trim().startsWith('-')
-    if (!isDebit && amount > 0) amount = Math.abs(amount)
-    const txnDate = `${stmtYear}-${mm}-${dd}`
-    records.push({
-      transaction_date: txnDate,
-      description: desc.slice(0, 200),
-      amount: amount,
-      account_name: 'Chase Business Checking',
-    })
+    const amount = parseFloat(amtRaw.replace(/,/g, ''))
+    records.push({ transaction_date: `${stmtYear}-${mm}-${dd}`, description: desc.slice(0, 200), amount, account_name: 'Chase Business Checking' })
   }
   return { records, meta: { rows: records.length, year: stmtYear, fileName: file.name } }
 }
@@ -398,6 +381,7 @@ export default function ManaSocialApp() {
     return h >= 19 || h < 7
   })()
   const C = isDark ? DARK_COLORS : LIGHT_COLORS
+
   const [authed, setAuthed] = useState(false)
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [activeTab, setActiveTab] = useState('summary')
@@ -418,86 +402,42 @@ export default function ManaSocialApp() {
   const [pendingReviewCount, setPendingReviewCount] = useState(0)
   const [importQueueOpen, setImportQueueOpen] = useState(false)
   const [importQueue, setImportQueue] = useState<any[]>([])
-    
-// --- Chase PDF Parsing Helpers ---
-function parseChaseStatement(text: string) {
-  const lines = text.split('\n')
-  const txns: any[] = []
+  const [duplicateWarning, setDuplicateWarning] = useState<any>(null)
+  const [bulkTable, setBulkTable] = useState('mileage_log')
+  const [bulkRows, setBulkRows] = useState<any[]>([])
+  const [bulkDateMode, setBulkDateMode] = useState<'single'|'range'|'week'|'month'>('single')
+  const [bulkDateFrom, setBulkDateFrom] = useState(new Date().toISOString().split('T')[0])
+  const [bulkDateTo, setBulkDateTo] = useState(new Date().toISOString().split('T')[0])
+  const [bulkUser, setBulkUser] = useState('Cam')
+  const [bulkDefaults, setBulkDefaults] = useState<any>({})
+  const [reconTransactions, setReconTransactions] = useState<any[]>([])
+  const [reconAccount, setReconAccount] = useState('All')
+  const [reconShowReconciled, setReconShowReconciled] = useState(false)
+  const [reconShowAddForm, setReconShowAddForm] = useState(false)
+  const [reconNewTxn, setReconNewTxn] = useState({
+    account_name: 'Chase Business Checking',
+    transaction_date: new Date().toISOString().split('T')[0],
+    description: '', amount: '', category: 'Other', is_business: true, notes: '',
+  })
+  const [reconUploadPreview, setReconUploadPreview] = useState<any[]>([])
+  const [reconUploadStatus, setReconUploadStatus] = useState('')
+  const salesFileRef = useRef<HTMLInputElement>(null)
+  const expFileRef = useRef<HTMLInputElement>(null)
+  const reconFileRef = useRef<HTMLInputElement>(null)
 
-  // Pattern: MM/DD  DESCRIPTION  -$123.45
-  const regex = /(\d{2}\/\d{2})\s+(.+?)\s+(-?\$[\d,]+\.\d{2})/
-
-  for (const raw of lines) {
-    const line = raw.trim()
-    const m = line.match(regex)
-    if (!m) continue
-
-    const [, mmdd, desc, amtStr] = m
-
-    txns.push({
-      transaction_date: convertChaseDate(mmdd),
-      description: desc.trim(),
-      amount: parseFloat(amtStr.replace(/[$,]/g, '')),
-      account_name: 'Chase Business Checking',
-      category: 'Other',
-      is_business: true,
-      notes: '',
-    })
+  const emptyForm = {
+    label: '', amount: '', date: new Date().toISOString().split('T')[0],
+    fees: '', shipping: '', notes: '', itemCount: '', category: 'Supplies & Packaging',
+    miles: '', mileFrom: '', mileTo: '', milePurpose: '',
+    cogsType: 'collection', cogsSet: '', cogsCost: '', cogsQty: '1',
+    cogsCards: '', cogsCardsPerBox: '', cogsEstValue: '', amountPaid: '',
+    userName: 'Cam', paidByCompany: true, assetCategory: 'Equipment', assetLife: '5',
+    payPeriod: '', hoursWorked: '', hourlyRate: '16', rothEligible: '', rothContributed: '',
+    bankName: 'Chase', accountType: 'Checking', accountLast4: '', bankBalance: '',
+    apVendor: '', apTotal: '', apPaid: '', apDue: '', supplyItem: '', supplyUnit: '', supplyCost: '',
   }
-
-  return txns
-}
-
-function convertChaseDate(mmdd: string) {
-  const [m, d] = mmdd.split('/')
-  const year = new Date().getFullYear()
-  return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
-}
-
-const emptyForm = {
-  label: '',
-  amount: '',
-  date: new Date().toISOString().split('T')[0],
-  fees: '',
-  shipping: '',
-  notes: '',
-  itemCount: '',
-  category: 'Supplies & Packaging',
-  miles: '',
-  mileFrom: '',
-  mileTo: '',
-  milePurpose: '',
-  cogsType: 'collection',
-  cogsSet: '',
-  cogsCost: '',
-  cogsQty: '1',
-  cogsCards: '',
-  cogsCardsPerBox: '',
-  cogsEstValue: '',
-  amountPaid: '',
-  userName: 'Cam',
-  paidByCompany: true,
-  assetCategory: 'Equipment',
-  assetLife: '5',
-  payPeriod: '',
-  hoursWorked: '',
-  hourlyRate: '16',
-  rothEligible: '',
-  rothContributed: '',
-  bankName: 'Chase',
-  accountType: 'Checking',
-  accountLast4: '',
-  bankBalance: '',
-  apVendor: '',
-  apTotal: '',
-  apPaid: '',
-  apDue: '',
-  supplyItem: '',
-  supplyUnit: '',
-  supplyCost: '',
-}
-
   const [formData, setFormData] = useState(emptyForm)
+
   const [sales, setSales] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [accountsPayable, setAccountsPayable] = useState<any[]>([])
@@ -570,7 +510,6 @@ const emptyForm = {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // ── Computed values ──────────────────────────────────────────────────
   const gross = sales.reduce((s, r) => s + Number(r.amount), 0)
   const totalPlatformFees = sales.reduce((s, r) => s + Number(r.fees || 0), 0)
   const totalShippingExpense = sales.reduce((s, r) => s + Number(r.shipping || 0), 0)
@@ -627,13 +566,11 @@ const emptyForm = {
   const totalAssets = totalCurrentAssets + totalBookValue
   const totalLiabilities = totalAPOwed + totalCreditDebt
   const ownerEquity = totalAssets - totalLiabilities
-
   const getLatestSupplyCost = (itemName: string): number => {
     const matches = supplyCosts.filter(s => s.item_name === itemName).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
     return matches.length > 0 ? parseFloat(matches[0].cost_per_unit) : 0
   }
   const uniqueSupplyItems = Array.from(new Set(supplyCosts.map(s => s.item_name)))
-
   const quarters = [
     { label: 'Q1', start: '2026-01-01', end: '2026-03-31', due941: 'Apr 30', due1040: 'Apr 15' },
     { label: 'Q2', start: '2026-04-01', end: '2026-06-30', due941: 'Jul 31', due1040: 'Jun 16' },
@@ -651,7 +588,6 @@ const emptyForm = {
     return { ...q, netRev, exp, grossPay, taxable, fica, futa, caUI, fedEst, pte, grand: fica + futa + caUI + fedEst + pte }
   })
   const ytdTax = quarters.reduce((a, q) => a + q.grand, 0)
-
   const buildInventoryFlow = () => {
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
     const beginningBalance = allCogsInventory.filter(r => new Date(r.date).getFullYear() < selectedYear).reduce((a, r) => a + parseFloat(r.total_cost || 0), 0)
@@ -669,7 +605,6 @@ const emptyForm = {
   }
   const { flow: inventoryFlow, endingBalance } = buildInventoryFlow()
 
-  // ── Styles ──────────────────────────────────────────────────────────
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
   const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: C.inputBg, boxSizing: 'border-box', fontFamily: BODY, color: C.text }
   const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: BODY }
@@ -677,7 +612,6 @@ const emptyForm = {
   const delBtn: React.CSSProperties = { background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '18px', fontFamily: FONT }
   const secHdr: React.CSSProperties = { fontSize: '11px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '12px', fontFamily: BODY, display: 'block' }
 
-  // ── Handlers ─────────────────────────────────────────────────────────
   const fetchImportQueue = async () => {
     const { data } = await supabase.from('import_queue').select('*').in('status', ['pending', 'pending_auto']).order('created_at', { ascending: false })
     setImportQueue(data || [])
@@ -687,6 +621,38 @@ const emptyForm = {
   useEffect(() => { if (authed) fetchImportQueue() }, [authed])
   useEffect(() => { document.body.style.background = isDark ? '#232D42' : '#F0F2F8'; document.body.style.transition = 'background 0.2s' }, [isDark])
   useEffect(() => { setBulkDefaults({}); setBulkRows([]) }, [bulkTable])
+
+  const handleReconPdfUpload = async (file: File) => {
+    setReconUploadPreview([])
+    if (file.type !== 'application/pdf') { setReconUploadStatus('Please upload a PDF bank statement'); return }
+    setReconUploadStatus('Reading Chase statement...')
+    try {
+      const { records, meta } = await parseChaseStatementPDF(file)
+      if (records.length === 0) { setReconUploadStatus('No transactions found — is this a Chase Checking statement?'); return }
+      setReconUploadPreview(records.map(r => ({ ...r, category: 'Other', is_business: true, _selected: true })))
+      setReconUploadStatus(`Found ${records.length} transactions from ${meta.year}. Review and import below.`)
+    } catch (err: any) {
+      setReconUploadStatus('Parse error: ' + err.message)
+    }
+  }
+
+  const confirmReconImport = async () => {
+    const toImport = reconUploadPreview.filter(r => r._selected)
+    if (toImport.length === 0) return alert('No transactions selected')
+    setReconUploadStatus('Importing...')
+    const { error } = await supabase.from('bank_statement_transactions').insert(
+      toImport.map(r => ({
+        account_name: r.account_name, transaction_date: r.transaction_date,
+        description: r.description, amount: r.amount, category: r.category || 'Other',
+        is_business: r.is_business, is_reconciled: false, entity: getEntity(r.transaction_date), notes: '',
+      }))
+    )
+    if (error) { setReconUploadStatus('Error: ' + error.message); return }
+    setReconUploadPreview([])
+    setReconUploadStatus(`Imported ${toImport.length} transactions ✓`)
+    fetchData()
+    setTimeout(() => setReconUploadStatus(''), 4000)
+  }
 
   const handleFileUpload = async (file: File, mode: 'sales' | 'expenses') => {
     setUploadPreview([])
@@ -733,7 +699,7 @@ const emptyForm = {
       return
     }
     if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
-      setUploadStatus('Unrecognized file format. CSV/XLSX should be from a known platform. PDFs and photos use AI.')
+      setUploadStatus('Unrecognized file format.')
       return
     }
     setUploadMode(mode); setUploadStatus('Reading file with AI... (10-20 seconds)')
@@ -781,68 +747,6 @@ const emptyForm = {
     setTimeout(() => setUploadStatus(''), 3000)
   }
 
-  const confirmReconImport = async () => {
-    const toImport = reconUploadPreview.filter(r => r._selected)
-    if (toImport.length === 0) return alert('No transactions selected')
-    setReconUploadStatus('Importing...')
-    const { error } = await supabase.from('bank_statement_transactions').insert(
-      toImport.map(r => ({
-        account_name: r.account_name,
-        transaction_date: r.transaction_date,
-        description: r.description,
-        amount: r.amount,
-        category: r.category || 'Other',
-        is_business: r.is_business,
-        is_reconciled: false,
-        entity: getEntity(r.transaction_date),
-        notes: '',
-      }))
-    )
-    if (error) { setReconUploadStatus('Error: ' + error.message); return }
-    setReconUploadPreview([])
-    setReconUploadStatus(`Imported ${toImport.length} transactions ✓`)
-    fetchData()
-    setTimeout(() => setReconUploadStatus(''), 4000)
-  }
-  
-  const handleReconPdfUpload = async (file: File) => {
-    setReconUploadPreview([])
-    if (file.type !== 'application/pdf') { setReconUploadStatus('Please upload a PDF bank statement'); return }
-    setReconUploadStatus('Reading Chase statement...')
-    try {
-      const { records, meta } = await parseChaseStatementPDF(file)
-      if (records.length === 0) { setReconUploadStatus('No transactions found — is this a Chase Checking statement?'); return }
-      setReconUploadPreview(records.map(r => ({ ...r, category: 'Other', is_business: true, _selected: true })))
-      setReconUploadStatus(`Found ${records.length} transactions from ${meta.year}. Review and import below.`)
-    } catch (err: any) {
-      setReconUploadStatus('Parse error: ' + err.message)
-    }
-  }
-
-  const confirmReconImport = async () => {
-    const toImport = reconUploadPreview.filter(r => r._selected)
-    if (toImport.length === 0) return alert('No transactions selected')
-    setReconUploadStatus('Importing...')
-    const { error } = await supabase.from('bank_statement_transactions').insert(
-      toImport.map(r => ({
-        account_name: r.account_name,
-        transaction_date: r.transaction_date,
-        description: r.description,
-        amount: r.amount,
-        category: r.category || 'Other',
-        is_business: r.is_business,
-        is_reconciled: false,
-        entity: getEntity(r.transaction_date),
-        notes: '',
-      }))
-    )
-    if (error) { setReconUploadStatus('Error: ' + error.message); return }
-    setReconUploadPreview([])
-    setReconUploadStatus(`Imported ${toImport.length} transactions ✓`)
-    fetchData()
-    setTimeout(() => setReconUploadStatus(''), 4000)
-  }
-  
   const syncManaPool = async () => {
     setSyncStatus('Syncing ManaPool...')
     try {
@@ -936,7 +840,6 @@ const emptyForm = {
     setThemeMode(next); localStorage.setItem('mana_theme', next)
   }
   const themeIcon = themeMode === 'light' ? '☀️' : themeMode === 'dark' ? '🌙' : '🌓'
-
   const generateBulkDates = (): string[] => {
     if (bulkDateMode === 'single') return [bulkDateFrom]
     if (bulkDateMode === 'range') return getDatesInRange(bulkDateFrom, bulkDateTo)
@@ -944,7 +847,6 @@ const emptyForm = {
     if (bulkDateMode === 'month') return getMonthDates(bulkDateFrom)
     return [bulkDateFrom]
   }
-
   const initBulkRows = () => {
     const dates = generateBulkDates(), d = bulkDefaults
     if (bulkTable === 'mileage_log') setBulkRows(dates.map(dt => ({ date: dt, purpose: d.purpose || 'USPS drop-off', from_location: d.from_location || 'Home', to_location: d.to_location || 'USPS Moreno Valley', miles: d.miles || '3', user_name: bulkUser, selected: true })))
@@ -953,7 +855,6 @@ const emptyForm = {
     else if (bulkTable === 'payroll') setBulkRows(dates.map(dt => ({ date: dt, employee_name: d.employee_name || '', amount: '', hours_worked: '', hourly_rate: d.hourly_rate || '16', selected: true })))
     else setBulkRows(dates.map(dt => ({ date: dt, selected: true })))
   }
-
   const saveBulkRows = async () => {
     const selected = bulkRows.filter(r => r.selected)
     if (!selected.length) return alert('No rows selected')
@@ -967,7 +868,8 @@ const emptyForm = {
     if (error) return alert(error.message)
     setBulkAddOpen(false); setBulkRows([]); fetchData()
   }
-  // ── Upload Preview ───────────────────────────────────────────────────
+
+// ── Upload Preview ───────────────────────────────────────────────────
   const renderUploadPreview = () => {
     if (!uploadPreview.length && !uploadStatus) return null
     return (
@@ -1042,7 +944,6 @@ const emptyForm = {
               {getEntity(formData.date) === 'sole_prop' ? 'Camera Pho (Sole Prop)' : 'Mana Social LLC'}
             </div>
           )}
-
           {t === 'supply_costs' && <>
             <div><span style={lbl}>Supply Item Name</span><input value={formData.supplyItem} onChange={e => setFormData({ ...formData, supplyItem: e.target.value })} placeholder="e.g. Penny Sleeve, Forever Stamp" style={inp} /></div>
             <div><span style={lbl}>Unit Description</span><input value={formData.supplyUnit} onChange={e => setFormData({ ...formData, supplyUnit: e.target.value })} placeholder="e.g. per sleeve, per stamp" style={inp} /></div>
@@ -1054,7 +955,6 @@ const emptyForm = {
             <div><span style={lbl}>Vendor / Source</span><input value={(formData as any).supplyVendor || ''} onChange={e => setFormData({ ...formData, supplyVendor: e.target.value } as any)} placeholder="e.g. BCW, Amazon, Costco" style={inp} /></div>
             <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Order #, etc." style={inp} /></div>
           </>}
-
           {t === 'assets' && <>
             <div><span style={lbl}>Category</span>
               <select value={formData.assetCategory} onChange={e => setFormData({ ...formData, assetCategory: e.target.value, assetLife: String(USEFUL_LIFE[e.target.value] || 5) })} style={inp}>
@@ -1077,7 +977,6 @@ const emptyForm = {
             {formData.amount && (() => { const cost = parseFloat(formData.amount)||0, life = parseInt(formData.assetLife)||5; return (<div style={{ padding:'10px', borderRadius:'8px', background:'rgba(45,191,184,0.08)', fontSize:'13px', color:'#1A7A75', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}><span>Sec 179: <strong>{fmt(cost)}</strong></span><span>SL/yr: <strong>{fmt(cost/life)}</strong></span></div>) })()}
             <div><span style={lbl}>Notes / PO#</span><input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Order number or notes" style={inp} /></div>
           </>}
-
           {t === 'bank_accounts' && <>
             <div><span style={lbl}>Bank</span>
               <select value={formData.bankName} onChange={e => setFormData({ ...formData, bankName: e.target.value })} style={inp}>
@@ -1096,7 +995,6 @@ const emptyForm = {
             <div><span style={lbl}>Current Balance ($)</span><input type="number" step="0.01" value={formData.bankBalance} onChange={e => setFormData({ ...formData, bankBalance: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="e.g. Chase Ink Business" style={inp} /></div>
           </>}
-
           {t === 'accounts_payable' && <>
             <div><span style={lbl}>Vendor / Seller Name</span><input value={formData.apVendor} onChange={e => setFormData({ ...formData, apVendor: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} /></div>
             <div><span style={lbl}>Transaction Description</span><input value={formData.label} onChange={e => setFormData({ ...formData, label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
@@ -1116,7 +1014,6 @@ const emptyForm = {
             </div>
             <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Payment terms, card types, condition, context" style={{ ...inp, height: '60px', resize: 'vertical' }} /></div>
           </>}
-
           {t === 'mileage_log' && <>
             <div><span style={lbl}>Business Purpose</span><input value={formData.milePurpose} onChange={e => setFormData({ ...formData, milePurpose: e.target.value })} placeholder="e.g. USPS drop-off" style={inp} /></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1133,7 +1030,6 @@ const emptyForm = {
             </div>
             {formData.miles && <div style={{ padding: '10px', borderRadius: '8px', background: 'rgba(45,191,184,0.08)', fontSize: '14px', color: '#1A7A75' }}>Deduction: <strong>{fmt(parseFloat(formData.miles) * MILEAGE_RATE)}</strong></div>}
           </>}
-
           {t === 'cogs_inventory' && <>
             <div><span style={lbl}>Inventory Type</span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
@@ -1162,7 +1058,6 @@ const emptyForm = {
             <div><span style={lbl}>Est. Sell Value ($)</span><input type="number" step="0.01" value={formData.cogsEstValue} onChange={e => setFormData({ ...formData, cogsEstValue: e.target.value })} placeholder="0.00" style={inp} /></div>
             {formData.cogsCost && (() => { const p = cogsPreview(); return (<div style={{ padding:'10px', borderRadius:'8px', background:'rgba(45,191,184,0.08)', fontSize:'14px', color:'#1A7A75', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}><span>Total: <strong>{fmt(p.total)}</strong></span><span>Units: <strong>{p.units.toLocaleString()}</strong></span><span>Per unit: <strong>${p.cpu.toFixed(3)}</strong></span>{formData.cogsEstValue&&<span>Margin: <strong>{p.total>0?(((parseFloat(formData.cogsEstValue)-p.total)/p.total)*100).toFixed(1)+'%':'—'}</strong></span>}</div>) })()}
           </>}
-
           {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable','supply_costs'].includes(t) && <>
             {t==='expenses' ? <>
               <div><span style={lbl}>Category</span>
@@ -1204,7 +1099,6 @@ const emptyForm = {
             </>}
             {t==='disbursements' && <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>}
           </>}
-
           <button onClick={handleSave} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '16px', borderRadius: '12px', fontWeight: 900, border: 'none', fontSize: '16px', cursor: 'pointer', marginTop: '4px', fontFamily: FONT }}>
             {isEditing ? 'UPDATE RECORD' : 'SAVE RECORD'}
           </button>
@@ -1213,7 +1107,6 @@ const emptyForm = {
     )
   }
 
-  // ── Accounting sub-components ────────────────────────────────────────
   const PLRow = ({ label, value, indent = false, bold = false, isNegative = false, showDrilldown = false, drillId = '' }: any) => (
     <div onClick={showDrilldown ? () => setAcctDrilldown(acctDrilldown === drillId ? null : drillId) : undefined}
       style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${bold ? '12px' : '8px'} 0`, borderBottom: `1px solid ${C.border}`, paddingLeft: indent ? '16px' : '0', cursor: showDrilldown ? 'pointer' : 'default', background: showDrilldown && acctDrilldown === drillId ? 'rgba(45,191,184,0.04)' : 'transparent' }}>
@@ -1231,7 +1124,6 @@ const emptyForm = {
     </div>
   )
 
-  // ── Bulk Add Modal ───────────────────────────────────────────────────
   const renderBulkModal = () => {
     if (!bulkAddOpen) return null
     return (
@@ -1350,8 +1242,8 @@ const emptyForm = {
       </div>
     )
   }
-  // ── Tab Renderer ─────────────────────────────────────────────────────
-  const renderTab = () => {
+
+const renderTab = () => {
     switch (activeTab) {
 
       case 'summary': return (
@@ -2040,13 +1932,14 @@ const emptyForm = {
           })()}
         </div>
       )
-        
-case 'reconcile': return (
+
+      case 'reconcile': return (
         <div>
           <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
-            🏦 Bank Reconciliation — manually enter transactions from your bank statements and categorize them.
+            🏦 Bank Reconciliation — upload Chase statements or add transactions manually.
           </div>
-        <div style={{ ...card, padding: '14px' }}>
+
+          <div style={{ ...card, padding: '14px' }}>
             <span style={secHdr}>UPLOAD BANK STATEMENT</span>
             <button onClick={() => reconFileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>
               Upload Chase Checking PDF
@@ -2081,6 +1974,7 @@ case 'reconcile': return (
               </div>
             </div>
           )}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
             <div style={{ fontSize: '13px', color: C.muted }}>
               {reconTransactions.length} transaction{reconTransactions.length !== 1 ? 's' : ''} · {reconTransactions.filter(t => t.is_reconciled).length} reconciled
@@ -2124,15 +2018,10 @@ case 'reconcile': return (
                 <button onClick={async () => {
                   if (!reconNewTxn.description || !reconNewTxn.amount) return alert('Missing description or amount')
                   const { error } = await supabase.from('bank_statement_transactions').insert([{
-                    account_name: reconNewTxn.account_name,
-                    transaction_date: reconNewTxn.transaction_date,
-                    description: reconNewTxn.description,
-                    amount: parseFloat(reconNewTxn.amount),
-                    category: reconNewTxn.category,
-                    is_business: reconNewTxn.is_business,
-                    is_reconciled: false,
-                    entity: getEntity(reconNewTxn.transaction_date),
-                    notes: reconNewTxn.notes,
+                    account_name: reconNewTxn.account_name, transaction_date: reconNewTxn.transaction_date,
+                    description: reconNewTxn.description, amount: parseFloat(reconNewTxn.amount),
+                    category: reconNewTxn.category, is_business: reconNewTxn.is_business,
+                    is_reconciled: false, entity: getEntity(reconNewTxn.transaction_date), notes: reconNewTxn.notes,
                   }])
                   if (error) return alert(error.message)
                   setReconShowAddForm(false)
@@ -2187,7 +2076,7 @@ case 'reconcile': return (
               .filter(t => reconShowReconciled || !t.is_reconciled)
             if (filtered.length === 0) return (
               <div style={{ textAlign: 'center', padding: '40px', color: C.muted, fontSize: '14px' }}>
-                No transactions yet — tap + Add Transaction to get started
+                No transactions yet — upload a statement or tap + Add Transaction
               </div>
             )
             return filtered.map(txn => (
@@ -2236,7 +2125,7 @@ case 'reconcile': return (
           })()}
         </div>
       )
-        
+
       case 'accounting': return (
         <div>
           <div style={{ padding: '8px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
@@ -2355,7 +2244,6 @@ case 'reconcile': return (
     }
   }
 
-  // ── Final render ──────────────────────────────────────────────────────
   if (checkingAuth) return (
     <div style={{ minHeight: '100vh', background: C.navyDark, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ width: '32px', height: '32px', border: '2px solid rgba(45,191,184,0.2)', borderTopColor: C.teal, borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
@@ -2372,7 +2260,7 @@ case 'reconcile': return (
     { id: 'deductions', label: 'Deductions' },
     { id: 'tax',        label: 'Tax'        },
     { id: 'payroll',    label: 'Payroll'    },
-    { id: 'reconcile', label: 'Reconcile'   },
+    { id: 'reconcile',  label: 'Reconcile'  },
     { id: 'accounting', label: 'Accounting' },
   ]
 
