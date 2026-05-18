@@ -418,21 +418,6 @@ export default function ManaSocialApp() {
   const [pendingReviewCount, setPendingReviewCount] = useState(0)
   const [importQueueOpen, setImportQueueOpen] = useState(false)
   const [importQueue, setImportQueue] = useState<any[]>([])
-  
-// --- PDF Upload & Parsing for Reconcile Tab ---
-async function handleReconPdfUpload(file: File) {
-  try {
-    setReconUploadStatus('Reading PDF…')
-
-    const arrayBuffer = await file.arrayBuffer()
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-
-    let text = ''
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i)
-      const content = await page.getTextContent()
-      text += content.items.map((it: any) => it.str).join(' ') + '\n'
-    }
     
 // --- Chase PDF Parsing Helpers ---
 function parseChaseStatement(text: string) {
