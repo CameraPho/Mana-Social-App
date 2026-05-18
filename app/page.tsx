@@ -1887,7 +1887,6 @@ export default function ManaSocialApp() {
       )
         
 case 'reconcile': return (
-        case 'reconcile': return (
         <div>
           <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
             🏦 Bank Reconciliation — manually enter transactions from your bank statements and categorize them.
