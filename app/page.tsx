@@ -1232,7 +1232,7 @@ export default function ManaSocialApp() {
           </div>
         </div>
       )
-        
+
       case 'income': return (
         <div>
           <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
@@ -1246,4 +1246,903 @@ export default function ManaSocialApp() {
               <button onClick={() => salesFileRef.current?.click()} style={{ padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: C.inputBg, fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload file</button>
               <button onClick={syncManaPool} style={{ padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>Sync ManaPool</button>
             </div>
-            <input ref={salesFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" style={{ display: 'none' }} onChange={e => {​​​​​​​​​​​​​​​​
+            <input ref={salesFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'sales'); e.target.value = '' }} />
+            <div style={{ fontSize: '12px', color: C.muted }}>TCGplayer .xlsx · eBay .csv · ManaPool .csv · photos · PDFs</div>
+            {syncStatus && <div style={{ marginTop: '8px', fontSize: '13px', color: C.teal }}>{syncStatus}</div>}
+          </div>
+          {renderUploadPreview()}
+          {(() => {
+            const platforms = Array.from(new Set(sales.map(s => s.platform)))
+            if (platforms.length === 0) return <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No sales this period</div>
+            return platforms.map(platform => {
+              const ps = sales.filter(s => s.platform === platform)
+              const pt = ps.reduce((a, s) => a + Number(s.amount), 0)
+              const pf = ps.reduce((a, s) => a + Number(s.fees||0) + Number(s.shipping||0), 0)
+              const isOpen = expandedTiles[`sales_${platform}`]
+              return (
+                <div key={platform} style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                  <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`sales_${platform}`]: !prev[`sales_${platform}`] }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : 'transparent' }}>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '15px', textTransform: 'capitalize', color: C.navy }}>{platform}</div>
+                      <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{ps.length} record{ps.length !== 1 ? 's' : ''} · Fees {fmt(pf)}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontWeight: 900, color: C.green, fontSize: '18px' }}>{fmt(pt)}</span>
+                      <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div style={{ borderTop: `1px solid ${C.border}` }}>
+                      {ps.map(s => (
+                        <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 600 }}>{s.period_start && s.period_start !== s.sale_date ? `${s.period_start} – ${s.period_end}` : s.sale_date}</div>
+                            <div style={{ fontSize: '12px', color: C.muted }}>Fees {fmt(Number(s.fees||0)+Number(s.shipping||0))} · {s.num_orders||1} orders</div>
+                            <div style={{ fontSize: '11px', color: s.entity === 'llc' ? C.teal : C.gold }}>{s.entity === 'llc' ? 'LLC' : 'Sole Prop'}</div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 700, color: C.green, fontSize: '15px' }}>{fmt(Number(s.amount))}</span>
+                            <button onClick={() => startEdit('sales', s)} style={editBtn}>Edit</button>
+                            <button onClick={() => handleDelete('sales', s.id)} style={delBtn}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          })()}
+        </div>
+      )
+
+      case 'expense': return (
+        <div>
+          <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
+            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL EXPENSES</div>
+            <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(opExpenses + totalAPOwed)}</div>
+          </div>
+          {(() => {
+            const totalOwed = accountsPayable.reduce((a, r) => a + Math.max(0, Number(r.total_amount) - Number(r.amount_paid||0)), 0)
+            const totalAP = accountsPayable.reduce((a, r) => a + Number(r.total_amount), 0)
+            const isOpen = expandedTiles['ap_tile']
+            return (
+              <div style={{ ...card, border: `1px solid rgba(240,192,64,0.4)`, padding: 0, overflow: 'hidden' }}>
+                <div onClick={() => setExpandedTiles(prev => ({ ...prev, ap_tile: !prev.ap_tile }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer', background: isOpen ? 'rgba(240,192,64,0.06)' : 'transparent' }}>
+                  <div>
+                    <div style={{ fontWeight: 900, fontSize: '15px', color: '#7A5A00' }}>Accounts Payable</div>
+                    <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{accountsPayable.length} transaction{accountsPayable.length !== 1 ? 's' : ''} · Total {fmt(totalAP)}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: 900, fontSize: '18px', color: totalOwed > 0 ? C.pink : C.teal }}>{fmt(totalOwed)}</div>
+                      <div style={{ fontSize: '11px', color: C.muted }}>outstanding</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <button onClick={e => { e.stopPropagation(); setEditingItem({ table: 'accounts_payable' }) }} style={{ background: C.gold, color: '#7A5A00', border: 'none', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Add</button>
+                      <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div style={{ borderTop: `1px solid rgba(240,192,64,0.3)` }}>
+                    {accountsPayable.length === 0 ? (
+                      <div style={{ padding: '20px', textAlign: 'center', color: C.muted, fontSize: '13px' }}>No accounts payable recorded</div>
+                    ) : accountsPayable.map(b => {
+                      const paid = Number(b.amount_paid||0), owed = Number(b.total_amount) - paid
+                      const pct = Number(b.total_amount) > 0 ? (paid / Number(b.total_amount) * 100) : 0
+                      return (
+                        <div key={b.id} style={{ padding: '14px 16px', borderBottom: `1px solid rgba(240,192,64,0.2)` }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: '15px' }}>{b.vendor_name}</div>
+                              {b.description && <div style={{ fontSize: '12px', color: C.muted }}>{b.description}</div>}
+                              {b.notes && b.notes.includes('cards @') && <div style={{ fontSize: '12px', color: C.purple, fontWeight: 700 }}>{b.notes.split('|')[1]?.trim()}</div>}
+                              <div style={{ fontSize: '11px', color: C.muted }}>{b.invoice_date}{b.due_date && b.due_date !== b.invoice_date ? ` · Due ${b.due_date}` : ''}</div>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                              <div style={{ fontSize: '15px', fontWeight: 700, color: owed > 0 ? C.pink : C.teal }}>{fmt(owed)} {owed <= 0 ? '✓' : 'left'}</div>
+                              <div style={{ fontSize: '11px', color: C.muted }}>of {fmt(Number(b.total_amount))}</div>
+                            </div>
+                          </div>
+                          <div style={{ height: '5px', background: C.border, borderRadius: '3px', margin: '6px 0' }}>
+                            <div style={{ height: '100%', width: `${Math.min(pct,100)}%`, background: pct >= 100 ? C.teal : C.gold, borderRadius: '3px' }} />
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: C.muted, marginBottom: '6px' }}>
+                            <span>Paid: {fmt(paid)}</span><span>{pct.toFixed(0)}% complete</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button onClick={() => startEdit('accounts_payable', b)} style={editBtn}>Update</button>
+                            <button onClick={() => handleDelete('accounts_payable', b.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+          <div style={{ ...card, padding: '14px' }}>
+            <span style={secHdr}>IMPORT EXPENSES</span>
+            <button onClick={() => expFileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.border}`, background: C.inputBg, fontSize: '14px', fontWeight: 'bold', color: C.navy, cursor: 'pointer', fontFamily: FONT }}>Upload receipt / Amazon CSV / photo</button>
+            <input ref={expFileRef} type="file" accept="image/*,.pdf,.csv,.xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f, 'expenses'); e.target.value = '' }} />
+            <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Amazon orders .csv · receipts · PDFs</div>
+          </div>
+          {renderUploadPreview()}
+          {uniqueSupplyItems.length > 0 && (() => {
+            const isOpen = expandedTiles['supply_tile']
+            const shipItems = ['Penny Sleeve','Semi-Rigid Card Saver','Team Bag','A6 Envelope','Forever Stamp','LetterTrack Pro']
+            let shipTotal = 0
+            const shipRows = shipItems.map(item => { const cost = getLatestSupplyCost(item); shipTotal += cost; return { item, cost } }).filter(r => r.cost > 0)
+            return (
+              <div style={{ ...card, border: `1px solid rgba(107,63,160,0.25)`, padding: 0, overflow: 'hidden' }}>
+                <div onClick={() => setExpandedTiles(prev => ({ ...prev, supply_tile: !prev.supply_tile }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer' }}>
+                  <div>
+                    <span style={{ fontSize: '12px', color: C.purple, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Supply Cost Tracker</span>
+                    <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{uniqueSupplyItems.length} items tracked</div>
+                    {shipTotal > 0 && <div style={{ fontSize: '12px', color: C.purple }}>Per shipment: ${shipTotal.toFixed(4)}</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button onClick={e => { e.stopPropagation(); setEditingItem({ table: 'supply_costs' }) }} style={{ background: C.purple, color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Add</button>
+                    <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div style={{ borderTop: `1px solid ${C.border}`, padding: '12px 16px' }}>
+                    {uniqueSupplyItems.map(item => {
+                      const history = supplyCosts.filter(s => s.item_name === item).sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime())
+                      const latest = history[0]
+                      return (
+                        <div key={item} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: '14px' }}>{item}</div>
+                              <div style={{ fontSize: '12px', color: C.muted }}>{latest.unit_description} · as of {latest.effective_date}</div>
+                            </div>
+                            <div style={{ fontWeight: 700, color: C.purple, fontSize: '15px' }}>${parseFloat(latest.cost_per_unit).toFixed(4)}</div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                            <button onClick={() => startEdit('supply_costs', latest)} style={editBtn}>Update price</button>
+                            <button onClick={() => handleDelete('supply_costs', latest.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {shipRows.length > 0 && (
+                      <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(107,63,160,0.06)', borderRadius: '10px' }}>
+                        <div style={{ fontSize: '11px', color: C.purple, fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Shipping Cost Calculator</div>
+                        {shipRows.map(r => (
+                          <div key={r.item} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '3px 0' }}>
+                            <span style={{ color: C.muted }}>{r.item}</span><span>${r.cost.toFixed(4)}</span>
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700, padding: '6px 0 0', borderTop: `1px solid ${C.border}`, marginTop: '4px' }}>
+                          <span>Per shipment</span><span style={{ color: C.purple }}>${shipTotal.toFixed(4)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+          {(() => {
+            const cats = EXPENSE_CATEGORIES.filter(cat => expenses.some(e => e.category === cat))
+            if (cats.length === 0) return <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No expenses this period</div>
+            return cats.map(cat => {
+              const catExpenses = expenses.filter(e => e.category === cat)
+              const catTotal = catExpenses.reduce((a, e) => a + Number(e.cost), 0)
+              const isOpen = expandedTiles[`exp_${cat}`]
+              const rule = DEDUCTIBILITY[cat]
+              return (
+                <div key={cat} style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                  <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`exp_${cat}`]: !prev[`exp_${cat}`] }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer', background: isOpen ? 'rgba(232,64,122,0.03)' : 'transparent' }}>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '15px', color: C.navy }}>{cat}</div>
+                      <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>
+                        {catExpenses.length} item{catExpenses.length !== 1 ? 's' : ''}
+                        {rule && <span style={{ marginLeft: '6px', padding: '1px 5px', borderRadius: '3px', background: rule.pct === 100 ? '#E1F5EE' : '#FEF3E2', color: rule.pct === 100 ? '#085041' : '#7A5A00', fontSize: '11px' }}>{rule.label}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontWeight: 900, color: '#ef4444', fontSize: '18px' }}>{fmt(-catTotal)}</span>
+                      <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div style={{ borderTop: `1px solid ${C.border}` }}>
+                      {catExpenses.map(e => (
+                        <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+                          <div>
+                            {e.notes && <div style={{ fontSize: '13px', fontWeight: 600 }}>{e.notes}</div>}
+                            <div style={{ fontSize: '12px', color: C.muted }}>{e.purchase_date}</div>
+                            <div style={{ fontSize: '11px', padding: '1px 5px', borderRadius: '3px', display: 'inline-block', marginTop: '2px', background: e.paid_by_company ? 'rgba(16,185,129,0.12)' : 'rgba(240,192,64,0.15)', color: e.paid_by_company ? '#085041' : '#7A5A00' }}>
+                              {e.user_name || 'Cam'}{e.paid_by_company ? ' — LLC' : ' — personal'}
+                            </div>
+                            {e.asset_created && <div style={{ fontSize: '11px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(107,63,160,0.12)', color: C.purple, display: 'inline-block', marginLeft: '4px' }}>→ Asset</div>}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: '8px' }}>
+                            <span style={{ fontWeight: 700, color: '#ef4444', fontSize: '15px' }}>{fmt(-Number(e.cost))}</span>
+                            <button onClick={() => startEdit('expenses', e)} style={editBtn}>Edit</button>
+                            <button onClick={() => handleDelete('expenses', e.id)} style={delBtn}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ padding: '10px 16px', background: C.inputBg, display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700 }}>
+                        <span>{cat} Total</span><span style={{ color: '#ef4444' }}>{fmt(-catTotal)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          })()}
+        </div>
+      )
+
+      case 'assets': return (
+        <div>
+          <div style={{ ...card, background: `linear-gradient(135deg,${C.purple},#4A2070)`, color: '#fff', padding: '20px', marginBottom: '12px', position: 'relative' }}>
+            <div style={{ position: 'absolute', top: '12px', right: '12px', fontSize: '10px', fontWeight: 'bold', padding: '3px 8px', background: 'rgba(240,192,64,0.25)', color: '#FFD96B', borderRadius: '4px' }}>WIP — singles tracking coming soon</div>
+            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>INVENTORY VALUE (COST BASIS)</div>
+            <div style={{ fontSize: '32px', fontWeight: 400 }}>{fmt(endingInventory)}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '14px' }}>
+              <div><div style={{ fontSize: '10px', opacity: 0.6 }}>TOTAL LOTS</div><div style={{ fontSize: '18px', fontWeight: 700 }}>{allCogsInventory.length}</div></div>
+              <div><div style={{ fontSize: '10px', opacity: 0.6 }}>COGS RECOGNIZED</div><div style={{ fontSize: '18px', fontWeight: 700, color: '#fda4af' }}>{fmt(cogsRecognized)}</div></div>
+              <div><div style={{ fontSize: '10px', opacity: 0.6 }}>EST. MARGIN</div><div style={{ fontSize: '18px', fontWeight: 700, color: '#4ade80' }}>{endingInventory > 0 ? ((allCogsInventory.reduce((a,r) => a + parseFloat(r.est_sell_value||0), 0) - endingInventory) / endingInventory * 100).toFixed(0) + '%' : '—'}</div></div>
+            </div>
+          </div>
+          {allCogsInventory.length > 0 && (
+            <div style={card}>
+              <div onClick={() => setExpandedTiles(prev => ({ ...prev, inv_lots: !prev.inv_lots }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+                <span style={secHdr}>INVENTORY LOTS</span>
+                <span style={{ color: C.muted, fontSize: '14px', marginTop: '-10px' }}>{expandedTiles.inv_lots ? '▲' : '▼'}</span>
+              </div>
+              {expandedTiles.inv_lots && allCogsInventory.map(r => {
+                const ratio = r.total_units > 0 ? Math.min((r.sold_units||0)/r.total_units, 1) : 0
+                const remaining = parseFloat(r.total_cost||0) * (1 - ratio)
+                const pct = Math.round(ratio * 100)
+                return (
+                  <div key={r.id} style={{ padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 700 }}>{r.description}</div>
+                        <div style={{ fontSize: '11px', color: C.muted }}>{r.date} · {r.inventory_type} · {r.total_units} units</div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: C.purple }}>{fmt(remaining)}</div>
+                        <div style={{ fontSize: '11px', color: C.muted }}>{pct}% sold</div>
+                      </div>
+                    </div>
+                    <div style={{ height: '4px', background: 'rgba(27,42,74,0.1)', borderRadius: '2px' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: pct >= 100 ? C.teal : C.purple, borderRadius: '2px' }} />
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                      <button onClick={() => startEdit('cogs_inventory', r)} style={editBtn}>Edit</button>
+                      <button onClick={() => handleDelete('cogs_inventory', r.id)} style={delBtn}>×</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
+            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>FIXED ASSETS (COST)</div>
+            <div style={{ fontSize: '30px', fontWeight: 900 }}>{fmt(totalAssetCost)}</div>
+            <div style={{ display: 'flex', gap: '16px', marginTop: '8px', fontSize: '13px', opacity: 0.7 }}>
+              <span>Book Value: {fmt(totalBookValue)}</span><span>Acc. Dep: {fmt(totalAccumulatedDep)}</span>
+            </div>
+          </div>
+          <div style={{ ...card, padding: '14px' }}>
+            <span style={secHdr}>DEPRECIATION SUMMARY · {selectedYear}</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div style={{ padding: '12px', background: C.inputBg, borderRadius: '8px', textAlign: 'center' }}>
+                <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>STRAIGHT-LINE / YR</div>
+                <div style={{ fontSize: '22px', fontWeight: 900, color: C.purple }}>{fmt(totalDepreciation)}</div>
+              </div>
+              <div style={{ padding: '12px', background: C.inputBg, borderRadius: '8px', textAlign: 'center' }}>
+                <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', marginBottom: '4px' }}>SECTION 179 (FULL)</div>
+                <div style={{ fontSize: '22px', fontWeight: 900, color: C.teal }}>{fmt(totalAssetCost)}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: '8px', fontSize: '12px', color: C.muted, padding: '8px', background: 'rgba(240,192,64,0.08)', borderRadius: '8px' }}>Confirm with Kannie at tax time. Sec 179 = deduct full cost this year. Straight-line = spread over useful life.</div>
+          </div>
+          {ASSET_CATEGORIES.map(cat => {
+            const catAssets = assets.filter(a => a.category === cat)
+            if (!catAssets.length) return null
+            return (
+              <div key={cat} style={card}>
+                <span style={secHdr}>{cat}</span>
+                {catAssets.map(a => {
+                  const life = parseInt(a.useful_life_yrs) || USEFUL_LIFE[a.category] || 5
+                  const { slAnnual, slBookValue } = calcDepreciation(parseFloat(a.cost), life, a.purchase_date, selectedYear)
+                  return (
+                    <div key={a.id} style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: `1px solid ${C.border}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                        <div><div style={{ fontWeight: 700, fontSize: '15px' }}>{a.description}</div><div style={{ fontSize: '12px', color: C.muted }}>{a.purchase_date} · {life}yr · {a.user_name}</div></div>
+                        <div style={{ textAlign: 'right' }}><div style={{ fontWeight: 700, fontSize: '15px' }}>{fmt(parseFloat(a.cost))}</div><div style={{ fontSize: '12px', color: C.muted }}>Book: {fmt(slBookValue)}</div></div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                        <div style={{ padding: '6px 8px', background: 'rgba(107,63,160,0.08)', borderRadius: '6px' }}>
+                          <div style={{ fontSize: '11px', color: C.muted }}>SL / year</div>
+                          <div style={{ fontWeight: 700, color: C.purple }}>{fmt(slAnnual)}</div>
+                        </div>
+                        <div style={{ padding: '6px 8px', background: 'rgba(45,191,184,0.08)', borderRadius: '6px' }}>
+                          <div style={{ fontSize: '11px', color: C.muted }}>Section 179</div>
+                          <div style={{ fontWeight: 700, color: C.teal }}>{fmt(parseFloat(a.cost))}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                        <button onClick={() => startEdit('assets', a)} style={editBtn}>Edit</button>
+                        <button onClick={() => handleDelete('assets', a.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+          {assets.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No assets logged yet</div>}
+        </div>
+      )
+
+      case 'deductions': return (
+        <div>
+          <button onClick={() => setShowSettings(!showSettings)} style={{ ...card, width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', padding: '14px 16px', marginBottom: '10px', border: `1px solid ${C.border}` }}>
+            <span style={{ fontWeight: 700, color: C.navy, fontSize: '15px', fontFamily: FONT }}>Settings</span>
+            <span style={{ color: C.muted }}>{showSettings ? '▲' : '▼'}</span>
+          </button>
+          {showSettings && (
+            <div style={{ ...card, borderColor: C.teal }}>
+              <div style={{ marginBottom: '12px' }}>
+                <span style={lbl}>Home Office %</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="number" min="0" max="100" step="0.1" value={homeOfficePct} onChange={e => setHomeOfficePct(parseFloat(e.target.value) || 0)} style={{ ...inp, width: '80px' }} />
+                  <span style={{ color: C.muted, fontSize: '14px' }}>% (e.g. 150/1500 sqft = 10%)</span>
+                </div>
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <span style={lbl}>Internet & Phone Business Use %</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="number" min="0" max="100" step="1" value={internetPct} onChange={e => setInternetPct(parseFloat(e.target.value) || 0)} style={{ ...inp, width: '80px' }} />
+                  <span style={{ color: C.muted, fontSize: '14px' }}>%</span>
+                </div>
+              </div>
+              <div style={{ fontSize: '14px', color: C.text }}>Mileage: {MILEAGE_RATE * 100}¢/mile · {totalMiles.toFixed(1)} miles · <strong style={{ color: C.teal }}>{fmt(mileageDeduction)}</strong></div>
+            </div>
+          )}
+          <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '20px' }}>
+            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>TOTAL DEDUCTIONS</div>
+            <div style={{ fontSize: '34px', fontWeight: 900, color: C.teal }}>{fmtK(totalDeductions)}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '14px' }}>
+              <div><div style={{ fontSize: '11px', opacity: 0.6 }}>EST FED SAVINGS</div><div style={{ fontSize: '20px', fontWeight: 700, color: '#a78bfa' }}>{fmt(fedSavings)}</div></div>
+              <div><div style={{ fontSize: '11px', opacity: 0.6 }}>EST CA SAVINGS</div><div style={{ fontSize: '20px', fontWeight: 700, color: '#a78bfa' }}>{fmt(caSavings)}</div></div>
+            </div>
+          </div>
+          <div>
+            <span style={{ ...secHdr, paddingLeft: '4px' }}>EXPENSE DEDUCTIBILITY</span>
+            {(() => {
+              const cats = EXPENSE_CATEGORIES.filter(cat => expenses.some(e => e.category === cat))
+              if (cats.length === 0) return <div style={{ ...card, textAlign: 'center', padding: '30px', color: C.muted }}>No expenses logged yet</div>
+              return cats.map(cat => {
+                const catExpenses = expenses.filter(e => e.category === cat)
+                const rule = DEDUCTIBILITY[cat] || DEDUCTIBILITY['Other']
+                const catTotal = catExpenses.reduce((a, e) => a + Number(e.cost), 0)
+                const catDeductible = catExpenses.reduce((a, e) => {
+                  const amt = Number(e.cost)
+                  if (rule.pct === 100) return a + amt
+                  if (rule.pct === 50) return a + amt * 0.5
+                  if (cat === 'Home Office') return a + amt * (homeOfficePct / 100)
+                  if (cat === 'Internet & Phone') return a + amt * (internetPct / 100)
+                  return a
+                }, 0)
+                const isOpen = expandedTiles[`ded_${cat}`]
+                return (
+                  <div key={cat} style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                    <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`ded_${cat}`]: !prev[`ded_${cat}`] }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : 'transparent' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 900, fontSize: '14px', color: C.navy }}>{cat}</div>
+                        <div style={{ fontSize: '11px', padding: '1px 5px', borderRadius: '3px', display: 'inline-block', marginTop: '3px', background: rule.pct === 100 ? '#E1F5EE' : '#FEF3E2', color: rule.pct === 100 ? '#085041' : '#7A5A00' }}>{rule.label} · {rule.line}</div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                        <div style={{ fontSize: '15px', fontWeight: 900, color: C.teal }}>{fmt(catDeductible)}</div>
+                        <div style={{ fontSize: '11px', color: C.muted }}>saves {fmt(catDeductible * 0.313)}</div>
+                        <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{isOpen ? '▲' : '▼'}</div>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div style={{ borderTop: `1px solid ${C.border}` }}>
+                        {catExpenses.map(e => {
+                          const amt = Number(e.cost)
+                          const ded = rule.pct === 100 ? amt : rule.pct === 50 ? amt * 0.5 : cat === 'Home Office' ? amt * (homeOfficePct/100) : cat === 'Internet & Phone' ? amt * (internetPct/100) : 0
+                          return (
+                            <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '10px 16px', borderBottom: `1px solid ${C.border}` }}>
+                              <div>
+                                {e.notes && <div style={{ fontSize: '13px', fontWeight: 600 }}>{e.notes}</div>}
+                                <div style={{ fontSize: '11px', color: C.muted }}>{e.purchase_date} · {e.user_name || 'Cam'}</div>
+                              </div>
+                              <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '8px' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700, color: '#ef4444' }}>{fmt(-amt)}</div>
+                                <div style={{ fontSize: '11px', color: C.teal }}>→ {fmt(ded)} ded.</div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                        <div style={{ padding: '10px 16px', background: C.inputBg, display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700 }}>
+                          <span>Total</span>
+                          <span>{fmt(catTotal)} → <span style={{ color: C.teal }}>{fmt(catDeductible)} deductible</span></span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            })()}
+          </div>
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={secHdr}>MILEAGE LOG</span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button onClick={() => { setBulkTable('mileage_log'); setBulkAddOpen(true) }} style={{ ...editBtn, background: 'rgba(45,191,184,0.08)', borderColor: C.teal, color: C.teal }}>Bulk Add</button>
+                <button onClick={() => setEditingItem({ table: 'mileage_log' })} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Trip</button>
+              </div>
+            </div>
+            {mileageLog.length === 0 ? <div style={{ textAlign: 'center', padding: '20px', color: C.muted }}>No trips logged yet</div> : (() => {
+              const users = Array.from(new Set(mileageLog.map(r => r.user_name || 'Cam')))
+              return (
+                <>
+                  {users.map(user => {
+                    const userTrips = mileageLog.filter(r => (r.user_name || 'Cam') === user)
+                    const userMiles = userTrips.reduce((a, r) => a + parseFloat(r.miles||0), 0)
+                    const isOpen = expandedTiles[`mile_${user}`]
+                    return (
+                      <div key={user} style={{ marginBottom: '8px', border: `1px solid ${C.border}`, borderRadius: '10px', overflow: 'hidden' }}>
+                        <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`mile_${user}`]: !prev[`mile_${user}`] }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : C.inputBg }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '14px' }}>{user}</div>
+                            <div style={{ fontSize: '12px', color: C.muted }}>{userTrips.length} trips · {userMiles.toFixed(1)} mi</div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 700, color: C.teal }}>{fmt(userMiles * MILEAGE_RATE)}</span>
+                            <span style={{ color: C.muted }}>{isOpen ? '▲' : '▼'}</span>
+                          </div>
+                        </div>
+                        {isOpen && userTrips.map(r => (
+                          <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderTop: `1px solid ${C.border}` }}>
+                            <div>
+                              <div style={{ fontSize: '13px', fontWeight: 600 }}>{r.purpose}</div>
+                              <div style={{ fontSize: '12px', color: C.muted }}>{r.date} · {r.from_location} → {r.to_location}</div>
+                              <div style={{ fontSize: '12px', color: C.teal }}>{parseFloat(r.miles).toFixed(1)} mi · {fmt(parseFloat(r.miles) * MILEAGE_RATE)}</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <button onClick={() => startEdit('mileage_log', r)} style={editBtn}>Edit</button>
+                              <button onClick={() => handleDelete('mileage_log', r.id)} style={delBtn}>×</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', fontSize: '14px', fontWeight: 700 }}>
+                    <span>{totalMiles.toFixed(1)} total miles</span>
+                    <span style={{ color: C.teal }}>{fmt(mileageDeduction)}</span>
+                  </div>
+                </>
+              )
+            })()}
+          </div>
+        </div>
+      )
+
+      case 'tax': return (
+        <div>
+          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(240,192,64,0.1)', border: '1px solid rgba(240,192,64,0.3)', marginBottom: '8px', fontSize: '13px', color: '#7A5A00', fontFamily: FONT }}>
+            Estimates only — 22% federal. Confirm with Kannie before paying.
+          </div>
+          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)', marginBottom: '12px', fontSize: '13px', color: '#5B21B6', fontFamily: FONT }}>
+            <strong>PTE Elective Tax (AB 150):</strong> LLC pays 9.3% CA tax on members behalf. LLC gets federal deduction — saves ~2% vs paying personally. Elect by filing FTB 3893. Confirm with Kannie.
+          </div>
+          <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '20px', marginBottom: '12px' }}>
+            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px', marginBottom: '4px' }}>YTD EST. TOTAL TAX</div>
+            <div style={{ fontSize: '38px', fontWeight: 700, color: '#fda4af' }}>{fmtK(ytdTax)}</div>
+          </div>
+          {quarters.map(q => (
+            <div key={q.label} style={card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div><div style={{ fontWeight: 700, fontSize: '17px', color: C.navy }}>{q.label} 2026</div><div style={{ fontSize: '12px', color: C.muted }}>{q.start} – {q.end}</div></div>
+                <div style={{ textAlign: 'right' }}><div style={{ fontSize: '21px', fontWeight: 700, color: C.pink }}>{fmt(q.grand)}</div><div style={{ fontSize: '12px', color: C.muted }}>est. total</div></div>
+              </div>
+              {[['Form 941 — FICA', fmt(q.fica), `Due ${q.due941}`], ['Form 940 — FUTA', fmt(q.futa), 'Due Jan 31'], ['CA UI/ETT', fmt(q.caUI), `Due ${q.due941}`], ['1040-ES Federal', fmt(q.fedEst), `Due ${q.due1040}`], ['PTE Elective Tax (CA)', fmt(q.pte), `Due ${q.due1040}`]].map(([l, v, d]) => (
+                <div key={String(l)} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: `1px solid ${C.border}`, fontSize: '14px' }}>
+                  <span>{l}</span>
+                  <div style={{ textAlign: 'right' }}><span style={{ fontWeight: 700, color: C.pink, marginRight: '8px' }}>{v}</span><span style={{ fontSize: '12px', color: C.muted }}>{d}</span></div>
+                </div>
+              ))}
+              <div style={{ marginTop: '10px', padding: '8px 10px', background: C.inputBg, borderRadius: '8px', fontSize: '12px', color: C.muted, display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                <span>Net rev: <strong style={{ color: C.text }}>{fmt(q.netRev)}</strong></span>
+                <span>Exp: <strong style={{ color: C.text }}>{fmt(q.exp)}</strong></span>
+                <span>Payroll: <strong style={{ color: C.text }}>{fmt(q.grossPay)}</strong></span>
+                <span>Taxable: <strong style={{ color: C.text }}>{fmt(q.taxable)}</strong></span>
+              </div>
+            </div>
+          ))}
+          <div style={{ ...card, border: `1px solid rgba(45,191,184,0.25)` }}>
+            <span style={secHdr}>CA LLC FEE (ANNUAL)</span>
+            {(() => {
+              const annualGross = sales.reduce((a, r) => a + Number(r.amount), 0)
+              let llcFee = 0, feeLabel = 'No fee (under $250k gross)'
+              if (annualGross >= 5000000) { llcFee = 11790; feeLabel = '$11,790 (over $5M)' }
+              else if (annualGross >= 1000000) { llcFee = 6000; feeLabel = '$6,000 ($1M–$4.99M)' }
+              else if (annualGross >= 500000) { llcFee = 2500; feeLabel = '$2,500 ($500k–$999k)' }
+              else if (annualGross >= 250000) { llcFee = 900; feeLabel = '$900 ($250k–$499k)' }
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700 }}>LLC Fee — gross receipts based</div>
+                    <div style={{ fontSize: '12px', color: C.muted }}>Due April 15 · FTB 3536 · Current gross: {fmt(annualGross)}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: llcFee > 0 ? C.pink : C.teal }}>{llcFee > 0 ? fmt(llcFee) : '$0'}</div>
+                    <div style={{ fontSize: '11px', color: C.muted }}>{feeLabel}</div>
+                  </div>
+                </div>
+              )
+            })()}
+            <div style={{ marginTop: '8px', fontSize: '12px', color: C.muted, padding: '8px', background: 'rgba(45,191,184,0.06)', borderRadius: '6px' }}>Separate from the $800 franchise tax already paid. Kicks in at $250k gross.</div>
+          </div>
+          {disbursements.length > 0 && (
+            <div style={card}>
+              <span style={secHdr}>OWNER DRAWS</span>
+              {disbursements.map(d => (
+                <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: `1px solid ${C.border}` }}>
+                  <div><div style={{ fontWeight: 500, fontSize: '15px' }}>{d.recipient}</div><div style={{ fontSize: '12px', color: C.muted }}>{d.disbursement_date}</div></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 700, fontSize: '16px' }}>{fmt(Number(d.amount))}</span>
+                    <button onClick={() => handleDelete('disbursements', d.id)} style={delBtn}>×</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+
+      case 'payroll': return (
+        <div>
+          <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
+            <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL PAYROLL</div>
+            <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(staffingCosts)}</div>
+            <div style={{ fontSize: '13px', opacity: 0.5, marginTop: '2px' }}>FICA: {fmt(staffingCosts * 0.153)} · FUTA: {fmt(staffingCosts * 0.006)}</div>
+            <div style={{ fontSize: '13px', opacity: 0.5 }}>Roth IRA Contributed: {fmt(payroll.reduce((a, r) => a + Number(r.roth_ira_contributed || 0), 0))}</div>
+          </div>
+          {(() => {
+            const employees = Array.from(new Set(payroll.map(p => p.employee_name)))
+            if (employees.length === 0) return <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No payroll this period</div>
+            return employees.map(emp => {
+              const empPayroll = payroll.filter(p => p.employee_name === emp)
+              const empTotal = empPayroll.reduce((a, p) => a + Number(p.amount), 0)
+              const empHours = empPayroll.reduce((a, p) => a + Number(p.hours_worked || 0), 0)
+              const empRoth = empPayroll.reduce((a, p) => a + Number(p.roth_ira_contributed || 0), 0)
+              const isOpen = expandedTiles[`pay_${emp}`]
+              return (
+                <div key={emp} style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                  <div onClick={() => setExpandedTiles(prev => ({ ...prev, [`pay_${emp}`]: !prev[`pay_${emp}`] }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer', background: isOpen ? 'rgba(45,191,184,0.04)' : 'transparent' }}>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '15px', color: C.navy }}>{emp}</div>
+                      <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>
+                        {empPayroll.length} payment{empPayroll.length !== 1 ? 's' : ''}
+                        {empHours > 0 && ` · ${empHours.toFixed(1)} hrs`}
+                        {empRoth > 0 && ` · Roth ${fmt(empRoth)}`}
+                      </div>
+                      <div style={{ fontSize: '12px', color: C.muted }}>FICA: {fmt(empTotal * 0.153)}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontWeight: 900, fontSize: '18px', color: C.text }}>{fmt(empTotal)}</span>
+                      <span style={{ color: C.muted, fontSize: '14px' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div style={{ borderTop: `1px solid ${C.border}` }}>
+                      {empPayroll.map(p => (
+                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 600 }}>{p.pay_date}{p.pay_period ? ` · Period ends ${p.pay_period}` : ''}</div>
+                            {p.hours_worked > 0 && <div style={{ fontSize: '12px', color: C.muted }}>{p.hours_worked} hrs @ ${p.hourly_rate}/hr</div>}
+                            {p.roth_ira_contributed > 0 && <div style={{ fontSize: '12px', color: C.teal }}>Roth IRA: {fmt(p.roth_ira_contributed)}</div>}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 700, fontSize: '15px' }}>{fmt(Number(p.amount))}</span>
+                            <button onClick={() => startEdit('payroll', p)} style={editBtn}>Edit</button>
+                            <button onClick={() => handleDelete('payroll', p.id)} style={delBtn}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ padding: '10px 16px', background: C.inputBg, display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700 }}>
+                        <span>{emp} Total</span><span>{fmt(empTotal)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          })()}
+        </div>
+      )
+
+      case 'accounting': return (
+        <div>
+          <div style={{ padding: '8px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
+            ⚖️ Accrual Method — revenue & expenses recognized in period earned/incurred
+          </div>
+          <div style={card}>
+            <span style={secHdr}>INCOME STATEMENT · {selectedMonth === 0 ? selectedYear : new Date(selectedYear, selectedMonth - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}</span>
+            <PLRow label="Gross Revenue" value={gross} bold />
+            <PLRow label="Less: Selling Fees & Commissions" value={totalPlatformFees} indent isNegative />
+            <PLRow label="Less: Shipping Expense" value={totalShippingExpense} indent isNegative />
+            <PLRow label="Net Sales" value={netSalesAmt} bold />
+            <PLRow label="Cost of Goods Sold" value={cogsRecognized} isNegative showDrilldown drillId="cogs" />
+            {acctDrilldown === 'cogs' && <DD>{cogsInventory.map(r => { const ratio = r.total_units > 0 ? Math.min((r.sold_units||0)/r.total_units,1) : 0; const recog = parseFloat(r.total_cost||0)*ratio; return recog > 0 ? <DDRow key={r.id} label={r.description} value={recog} neg /> : null })}</DD>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: `2px solid ${C.border}` }}>
+              <span style={{ fontSize: '16px', fontWeight: 700, fontFamily: FONT }}>Gross Profit</span>
+              <span style={{ fontSize: '16px', fontWeight: 900, color: grossMargin >= 0 ? C.green : '#ef4444', fontFamily: FONT }}>{grossMargin < 0 ? `(${fmt(Math.abs(grossMargin))})` : fmt(grossMargin)}</span>
+            </div>
+            <div style={{ padding: '10px 0 4px', fontSize: '12px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.05em', textTransform: 'uppercase', fontFamily: FONT }}>Operating Expenses</div>
+            {EXPENSE_CATEGORIES.filter(cat => expByCategory[cat] > 0).map(cat => (
+              <div key={cat}>
+                <PLRow label={cat} value={expByCategory[cat]} indent isNegative showDrilldown drillId={`exp_${cat}`} />
+                {acctDrilldown === `exp_${cat}` && <DD>{expenses.filter(e => e.category === cat).map(e => <DDRow key={e.id} label={`${e.notes || e.purchase_date}${e.user_name ? ` · ${e.user_name}` : ''}`} value={Number(e.cost)} neg />)}</DD>}
+              </div>
+            ))}
+            <PLRow label="Salaries & Wages" value={staffingCosts} indent isNegative showDrilldown drillId="payroll_dd" />
+            {acctDrilldown === 'payroll_dd' && <DD>{payroll.map(p => <DDRow key={p.id} label={`${p.employee_name} · ${p.pay_date}`} value={Number(p.amount)} neg />)}</DD>}
+            {totalDepreciation > 0 && <PLRow label="Depreciation" value={totalDepreciation} indent isNegative showDrilldown drillId="dep_dd" />}
+            {acctDrilldown === 'dep_dd' && <DD>{assets.map(a => { const life = parseInt(a.useful_life_yrs)||USEFUL_LIFE[a.category]||5; const { slAnnual } = calcDepreciation(parseFloat(a.cost), life, a.purchase_date, selectedYear); return slAnnual > 0 ? <DDRow key={a.id} label={`${a.description} (${life}yr SL)`} value={slAnnual} neg /> : null })}</DD>}
+            <PLRow label="Total Operating Expenses" value={totalOpEx} bold isNegative />
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', marginTop: '4px' }}>
+              <span style={{ fontSize: '18px', fontWeight: 900, fontFamily: FONT, textDecoration: 'underline double' }}>Net Income</span>
+              <span style={{ fontSize: '18px', fontWeight: 900, color: netIncome >= 0 ? C.green : '#ef4444', fontFamily: FONT, textDecoration: 'underline double' }}>{netIncome < 0 ? `(${fmt(Math.abs(netIncome))})` : fmt(netIncome)}</span>
+            </div>
+          </div>
+          <div style={card}>
+            <span style={secHdr}>BALANCE SHEET — as of {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: C.navy, padding: '6px 0', borderBottom: `1px solid ${C.border}`, marginBottom: '4px' }}>ASSETS</div>
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', padding: '6px 0 2px' }}>Current Assets</div>
+            <PLRow label="Cash & Bank Accounts" value={totalCash} indent showDrilldown drillId="cash_dd" />
+            {acctDrilldown === 'cash_dd' && <DD>
+              {bankAccounts.filter(b => b.account_type !== 'Credit').map(b => <DDRow key={b.id} label={`${b.bank_name} ${b.account_type}${b.account_last4 ? ` ·${b.account_last4}` : ''}`} value={Number(b.current_balance)} />)}
+              <div style={{ textAlign: 'right', marginTop: '6px' }}><button onClick={() => setEditingItem({ table: 'bank_accounts' })} style={editBtn}>+ Update Balance</button></div>
+            </DD>}
+            <PLRow label="Accounts Receivable" value={0} indent />
+            <PLRow label="Inventory (ending)" value={endingInventory} indent showDrilldown drillId="inv_dd" />
+            {acctDrilldown === 'inv_dd' && <DD>{allCogsInventory.filter(r => (r.sold_units||0) < (r.total_units||0)).map(r => { const rem = parseFloat(r.total_cost||0) * (1 - Math.min((r.sold_units||0)/(r.total_units||1),1)); return <DDRow key={r.id} label={r.description} value={rem} /> })}</DD>}
+            <PLRow label="Total Current Assets" value={totalCurrentAssets} bold />
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', padding: '10px 0 2px' }}>Fixed Assets</div>
+            <PLRow label="Equipment & Furniture (cost)" value={totalAssetCost} indent showDrilldown drillId="fixed_dd" />
+            {acctDrilldown === 'fixed_dd' && <DD>{assets.map(a => <DDRow key={a.id} label={`${a.description} (${a.purchase_date})`} value={parseFloat(a.cost)} />)}</DD>}
+            {totalAccumulatedDep > 0 && <PLRow label="Less: Accumulated Depreciation" value={totalAccumulatedDep} indent isNegative />}
+            <PLRow label="Net Fixed Assets" value={totalBookValue} bold />
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: `2px solid ${C.border}`, marginTop: '4px' }}>
+              <span style={{ fontSize: '16px', fontWeight: 900, fontFamily: FONT }}>Total Assets</span>
+              <span style={{ fontSize: '16px', fontWeight: 900, color: C.navy, fontFamily: FONT }}>{fmt(totalAssets)}</span>
+            </div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: C.navy, padding: '10px 0 4px', borderBottom: `1px solid ${C.border}`, marginTop: '8px' }}>LIABILITIES & EQUITY</div>
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', padding: '6px 0 2px' }}>Current Liabilities</div>
+            <PLRow label="Accounts Payable" value={totalAPOwed} indent showDrilldown drillId="ap_dd" />
+            {acctDrilldown === 'ap_dd' && <DD>
+              {accountsPayable.filter(a => Number(a.total_amount) - Number(a.amount_paid||0) > 0).map(a => { const owed = Number(a.total_amount) - Number(a.amount_paid||0); return <DDRow key={a.id} label={`${a.vendor_name}${a.due_date ? ` · Due ${a.due_date}` : ''}`} value={owed} neg /> })}
+              <div style={{ textAlign: 'right', marginTop: '6px' }}><button onClick={() => setEditingItem({ table: 'accounts_payable' })} style={editBtn}>+ Add A/P</button></div>
+            </DD>}
+            <PLRow label="Credit Card Balances" value={totalCreditDebt} indent showDrilldown drillId="cc_dd" />
+            {acctDrilldown === 'cc_dd' && <DD>{bankAccounts.filter(b => b.account_type === 'Credit').map(b => <DDRow key={b.id} label={`${b.bank_name}${b.notes ? ` — ${b.notes}` : ''}`} value={Math.abs(Number(b.current_balance))} neg />)}</DD>}
+            <PLRow label="Total Liabilities" value={totalLiabilities} bold />
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', padding: '10px 0 2px' }}>Owner's Equity</div>
+            <PLRow label="Retained Earnings / Net Income" value={netIncome} indent />
+            <PLRow label="Total Owner's Equity" value={ownerEquity} bold />
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: `2px solid ${C.border}`, marginTop: '4px' }}>
+              <span style={{ fontSize: '16px', fontWeight: 900, fontFamily: FONT }}>Total Liabilities & Equity</span>
+              <span style={{ fontSize: '16px', fontWeight: 900, color: C.navy, fontFamily: FONT }}>{fmt(totalLiabilities + ownerEquity)}</span>
+            </div>
+          </div>
+          <div style={card}>
+            <span style={secHdr}>INVENTORY FLOW — {selectedYear}</span>
+            {inventoryFlow.length === 0
+              ? <div style={{ textAlign: 'center', padding: '30px', color: C.muted, fontSize: '14px' }}>No inventory data yet</div>
+              : <>
+                {inventoryFlow.map((row, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
+                    <span style={{ fontSize: '14px', color: C.text, fontFamily: FONT, flex: 1, paddingRight: '8px' }}>{row.label}</span>
+                    <span style={{ fontSize: '15px', fontWeight: 700, fontFamily: FONT, minWidth: '90px', textAlign: 'right', color: row.isAddition ? C.green : '#ef4444' }}>
+                      {row.isAddition ? '' : '('}{fmt(row.amount)}{row.isAddition ? '' : ')'}
+                    </span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0 0', marginTop: '4px' }}>
+                  <span style={{ fontSize: '16px', fontWeight: 700, fontFamily: FONT, textDecoration: 'underline' }}>Ending Inventory</span>
+                  <span style={{ fontSize: '16px', fontWeight: 900, color: C.teal, fontFamily: FONT, textDecoration: 'underline' }}>{fmt(endingBalance)}</span>
+                </div>
+              </>}
+          </div>
+          <div style={card}>
+            <span style={secHdr}>REVENUE BY ENTITY</span>
+            {(['sole_prop', 'llc'] as const).map(entity => {
+              const es = sales.filter(s => s.entity === entity)
+              const eGross = es.reduce((a, r) => a + Number(r.amount), 0)
+              const eNet = es.reduce((a, r) => a + Number(r.net_sales || r.amount), 0)
+              if (eGross === 0) return null
+              return (
+                <div key={entity} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: entity === 'llc' ? C.teal : C.gold }}>{entity === 'llc' ? 'Mana Social LLC' : 'Camera Pho (Sole Prop)'}</div>
+                    <div style={{ fontSize: '12px', color: C.muted }}>Net: {fmt(eNet)}</div>
+                  </div>
+                  <div style={{ fontSize: '17px', fontWeight: 700, color: C.green }}>{fmt(eGross)}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )
+
+      default: return null
+    }
+  }
+
+  // ── Final render ──────────────────────────────────────────────────────
+  if (checkingAuth) return (
+    <div style={{ minHeight: '100vh', background: C.navyDark, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: '32px', height: '32px', border: '2px solid rgba(45,191,184,0.2)', borderTopColor: C.teal, borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
+  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />
+
+  const TABS = [
+    { id: 'summary',    label: 'Summary'    },
+    { id: 'income',     label: 'Sales'      },
+    { id: 'expense',    label: 'Expenses'   },
+    { id: 'assets',     label: 'Assets'     },
+    { id: 'deductions', label: 'Deductions' },
+    { id: 'tax',        label: 'Tax'        },
+    { id: 'payroll',    label: 'Payroll'    },
+    { id: 'accounting', label: 'Accounting' },
+  ]
+
+  return (
+    <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text, transition: 'background 0.2s, color 0.2s' }}>
+      <div style={{ maxWidth: '500px', margin: '0 auto', padding: '16px' }}>
+        <header style={{ marginBottom: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ fontWeight: 900, color: C.navy, fontSize: '17px', letterSpacing: '-0.3px', fontFamily: FONT }}>MANA SOCIAL LLC</div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button onClick={cycleTheme} title={`Mode: ${themeMode}`} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 10px', fontSize: '15px', cursor: 'pointer' }}>{themeIcon}</button>
+              <button onClick={signOut} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>Sign out</button>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: `2px solid ${C.border}`, fontWeight: 'bold', background: C.white, fontFamily: FONT, fontSize: '14px', color: C.text }}>
+              <option value={2026}>2026</option>
+            </select>
+            <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} style={{ flex: 2, padding: '10px', borderRadius: '10px', border: `2px solid ${C.border}`, fontWeight: 'bold', background: C.white, fontFamily: FONT, fontSize: '14px', color: C.text }}>
+              <option value={0}>Full Year</option>
+              {Array.from({ length: 12 }, (_, i) => <option key={i} value={i + 1}>{new Date(0, i).toLocaleString('default', { month: 'long' })}</option>)}
+            </select>
+          </div>
+        </header>
+
+        {editingItem ? renderForm() : renderTab()}
+
+        {!editingItem && (
+          <button onClick={() => setIsQuickAddOpen(true)} style={{ position: 'fixed', bottom: '120px', right: '20px', width: '62px', height: '62px', borderRadius: '31px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', fontSize: '30px', border: '3px solid #fff', boxShadow: '0 8px 16px rgba(0,0,0,0.2)', zIndex: 500, cursor: 'pointer' }}>+</button>
+        )}
+
+        {isQuickAddOpen && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.9)', display: 'flex', alignItems: 'flex-end', padding: '20px', zIndex: 1000 }}>
+            <div style={{ background: C.white, width: '100%', borderRadius: '20px', padding: '24px', fontFamily: FONT }}>
+              <h2 style={{ fontWeight: 900, marginBottom: '16px', color: C.navy, fontSize: '17px' }}>ADD RECORD</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                {[
+                  ['sales',           'SALE',        C.green],
+                  ['accounts_payable','A/P',          C.pink],
+                  ['expenses',        'EXPENSE',     '#ef4444'],
+                  ['payroll',         'PAYROLL',     C.text],
+                  ['cogs_inventory',  'INVENTORY',   C.purple],
+                  ['mileage_log',     'MILEAGE',     C.teal],
+                  ['assets',          'ASSET',       C.navy],
+                  ['supply_costs',    'SUPPLY COST', C.purple],
+                ].map(([table, l, color]) => (
+                  <button key={String(table)} onClick={() => { setEditingItem({ table: String(table) }); setIsQuickAddOpen(false) }} style={{ padding: '17px', borderRadius: '12px', border: `1px solid ${C.border}`, fontWeight: 'bold', fontSize: '14px', background: C.white, color: color as string, cursor: 'pointer', fontFamily: FONT }}>{l}</button>
+                ))}
+                <button onClick={() => { setIsQuickAddOpen(false); setBulkAddOpen(true) }} style={{ padding: '17px', borderRadius: '12px', border: `2px solid ${C.gold}`, color: '#7A5A00', fontWeight: 900, background: 'rgba(240,192,64,0.08)', cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>BULK ADD</button>
+                <button onClick={() => { setEditingItem({ table: 'disbursements' }); setIsQuickAddOpen(false) }} style={{ padding: '17px', borderRadius: '12px', border: `2px solid ${C.teal}`, color: C.teal, fontWeight: 900, background: C.white, cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>OWNER DRAW</button>
+              </div>
+              <button onClick={() => setIsQuickAddOpen(false)} style={{ width: '100%', marginTop: '16px', border: 'none', background: 'none', color: C.muted, fontWeight: 'bold', cursor: 'pointer', padding: '8px', fontSize: '14px', fontFamily: FONT }}>CANCEL</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: isDark ? '#111D33' : '#FFFFFF', borderTop: `2px solid ${C.border}`, display: 'flex', zIndex: 400, height: '80px' }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ flex: 1, border: 'none', background: 'none', fontSize: '13px', fontWeight: 900, color: activeTab === t.id ? C.teal : C.muted, padding: '8px 2px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: FONT, borderTop: activeTab === t.id ? `3px solid ${C.teal}` : '3px solid transparent', minWidth: 0 }}>
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {renderBulkModal()}
+
+      {importQueueOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.92)', display: 'flex', alignItems: 'flex-end', zIndex: 2000, fontFamily: FONT }}>
+          <div style={{ background: C.white, width: '100%', borderRadius: '20px 20px 0 0', padding: '24px', maxHeight: '92vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontWeight: 900, color: C.navy, fontSize: '17px' }}>IMPORT QUEUE</h2>
+              <button onClick={() => setImportQueueOpen(false)} style={{ background: 'none', border: 'none', fontSize: '24px', color: C.muted, cursor: 'pointer' }}>×</button>
+            </div>
+            {importQueue.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No pending imports</div>
+            ) : (
+              <>
+                <div style={{ fontSize: '12px', color: C.muted, marginBottom: '12px' }}>Auto-tier (95%+) can be batch-approved. Review-tier (80-94%) should be checked. Manual items need verification.</div>
+                <button onClick={async () => {
+                  const autoIds = importQueue.filter(i => i.confidence_tier === 'auto' && i.validation_passed).map(i => i.id)
+                  if (autoIds.length === 0) return alert('No auto-approvable items')
+                  const res = await fetch('/api/import-queue/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: autoIds, reviewedBy: 'Cam' }) })
+                  const data = await res.json()
+                  if (data.success) { fetchImportQueue(); fetchData(); alert(`Imported ${data.imported} records`) }
+                  else alert('Error: ' + (data.error || 'Unknown'))
+                }} style={{ width: '100%', padding: '12px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', fontFamily: FONT, marginBottom: '12px' }}>
+                  Auto-approve all high-confidence ({importQueue.filter(i => i.confidence_tier === 'auto').length})
+                </button>
+                {importQueue.map(item => {
+                  const c = item.canonical_data || {}
+                  const tier = item.confidence_tier
+                  const tierColor = tier === 'auto' ? C.teal : tier === 'review' ? C.gold : C.pink
+                  const tierLabel = tier === 'auto' ? 'AUTO' : tier === 'review' ? 'REVIEW' : 'MANUAL'
+                  return (
+                    <div key={item.id} style={{ padding: '12px', borderBottom: `1px solid ${C.border}`, fontSize: '13px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 'bold', color: tierColor, background: tier === 'auto' ? 'rgba(45,191,184,0.1)' : tier === 'review' ? 'rgba(240,192,64,0.15)' : 'rgba(232,64,122,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{tierLabel} · {Math.round(parseFloat(item.confidence) * 100)}%</span>
+                        <span style={{ fontSize: '11px', color: C.muted }}>{item.target_table}</span>
+                      </div>
+                      <div style={{ fontWeight: 700, marginBottom: '4px' }}>{c.notes || c.description || c.platform || 'Item'}</div>
+                      <div style={{ fontSize: '12px', color: C.muted, marginBottom: '4px' }}>
+                        {c.category && <>Category: <strong>{c.category}</strong> · </>}
+                        Amount: <strong>${(c.amount || c.cost || c.total_cost || 0).toLocaleString()}</strong>
+                        {c.purchase_date && <> · {c.purchase_date}</>}{c.sale_date && <> · {c.sale_date}</>}
+                      </div>
+                      {item.validation_errors && item.validation_errors.length > 0 && <div style={{ fontSize: '11px', color: C.pink, marginBottom: '4px' }}>⚠️ {item.validation_errors.join(', ')}</div>}
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button onClick={async () => {
+                          const res = await fetch('/api/import-queue/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [item.id], reviewedBy: 'Cam' }) })
+                          const data = await res.json()
+                          if (data.success) { fetchImportQueue(); fetchData() }
+                          else alert('Error: ' + (data.error || 'Unknown'))
+                        }} style={{ padding: '5px 12px', background: C.teal, color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Approve</button>
+                        <button onClick={async () => { await fetch(`/api/import-queue/approve?id=${item.id}`, { method: 'DELETE' }); fetchImportQueue() }} style={{ padding: '5px 12px', background: 'none', border: `1px solid ${C.pink}`, color: C.pink, borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Reject</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {duplicateWarning && !importQueueOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', zIndex: 2100, fontFamily: FONT }}>
+          <div style={{ background: C.white, borderRadius: '16px', padding: '24px', maxWidth: '400px', width: '100%' }}>
+            <h3 style={{ color: C.pink, marginBottom: '12px', fontSize: '17px', fontWeight: 900 }}>⚠️ Duplicate File</h3>
+            <p style={{ fontSize: '14px', color: C.text, marginBottom: '16px' }}>{duplicateWarning.message}</p>
+            <p style={{ fontSize: '13px', color: C.muted, marginBottom: '16px' }}>Do you want to import it anyway?</p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={confirmDuplicateOverride} style={{ flex: 1, padding: '12px', background: C.pink, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Import Anyway</button>
+              <button onClick={() => { setDuplicateWarning(null); setUploadStatus('') }} style={{ flex: 1, padding: '12px', background: 'none', border: `1px solid ${C.border}`, color: C.muted, borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
