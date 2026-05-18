@@ -385,6 +385,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     </div>
   )
 }
+
 export default function ManaSocialApp() {
   const [themeMode, setThemeMode] = useState<'light'|'dark'|'auto'>(() => {
     if (typeof window !== 'undefined') return (localStorage.getItem('mana_theme') as any) || 'auto'
@@ -423,7 +424,7 @@ export default function ManaSocialApp() {
 function parseChaseStatement(text: string) {
   const lines = text.split('\n')
   const txns: any[] = []
-
+  
   // Pattern: MM/DD  DESCRIPTION  -$123.45
   const regex = /(\d{2}\/\d{2})\s+(.+?)\s+(-?\$[\d,]+\.\d{2})/
 
