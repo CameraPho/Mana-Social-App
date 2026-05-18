@@ -828,19 +828,6 @@ async function handleReconPdfUpload(file: File) {
     setUploadPreview([]); setUploadStatus('Saved!'); fetchData()
     setTimeout(() => setUploadStatus(''), 3000)
   }
-const handleReconPdfUpload = async (file: File) => {
-    setReconUploadPreview([])
-    if (file.type !== 'application/pdf') { setReconUploadStatus('Please upload a PDF bank statement'); return }
-    setReconUploadStatus('Reading Chase statement...')
-    try {
-      const { records, meta } = await parseChaseStatementPDF(file)
-      if (records.length === 0) { setReconUploadStatus('No transactions found — is this a Chase Checking statement?'); return }
-      setReconUploadPreview(records.map(r => ({ ...r, category: 'Other', is_business: true, _selected: true })))
-      setReconUploadStatus(`Found ${records.length} transactions from ${meta.year}. Review and import below.`)
-    } catch (err: any) {
-      setReconUploadStatus('Parse error: ' + err.message)
-    }
-  }
 
   const confirmReconImport = async () => {
     const toImport = reconUploadPreview.filter(r => r._selected)
