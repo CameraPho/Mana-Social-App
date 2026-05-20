@@ -37,11 +37,11 @@ export default function BankTab(p: any) {
     if (file.type !== 'application/pdf') { setUploadStatus('Please upload a PDF'); return }
     setUploadStatus('Detecting bank...')
     try {
-      // Peek at text to detect bank
-      const pdfjsLib = await import('pdfjs-dist')
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+      // Peek at text to detect bank — using same pdfjs setup as parsers
+      const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any)
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
       const buf = await file.arrayBuffer()
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise
       const page = await pdf.getPage(1)
       const content = await page.getTextContent()
       const firstPageText = content.items.map((item: any) => item.str).join(' ')
