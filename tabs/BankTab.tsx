@@ -7,11 +7,14 @@ import { parseChaseStatementPDF } from '@/parsers/chasePDF'
 import { parseWellsFargoStatementPDF } from '@/parsers/wellsFargoStatementPDF'
 import { findVendorMatch, buildLedgerPayloadFromMatch } from '@/lib/vendorMatch'
 
+type FilterMode = 'unreconciled' | 'reconciled' | 'all'
+
 export default function BankTab(p: any) {
   const { C, reconTransactions, bankAccounts, fetchData, expenses, sales, vendorMappings } = p
 
   const [account, setAccount] = useState('All')
-  const [showReconciled, setShowReconciled] = useState(false)
+  const [filterMode, setFilterMode] = useState<FilterMode>('unreconciled')
+  const [searchText, setSearchText] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [uploadPreview, setUploadPreview] = useState<any[]>([])
   const [uploadStatus, setUploadStatus] = useState('')
@@ -75,13 +78,11 @@ export default function BankTab(p: any) {
     setTimeout(() => setUploadStatus(''), 4000)
   }
 
-  // Extracts a learnable keyword from a bank description (first 2 alphabetic tokens, lowercased).
   const extractKeyword = (desc: string): string => {
     const tokens = (desc || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
     return tokens.slice(0, 2).join(' ').trim()
   }
 
-  // Upsert vendor learning row when user checks "Save vendor for next time"
   const learnVendor = async (txn: any, category: string, isSale: boolean) => {
     const keyword = extractKeyword(txn.description)
     if (!keyword) return
@@ -96,7 +97,6 @@ export default function BankTab(p: any) {
     }
   }
 
-  // Build a real ledger entry from a bank transaction, then lock it.
   const executeAction = async (txn: any) => {
     try {
       const isOutflow = txn.amount < 0
@@ -123,7 +123,6 @@ export default function BankTab(p: any) {
     } catch (err: any) { alert('Mapping error: ' + err.message) }
   }
 
-  // Bulk: process every unreconciled transaction that has a vendor match
   const bulkAutoApply = async () => {
     setBulkApplying(true)
     try {
@@ -143,15 +142,69 @@ export default function BankTab(p: any) {
     setBulkApplying(false)
   }
 
-  const filtered = reconTransactions.filter((t: any) => account === 'All' || t.account_name === account)
-  const visible = filtered.filter((t: any) => showReconciled || !t.is_reconciled)
-  const reconciledSum = filtered.filter((t: any) => t.is_reconciled).reduce((a: number, t: any) => a + Number(t.amount), 0)
+  // Delete a bank transaction. Refuses if reconciled — user must unreconcile first.
+  const deleteTxn = async (txn: any) => {
+    if (txn.is_reconciled) {
+      alert('Cannot delete a reconciled transaction. Unreconcile it first.')
+      return
+    }
+    if (!confirm(`Delete this transaction?\n\n${txn.description}\n${fmt(txn.amount)}`)) return
+    const { error } = await supabase.from('bank_statement_transactions').delete().eq('id', txn.id)
+    if (error) { alert('Delete failed: ' + error.message); return }
+    fetchData()
+  }
+
+  // Unreconcile: delete linked ledger entries + flip is_reconciled back to false
+  const unreconcileTxn = async (txn: any) => {
+    const linkedE = (expenses || []).filter((x: any) => x.bank_txn_id === txn.id)
+    const linkedS = (sales || []).filter((x: any) => x.bank_txn_id === txn.id)
+    const total = linkedE.length + linkedS.length
+    if (!confirm(`Unreconcile this transaction?\n\nThis will delete ${total} linked ledger entr${total === 1 ? 'y' : 'ies'} and mark the bank line as unreconciled.`)) return
+    try {
+      if (linkedE.length > 0) {
+        await supabase.from('expenses').delete().in('id', linkedE.map((x: any) => x.id))
+      }
+      if (linkedS.length > 0) {
+        await supabase.from('sales').delete().in('id', linkedS.map((x: any) => x.id))
+      }
+      await supabase.from('bank_statement_transactions').update({ is_reconciled: false }).eq('id', txn.id)
+      fetchData()
+    } catch (err: any) { alert('Unreconcile error: ' + err.message) }
+  }
+
+  // Filtering pipeline: account → searchText → filterMode
+  const byAccount = reconTransactions.filter((t: any) => account === 'All' || t.account_name === account)
+  const search = searchText.trim().toLowerCase()
+  const bySearch = !search ? byAccount : byAccount.filter((t: any) => {
+    return (t.description || '').toLowerCase().includes(search)
+      || (t.account_name || '').toLowerCase().includes(search)
+      || String(t.amount).includes(search)
+  })
+  const visible = bySearch.filter((t: any) => {
+    if (filterMode === 'unreconciled') return !t.is_reconciled
+    if (filterMode === 'reconciled') return t.is_reconciled
+    return true
+  })
+
+  // Counts for the filter tabs (post-search, pre-filterMode)
+  const unreconciledCount = bySearch.filter((t: any) => !t.is_reconciled).length
+  const reconciledCount = bySearch.filter((t: any) => t.is_reconciled).length
+  const allCount = bySearch.length
+
+  const reconciledSum = byAccount.filter((t: any) => t.is_reconciled).reduce((a: number, t: any) => a + Number(t.amount), 0)
   const baseBal = bankAccounts.find((b: any) => `${b.bank_name} ${b.account_type}` === account)?.current_balance || 0
   const liveCleared = Number(baseBal) + reconciledSum
   const variance = (parseFloat(statementEndBal) || 0) - liveCleared
 
-  const unreconciledForAccount = reconTransactions.filter((t: any) => !t.is_reconciled && (account === 'All' || t.account_name === account))
-  const matchCount = unreconciledForAccount.filter((t: any) => findVendorMatch(t.description, Number(t.amount), vendorMappings || [])).length
+  const matchCount = byAccount.filter((t: any) => !t.is_reconciled && findVendorMatch(t.description, Number(t.amount), vendorMappings || [])).length
+
+  const tabBtn = (mode: FilterMode, label: string, count: number): React.CSSProperties => ({
+    flex: 1, padding: '8px 10px', borderRadius: '8px', border: `1px solid ${filterMode === mode ? C.teal : C.border}`,
+    background: filterMode === mode ? 'rgba(45,191,184,0.12)' : C.inputBg,
+    color: filterMode === mode ? C.teal : C.muted,
+    fontSize: '12px', fontWeight: filterMode === mode ? 'bold' : 'normal',
+    cursor: 'pointer', fontFamily: FONT, whiteSpace: 'nowrap'
+  })
 
   return (
     <div>
@@ -232,11 +285,21 @@ export default function BankTab(p: any) {
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: C.muted, cursor: 'pointer' }}>
-          <input type="checkbox" checked={showReconciled} onChange={e => setShowReconciled(e.target.checked)} style={{ width: '16px', height: '16px' }} />
-          Show reconciled
-        </label>
+      <input
+        type="text"
+        placeholder="🔍 Search description, account, amount..."
+        value={searchText}
+        onChange={e => setSearchText(e.target.value)}
+        style={{ ...inp, marginBottom: '8px' }}
+      />
+
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+        <button onClick={() => setFilterMode('unreconciled')} style={tabBtn('unreconciled', 'Unreconciled', unreconciledCount)}>Unreconciled ({unreconciledCount})</button>
+        <button onClick={() => setFilterMode('reconciled')} style={tabBtn('reconciled', 'Reconciled', reconciledCount)}>Reconciled ({reconciledCount})</button>
+        <button onClick={() => setFilterMode('all')} style={tabBtn('all', 'All', allCount)}>All ({allCount})</button>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
         <button onClick={() => setShowAddForm(!showAddForm)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
           {showAddForm ? 'Cancel' : '+ Add Transaction'}
         </button>
@@ -267,12 +330,10 @@ export default function BankTab(p: any) {
         </div>
       )}
 
-      <div style={{ fontSize: '13px', color: C.muted, marginBottom: '8px' }}>
-        {filtered.length} transaction{filtered.length !== 1 ? 's' : ''} · {filtered.filter((t: any) => t.is_reconciled).length} reconciled
-      </div>
-
       {visible.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No transactions — upload a statement or add one manually</div>
+        <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>
+          {search ? 'No transactions match your search' : filterMode === 'unreconciled' ? 'Nothing to reconcile ✓' : filterMode === 'reconciled' ? 'No reconciled transactions yet' : 'No transactions — upload a statement or add one manually'}
+        </div>
       ) : visible.map((txn: any) => {
         const isFocused = focusedTxn?.id === txn.id
         const match = !txn.is_reconciled ? findVendorMatch(txn.description, Number(txn.amount), vendorMappings || []) : null
@@ -282,13 +343,16 @@ export default function BankTab(p: any) {
         return (
           <div key={txn.id} style={{ ...card, padding: '14px', border: isFocused ? `1px solid ${C.teal}` : `1px solid ${C.border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '14px', fontWeight: 700 }}>{txn.description}</div>
                 <div style={{ fontSize: '12px', color: C.muted }}>{txn.transaction_date} · {txn.account_name}</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '15px', fontWeight: 900, color: txn.amount >= 0 ? C.green : '#ef4444' }}>{fmt(txn.amount)}</span>
                 {txn.is_reconciled && <span style={{ color: C.green, fontSize: '12px' }}>✓</span>}
+                {!txn.is_reconciled && (
+                  <button onClick={() => deleteTxn(txn)} title="Delete" style={{ background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '16px', padding: '2px 4px' }}>🗑️</button>
+                )}
               </div>
             </div>
 
@@ -347,8 +411,11 @@ export default function BankTab(p: any) {
 
             {txn.is_reconciled && (
               <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.08em' }}>
-                  Matched to {totalMatched} ledger entr{totalMatched === 1 ? 'y' : 'ies'}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    Matched to {totalMatched} ledger entr{totalMatched === 1 ? 'y' : 'ies'}
+                  </div>
+                  <button onClick={() => unreconcileTxn(txn)} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '4px 10px', fontSize: '11px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>↩ Unreconcile</button>
                 </div>
                 {totalMatched === 0 ? (
                   <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>
