@@ -110,4 +110,134 @@ const PATTERN_RULES: { pattern: RegExp; action: ActionType; note?: string }[] = 
 
   // Owner contributions (inflows from owner's personal account)
   { pattern: /online\s+transfer\s+from\s+pho\s+c.*business\s+funding/i, action: 'owner_contribution' },
-  { pattern: /online\s+transfer\s+from\s+pho\s+c/i,                     action: 'owner_contribu
+  { pattern: /online\s+transfer\s+from\s+pho\s+c/i,                     action: 'owner_contribution' },
+  { pattern: /online\s+transfer\s+from\s+diep\s+k/i,                    action: 'owner_contribution' },
+  { pattern: /opening\s+deposit/i,                                      action: 'owner_contribution' },
+
+  // Owner draws (outflows to owner's personal account)
+  { pattern: /online\s+transfer\s+to\s+pho\s+c/i,  action: 'owner_draw' },
+  { pattern: /online\s+transfer\s+to\s+diep\s+k/i, action: 'owner_draw' },
+
+  // Common expense vendors (these stay as 'categorize' but vendor matching will fill the category)
+  // (No rule needed — falls through to 'categorize')
+]
+
+/** Suggest the most likely action type for a bank transaction based on its description and amount. */
+export function suggestActionType(description: string, amount: number): { action: ActionType; note?: string } {
+  if (!description) return { action: 'categorize' }
+  const desc = description.toLowerCase()
+
+  // Find the longest matching pattern (most specific wins)
+  let best: { action: ActionType; note?: string; specificity: number } | null = null
+  for (const rule of PATTERN_RULES) {
+    const m = desc.match(rule.pattern)
+    if (m) {
+      const specificity = m[0].length
+      if (!best || specificity > best.specificity) {
+        best = { action: rule.action, note: rule.note, specificity }
+      }
+    }
+  }
+
+  if (best) return { action: best.action, note: best.note }
+
+  // Sign-based safety check for actions that wouldn't normally apply
+  // (e.g., a positive amount being labeled 'categorize' default is fine)
+  return { action: 'categorize' }
+}
+
+// --- Payload Builders -------------------------------------------------
+// Each builder returns { targetTable, payload } ready to insert.
+// Returns null for actions that don't create a ledger row (reconcile-only).
+
+export type LedgerInsert = {
+  targetTable: string
+  payload: Record<string, any>
+} | null
+
+export function buildOwnerContributionPayload(
+  txn: { id: string; description: string; amount: number; transaction_date: string },
+  memberName: string,
+  entity: string,
+  notes?: string
+): LedgerInsert {
+  return {
+    targetTable: 'equity_transactions',
+    payload: {
+      transaction_date: txn.transaction_date,
+      member_name: memberName,
+      transaction_type: 'contribution',
+      amount: Math.abs(txn.amount),
+      notes: notes || txn.description,
+      bank_txn_id: txn.id,
+      entity,
+    }
+  }
+}
+
+export function buildOwnerLoanPayload(
+  txn: { id: string; description: string; amount: number; transaction_date: string },
+  memberName: string,
+  entity: string,
+  interestRate?: number,
+  notes?: string
+): LedgerInsert {
+  const principal = Math.abs(txn.amount)
+  return {
+    targetTable: 'member_loans',
+    payload: {
+      loan_date: txn.transaction_date,
+      member_name: memberName,
+      direction: 'from_member', // member is lending TO the LLC
+      principal,
+      interest_rate: interestRate || null,
+      outstanding_balance: principal,
+      notes: notes || txn.description,
+      bank_txn_id: txn.id,
+      entity,
+      is_active: true,
+    }
+  }
+}
+
+export function buildOwnerDrawPayload(
+  txn: { id: string; description: string; amount: number; transaction_date: string },
+  recipientName: string,
+  notes?: string
+): LedgerInsert {
+  return {
+    targetTable: 'disbursements',
+    payload: {
+      recipient: recipientName,
+      amount: Math.abs(txn.amount),
+      disbursement_date: txn.transaction_date,
+      notes: notes || txn.description,
+      bank_txn_id: txn.id,
+    }
+  }
+}
+
+export function buildLoanRepaymentPayload(
+  txn: { id: string; description: string; amount: number; transaction_date: string },
+  loanId: string,
+  principalPaid: number,
+  interestPaid: number,
+  notes?: string
+): LedgerInsert {
+  return {
+    targetTable: 'member_loan_payments',
+    payload: {
+      loan_id: loanId,
+      payment_date: txn.transaction_date,
+      principal_paid: principalPaid,
+      interest_paid: interestPaid,
+      notes: notes || txn.description,
+      bank_txn_id: txn.id,
+    }
+  }
+}
+
+// Note: ap_payment and collection_payment don't INSERT new rows — they UPDATE existing ones.
+// These are handled directly in BankTab's executeAction, not via a builder here.
+
+// platform_payout, card_payment, and transfer are reconcile-only — no ledger row created.
