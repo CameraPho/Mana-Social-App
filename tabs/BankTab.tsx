@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS } from '@/lib/constants'
 import { fmt, getEntity, today } from '@/lib/format'
 import { parseChaseStatementPDF } from '@/parsers/chasePDF'
+import { parseWellsFargoStatementPDF } from '@/parsers/wellsFargoStatementPDF'
 
 export default function BankTab(p: any) {
   const { C, reconTransactions, bankAccounts, fetchData } = p
@@ -34,12 +35,29 @@ export default function BankTab(p: any) {
   const handlePdf = async (file: File) => {
     setUploadPreview([])
     if (file.type !== 'application/pdf') { setUploadStatus('Please upload a PDF'); return }
-    setUploadStatus('Reading Chase statement...')
+    setUploadStatus('Detecting bank...')
     try {
-      const { records, meta } = await parseChaseStatementPDF(file)
-      if (records.length === 0) { setUploadStatus('No transactions found — is this a Chase Checking statement?'); return }
+      // Peek at text to detect bank
+      const pdfjsLib = await import('pdfjs-dist')
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+      const buf = await file.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise
+      const page = await pdf.getPage(1)
+      const content = await page.getTextContent()
+      const firstPageText = content.items.map((item: any) => item.str).join(' ')
+      const isWellsFargo = /wells fargo/i.test(firstPageText)
+
+      setUploadStatus(isWellsFargo ? 'Reading Wells Fargo statement...' : 'Reading Chase statement...')
+      const { records, meta } = isWellsFargo
+        ? await parseWellsFargoStatementPDF(file)
+        : await parseChaseStatementPDF(file)
+
+      if (records.length === 0) {
+        setUploadStatus('No transactions found — check that this is a supported bank statement.')
+        return
+      }
       setUploadPreview(records.map((r: any) => ({ ...r, _selected: true })))
-      setUploadStatus(`Found ${records.length} transactions from ${meta.year}.`)
+      setUploadStatus(`Found ${records.length} transactions from ${meta.year}. (${isWellsFargo ? 'Wells Fargo' : 'Chase'})`)
     } catch (err: any) { setUploadStatus('Parse error: ' + err.message) }
   }
 
@@ -114,9 +132,9 @@ export default function BankTab(p: any) {
 
       <div style={{ ...card, padding: '14px' }}>
         <span style={secHdr}>Upload Bank Statement</span>
-        <button onClick={() => fileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>Upload Chase Checking PDF</button>
+        <button onClick={() => fileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>Import File</button>
         <input ref={fileRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handlePdf(f); e.target.value = '' }} />
-        <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Chase Total Checking · other banks coming soon</div>
+        <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Chase · Wells Fargo · more banks coming soon</div>
         {uploadStatus && <div style={{ marginTop: '8px', fontSize: '13px', color: C.teal }}>{uploadStatus}</div>}
       </div>
 
@@ -199,7 +217,7 @@ export default function BankTab(p: any) {
         const isFocused = focusedTxn?.id === txn.id
         return (
           <div key={txn.id} style={{ ...card, padding: '14px', border: isFocused ? `1px solid ${C.teal}` : `1px solid ${C.border}` }}>
-            <div onClick={() => { setFocusedTxn(isFocused ? null : txn); setActionType('create') }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 700 }}>{txn.description}</div>
                 <div style={{ fontSize: '12px', color: C.muted }}>{txn.transaction_date} · {txn.account_name}</div>
@@ -210,7 +228,7 @@ export default function BankTab(p: any) {
               </div>
             </div>
 
-            {isFocused && !txn.is_reconciled && (
+            {!txn.is_reconciled && (
               <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                   <button onClick={() => setActionType('create')} style={{ ...editBtn, background: actionType === 'create' ? C.teal : 'transparent', color: actionType === 'create' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Categorize</button>
