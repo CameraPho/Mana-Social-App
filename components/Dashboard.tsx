@@ -97,7 +97,7 @@ export default function Dashboard() {
     setAssets(ast.data || [])
     setBankAccounts(ba.data || [])
     setSupplyCosts(sc.data || [])
-    setReconTransactions(bst.data || [])
+    setReconTransactions(fd(bst.data || [], 'transaction_date'))
     setVendorMappings(vm.data || [])
   }, [selectedYear, selectedMonth])
 
