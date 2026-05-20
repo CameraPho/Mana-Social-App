@@ -5,9 +5,10 @@ import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS } from '@/lib/constants'
 import { fmt, getEntity, today } from '@/lib/format'
 import { parseChaseStatementPDF } from '@/parsers/chasePDF'
 import { parseWellsFargoStatementPDF } from '@/parsers/wellsFargoStatementPDF'
+import { findVendorMatch, buildLedgerPayloadFromMatch } from '@/lib/vendorMatch'
 
 export default function BankTab(p: any) {
-  const { C, reconTransactions, bankAccounts, fetchData, expenses, sales } = p
+  const { C, reconTransactions, bankAccounts, fetchData, expenses, sales, vendorMappings } = p
 
   const [account, setAccount] = useState('All')
   const [showReconciled, setShowReconciled] = useState(false)
@@ -20,6 +21,8 @@ export default function BankTab(p: any) {
   const [createCat, setCreateCat] = useState('Supplies & Packaging')
   const [createPlatform, setCreatePlatform] = useState('')
   const [createNotes, setCreateNotes] = useState('')
+  const [saveAsRule, setSaveAsRule] = useState(false)
+  const [bulkApplying, setBulkApplying] = useState(false)
   const [splitLines, setSplitLines] = useState<{ amount: string, category: string, notes: string }[]>([
     { amount: '', category: 'Supplies & Packaging', notes: '' }
   ])
@@ -73,6 +76,27 @@ export default function BankTab(p: any) {
     setTimeout(() => setUploadStatus(''), 4000)
   }
 
+  // Extracts a learnable keyword from a bank description (first 1-3 alphabetic tokens, lowercased).
+  const extractKeyword = (desc: string): string => {
+    const tokens = (desc || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
+    return tokens.slice(0, 2).join(' ').trim()
+  }
+
+  // Upsert vendor learning row when user checks "Save vendor for next time"
+  const learnVendor = async (txn: any, category: string, isSale: boolean) => {
+    const keyword = extractKeyword(txn.description)
+    if (!keyword) return
+    const vendorName = keyword.toUpperCase()
+    const targetTable = isSale ? 'sales' : 'expenses'
+    const { data: existing } = await supabase.from('vendor_mappings').select('id, vendor_keywords, correction_count').eq('vendor_name', vendorName).maybeSingle()
+    if (existing) {
+      const kws = Array.from(new Set([...(existing.vendor_keywords || []), keyword]))
+      await supabase.from('vendor_mappings').update({ vendor_keywords: kws, default_category: category, default_table: targetTable, correction_count: (existing.correction_count || 0) + 1 }).eq('id', existing.id)
+    } else {
+      await supabase.from('vendor_mappings').insert({ vendor_name: vendorName, vendor_keywords: [keyword], default_category: category, default_table: targetTable, correction_count: 1, created_by: 'Cam' })
+    }
+  }
+
   // Build a real ledger entry from a bank transaction, then lock it.
   const executeAction = async (txn: any) => {
     try {
@@ -81,8 +105,11 @@ export default function BankTab(p: any) {
       if (actionType === 'create') {
         if (isOutflow) {
           await supabase.from('expenses').insert({ category: createCat, cost: absAmt, purchase_date: txn.transaction_date, notes: createNotes || txn.description, entity: getEntity(txn.transaction_date), user_name: 'Cam', paid_by_company: true, bank_txn_id: txn.id })
+          if (saveAsRule) await learnVendor(txn, createCat, false)
         } else {
-          await supabase.from('sales').insert({ platform: (createPlatform || 'other').toLowerCase(), amount: absAmt, fees: 0, shipping: 0, sale_date: txn.transaction_date, period_start: txn.transaction_date, period_end: txn.transaction_date, entity: getEntity(txn.transaction_date), net_sales: absAmt, num_orders: 1, bank_txn_id: txn.id })
+          const platform = (createPlatform || 'other').toLowerCase()
+          await supabase.from('sales').insert({ platform, amount: absAmt, fees: 0, shipping: 0, sale_date: txn.transaction_date, period_start: txn.transaction_date, period_end: txn.transaction_date, entity: getEntity(txn.transaction_date), net_sales: absAmt, num_orders: 1, bank_txn_id: txn.id })
+          if (saveAsRule) await learnVendor(txn, platform, true)
         }
       } else {
         const total = splitLines.reduce((a, l) => a + (parseFloat(l.amount) || 0), 0)
@@ -92,9 +119,29 @@ export default function BankTab(p: any) {
       await supabase.from('bank_statement_transactions').update({ is_reconciled: true }).eq('id', txn.id)
       setFocusedTxn(null)
       setSplitLines([{ amount: '', category: 'Supplies & Packaging', notes: '' }])
-      setCreateNotes(''); setCreatePlatform('')
+      setCreateNotes(''); setCreatePlatform(''); setSaveAsRule(false)
       fetchData()
     } catch (err: any) { alert('Mapping error: ' + err.message) }
+  }
+
+  // Bulk: process every unreconciled transaction that has a vendor match
+  const bulkAutoApply = async () => {
+    setBulkApplying(true)
+    try {
+      const unreconciled = reconTransactions.filter((t: any) => !t.is_reconciled && (account === 'All' || t.account_name === account))
+      const matches = unreconciled.map((t: any) => ({ txn: t, match: findVendorMatch(t.description, Number(t.amount), vendorMappings || []) })).filter(x => x.match)
+      if (matches.length === 0) { alert('No matched transactions to auto-import'); setBulkApplying(false); return }
+      if (!confirm(`Auto-import ${matches.length} matched transaction${matches.length !== 1 ? 's' : ''}?`)) { setBulkApplying(false); return }
+      for (const { txn, match } of matches) {
+        const entity = getEntity(txn.transaction_date)
+        const { targetTable, payload } = buildLedgerPayloadFromMatch(txn, match!, entity, 'Cam')
+        await supabase.from(targetTable).insert(payload)
+        await supabase.from('bank_statement_transactions').update({ is_reconciled: true }).eq('id', txn.id)
+      }
+      fetchData()
+      alert(`Imported ${matches.length} transactions ✓`)
+    } catch (err: any) { alert('Bulk apply error: ' + err.message) }
+    setBulkApplying(false)
   }
 
   const filtered = reconTransactions.filter((t: any) => account === 'All' || t.account_name === account)
@@ -172,15 +219,7 @@ export default function BankTab(p: any) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: C.muted, cursor: 'pointer' }}>
-          <input type="checkbox" checked={showReconciled} onChange={e => setShowReconciled(e.target.checked)} style={{ width: '16px', height: '16px' }} />
-          Show reconciled
-        </label>
-        <button onClick={() => setShowAddForm(!showAddForm)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
-          {showAddForm ? 'Cancel' : '+ Add Transaction'}
-        </button>
-      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap
 
       {showAddForm && (
         <div style={{ ...card, border: `1px solid ${C.teal}` }}>
@@ -228,49 +267,43 @@ export default function BankTab(p: any) {
               </div>
             </div>
 
-            {!txn.is_reconciled && (
-              <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                  <button onClick={() => setActionType('create')} style={{ ...editBtn, background: actionType === 'create' ? C.teal : 'transparent', color: actionType === 'create' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Categorize</button>
-                  <button onClick={() => setActionType('split')} style={{ ...editBtn, background: actionType === 'split' ? C.teal : 'transparent', color: actionType === 'split' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Split</button>
-                </div>
-
-                {actionType === 'create' && (
-                  <div style={{ display: 'grid', gap: '10px' }}>
-                    {txn.amount < 0 ? (
-                      <div><span style={lbl}>Expense Category</span>
-                        <select value={createCat} onChange={e => setCreateCat(e.target.value)} style={inp}>
-                          {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </div>
-                    ) : (
-                      <div><span style={lbl}>Sales Platform</span>
-                        <input value={createPlatform} onChange={e => setCreatePlatform(e.target.value)} placeholder="e.g. TCGplayer, eBay" style={inp} />
-                      </div>
-                    )}
-                    <div><span style={lbl}>Notes</span><input value={createNotes} onChange={e => setCreateNotes(e.target.value)} placeholder="Optional memo" style={inp} /></div>
-                    <button onClick={() => executeAction(txn)} style={{ padding: '10px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Confirm & Clear Line</button>
-                  </div>
-                )}
-
-                {actionType === 'split' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {splitLines.map((line, idx) => (
-                      <div key={idx} style={{ display: 'flex', gap: '6px' }}>
-                        <input type="number" placeholder="Amt" value={line.amount} onChange={e => { const u = [...splitLines]; u[idx].amount = e.target.value; setSplitLines(u) }} style={{ ...inp, width: '80px' }} />
-                        <select value={line.category} onChange={e => { const u = [...splitLines]; u[idx].category = e.target.value; setSplitLines(u) }} style={{ ...inp, flex: 1 }}>
-                          {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </div>
-                    ))}
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={() => setSplitLines([...splitLines, { amount: '', category: 'Supplies & Packaging', notes: '' }])} style={{ ...editBtn, border: `1px solid ${C.teal}`, color: C.teal }}>+ Line</button>
-                      <button onClick={() => executeAction(txn)} style={{ padding: '8px 16px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Post Split</button>
+            {!txn.is_reconciled && (() => {
+              const match = findVendorMatch(txn.description, Number(txn.amount), vendorMappings || [])
+              return (
+                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
+                  {match && (
+                    <div style={{ marginBottom: '10px', padding: '8px 10px', background: 'rgba(45,191,184,0.08)', border: `1px solid rgba(45,191,184,0.25)`, borderRadius: '6px', fontSize: '12px', color: C.teal, fontFamily: FONT }}>
+                      ✨ Suggested: <b>{match.suggestedCategory}</b> {match.isSale ? '(sale)' : '(expense)'} — matched <b>"{match.matchedKeyword}"</b>
                     </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                    <button onClick={() => setActionType('create')} style={{ ...editBtn, background: actionType === 'create' ? C.teal : 'transparent', color: actionType === 'create' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Categorize</button>
+                    <button onClick={() => setActionType('split')} style={{ ...editBtn, background: actionType === 'split' ? C.teal : 'transparent', color: actionType === 'split' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Split</button>
                   </div>
-                )}
-              </div>
-            )}
+
+                  {actionType === 'create' && (
+                    <div style={{ display: 'grid', gap: '10px' }}>
+                      {txn.amount < 0 ? (
+                        <div><span style={lbl}>Expense Category</span>
+                          <select value={match && !match.isSale && createCat === 'Supplies & Packaging' ? match.suggestedCategory : createCat} onChange={e => setCreateCat(e.target.value)} style={inp}>
+                            {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <div><span style={lbl}>Sales Platform</span>
+                          <input value={match && match.isSale && !createPlatform ? match.mapping.vendor_name : createPlatform} onChange={e => setCreatePlatform(e.target.value)} placeholder="e.g. TCGplayer, eBay" style={inp} />
+                        </div>
+                      )}
+                      <div><span style={lbl}>Notes</span><input value={createNotes} onChange={e => setCreateNotes(e.target.value)} placeholder="Optional memo" style={inp} /></div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: C.muted, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={saveAsRule} onChange={e => setSaveAsRule(e.target.checked)} style={{ width: '14px', height: '14px' }} />
+                        Save vendor for next time
+                      </label>
+                      <button onClick={() => executeAction(txn)} style={{ padding: '10px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Confirm & Clear Line</button>
+                    </div>
+                  )}
+
+                <div key={idx} style={{ display: 'flex', gap: '6px' }}>
 
             {txn.is_reconciled && (() => {
               const matchedExpenses = (expenses || []).filter((x: any) => x.bank_txn_id === txn.id)
