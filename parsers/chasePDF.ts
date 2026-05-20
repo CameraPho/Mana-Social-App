@@ -5,6 +5,9 @@ const DEBIT_HINTS = [
   'payment to', 'online realtime transfer to', 'card online payment',
   'epmt', 'eftpmt', 'eftps', 'cdtfa', 'franchise tax', 'gsbank',
   'withdrawal', 'fee', 'acctverify td',
+  'sortswift', 'tcg automate', 'usps', 'stamps.com', 'shopify',
+  'google', 'adobe', 'verizon', 'amazon web services', 'aws',
+  'vercel', 'supabase', 'bcw', 'ultra pro', 'web id:',
 ]
 // Words/phrases that indicate money ENTERING the account.
 const CREDIT_HINTS = [
