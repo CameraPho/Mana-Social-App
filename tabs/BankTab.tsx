@@ -40,7 +40,6 @@ export default function BankTab(p: any) {
     if (file.type !== 'application/pdf') { setUploadStatus('Please upload a PDF'); return }
     setUploadStatus('Detecting bank...')
     try {
-      // Peek at text to detect bank — using same pdfjs setup as parsers
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any)
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
       const buf = await file.arrayBuffer()
@@ -76,7 +75,7 @@ export default function BankTab(p: any) {
     setTimeout(() => setUploadStatus(''), 4000)
   }
 
-  // Extracts a learnable keyword from a bank description (first 1-3 alphabetic tokens, lowercased).
+  // Extracts a learnable keyword from a bank description (first 2 alphabetic tokens, lowercased).
   const extractKeyword = (desc: string): string => {
     const tokens = (desc || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
     return tokens.slice(0, 2).join(' ').trim()
@@ -151,10 +150,13 @@ export default function BankTab(p: any) {
   const liveCleared = Number(baseBal) + reconciledSum
   const variance = (parseFloat(statementEndBal) || 0) - liveCleared
 
+  const unreconciledForAccount = reconTransactions.filter((t: any) => !t.is_reconciled && (account === 'All' || t.account_name === account))
+  const matchCount = unreconciledForAccount.filter((t: any) => findVendorMatch(t.description, Number(t.amount), vendorMappings || [])).length
+
   return (
     <div>
       <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
-        🏦 Bank Reconciliation — upload Chase statements, then map each transaction to a real expense or sale.
+        🏦 Bank Reconciliation — upload Chase or Wells Fargo statements, then map each transaction to a real expense or sale.
       </div>
 
       <div style={{ ...card, background: C.navyDark, color: '#fff' }}>
@@ -219,7 +221,26 @@ export default function BankTab(p: any) {
         ))}
       </div>
 
-      <label style={{ display: 'flex', alignItems: 'center', gap
+      {matchCount > 0 && (
+        <div style={{ ...card, padding: '12px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+            <div style={{ fontSize: '13px', color: C.text }}>✨ <b>{matchCount}</b> unreconciled transaction{matchCount !== 1 ? 's match' : ' matches'} a learned vendor</div>
+            <button onClick={bulkAutoApply} disabled={bulkApplying} style={{ padding: '8px 14px', background: bulkApplying ? C.muted : `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', cursor: bulkApplying ? 'wait' : 'pointer', fontFamily: FONT, whiteSpace: 'nowrap' }}>
+              {bulkApplying ? 'Working...' : 'Auto-import all'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: C.muted, cursor: 'pointer' }}>
+          <input type="checkbox" checked={showReconciled} onChange={e => setShowReconciled(e.target.checked)} style={{ width: '16px', height: '16px' }} />
+          Show reconciled
+        </label>
+        <button onClick={() => setShowAddForm(!showAddForm)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
+          {showAddForm ? 'Cancel' : '+ Add Transaction'}
+        </button>
+      </div>
 
       {showAddForm && (
         <div style={{ ...card, border: `1px solid ${C.teal}` }}>
@@ -254,6 +275,10 @@ export default function BankTab(p: any) {
         <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No transactions — upload a statement or add one manually</div>
       ) : visible.map((txn: any) => {
         const isFocused = focusedTxn?.id === txn.id
+        const match = !txn.is_reconciled ? findVendorMatch(txn.description, Number(txn.amount), vendorMappings || []) : null
+        const matchedExpenses = txn.is_reconciled ? (expenses || []).filter((x: any) => x.bank_txn_id === txn.id) : []
+        const matchedSales = txn.is_reconciled ? (sales || []).filter((x: any) => x.bank_txn_id === txn.id) : []
+        const totalMatched = matchedExpenses.length + matchedSales.length
         return (
           <div key={txn.id} style={{ ...card, padding: '14px', border: isFocused ? `1px solid ${C.teal}` : `1px solid ${C.border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -267,82 +292,92 @@ export default function BankTab(p: any) {
               </div>
             </div>
 
-            {!txn.is_reconciled && (() => {
-              const match = findVendorMatch(txn.description, Number(txn.amount), vendorMappings || [])
-              return (
-                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
-                  {match && (
-                    <div style={{ marginBottom: '10px', padding: '8px 10px', background: 'rgba(45,191,184,0.08)', border: `1px solid rgba(45,191,184,0.25)`, borderRadius: '6px', fontSize: '12px', color: C.teal, fontFamily: FONT }}>
-                      ✨ Suggested: <b>{match.suggestedCategory}</b> {match.isSale ? '(sale)' : '(expense)'} — matched <b>"{match.matchedKeyword}"</b>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                    <button onClick={() => setActionType('create')} style={{ ...editBtn, background: actionType === 'create' ? C.teal : 'transparent', color: actionType === 'create' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Categorize</button>
-                    <button onClick={() => setActionType('split')} style={{ ...editBtn, background: actionType === 'split' ? C.teal : 'transparent', color: actionType === 'split' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Split</button>
+            {!txn.is_reconciled && (
+              <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
+                {match && (
+                  <div style={{ marginBottom: '10px', padding: '8px 10px', background: 'rgba(45,191,184,0.08)', border: `1px solid rgba(45,191,184,0.25)`, borderRadius: '6px', fontSize: '12px', color: C.teal, fontFamily: FONT }}>
+                    ✨ Suggested: <b>{match.suggestedCategory}</b> {match.isSale ? '(sale)' : '(expense)'} — matched <b>&quot;{match.matchedKeyword}&quot;</b>
                   </div>
-
-                  {actionType === 'create' && (
-                    <div style={{ display: 'grid', gap: '10px' }}>
-                      {txn.amount < 0 ? (
-                        <div><span style={lbl}>Expense Category</span>
-                          <select value={match && !match.isSale && createCat === 'Supplies & Packaging' ? match.suggestedCategory : createCat} onChange={e => setCreateCat(e.target.value)} style={inp}>
-                            {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                          </select>
-                        </div>
-                      ) : (
-                        <div><span style={lbl}>Sales Platform</span>
-                          <input value={match && match.isSale && !createPlatform ? match.mapping.vendor_name : createPlatform} onChange={e => setCreatePlatform(e.target.value)} placeholder="e.g. TCGplayer, eBay" style={inp} />
-                        </div>
-                      )}
-                      <div><span style={lbl}>Notes</span><input value={createNotes} onChange={e => setCreateNotes(e.target.value)} placeholder="Optional memo" style={inp} /></div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: C.muted, cursor: 'pointer' }}>
-                        <input type="checkbox" checked={saveAsRule} onChange={e => setSaveAsRule(e.target.checked)} style={{ width: '14px', height: '14px' }} />
-                        Save vendor for next time
-                      </label>
-                      <button onClick={() => executeAction(txn)} style={{ padding: '10px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Confirm & Clear Line</button>
-                    </div>
-                  )}
-
-                <div key={idx} style={{ display: 'flex', gap: '6px' }}>
-
-            {txn.is_reconciled && (() => {
-              const matchedExpenses = (expenses || []).filter((x: any) => x.bank_txn_id === txn.id)
-              const matchedSales = (sales || []).filter((x: any) => x.bank_txn_id === txn.id)
-              const total = matchedExpenses.length + matchedSales.length
-              return (
-                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
-                  <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.08em' }}>
-                    Matched to {total} ledger entr{total === 1 ? 'y' : 'ies'}
-                  </div>
-                  {total === 0 ? (
-                    <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>
-                      ⚠️ Marked reconciled but no ledger entry found. May have been deleted.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      {matchedExpenses.map((x: any) => (
-                        <div key={`e-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                            <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Expense · {x.category}</span>
-                            <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>{fmt(-Math.abs(Number(x.cost)))}</span>
-                          </div>
-                          <div style={{ fontSize: '12px', color: C.muted }}>{x.purchase_date} · {x.notes || '(no notes)'}</div>
-                        </div>
-                      ))}
-                      {matchedSales.map((x: any) => (
-                        <div key={`s-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                            <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Sale · {x.platform}</span>
-                            <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>{fmt(Math.abs(Number(x.amount)))}</span>
-                          </div>
-                          <div style={{ fontSize: '12px', color: C.muted }}>{x.sale_date}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                )}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  <button onClick={() => setActionType('create')} style={{ ...editBtn, background: actionType === 'create' ? C.teal : 'transparent', color: actionType === 'create' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Categorize</button>
+                  <button onClick={() => setActionType('split')} style={{ ...editBtn, background: actionType === 'split' ? C.teal : 'transparent', color: actionType === 'split' ? '#fff' : C.text, border: `1px solid ${C.teal}` }}>Split</button>
                 </div>
-              )
-            })()}
+
+                {actionType === 'create' && (
+                  <div style={{ display: 'grid', gap: '10px' }}>
+                    {txn.amount < 0 ? (
+                      <div><span style={lbl}>Expense Category</span>
+                        <select value={match && !match.isSale && createCat === 'Supplies & Packaging' ? match.suggestedCategory : createCat} onChange={e => setCreateCat(e.target.value)} style={inp}>
+                          {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                    ) : (
+                      <div><span style={lbl}>Sales Platform</span>
+                        <input value={match && match.isSale && !createPlatform ? match.mapping.vendor_name : createPlatform} onChange={e => setCreatePlatform(e.target.value)} placeholder="e.g. TCGplayer, eBay" style={inp} />
+                      </div>
+                    )}
+                    <div><span style={lbl}>Notes</span><input value={createNotes} onChange={e => setCreateNotes(e.target.value)} placeholder="Optional memo" style={inp} /></div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: C.muted, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={saveAsRule} onChange={e => setSaveAsRule(e.target.checked)} style={{ width: '14px', height: '14px' }} />
+                      Save vendor for next time
+                    </label>
+                    <button onClick={() => executeAction(txn)} style={{ padding: '10px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Confirm &amp; Clear Line</button>
+                  </div>
+                )}
+
+                {actionType === 'split' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {splitLines.map((line, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: '6px' }}>
+                        <input type="number" placeholder="Amt" value={line.amount} onChange={e => { const u = [...splitLines]; u[idx].amount = e.target.value; setSplitLines(u) }} style={{ ...inp, width: '80px' }} />
+                        <select value={line.category} onChange={e => { const u = [...splitLines]; u[idx].category = e.target.value; setSplitLines(u) }} style={{ ...inp, flex: 1 }}>
+                          {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button onClick={() => setSplitLines([...splitLines, { amount: '', category: 'Supplies & Packaging', notes: '' }])} style={{ ...editBtn, border: `1px solid ${C.teal}`, color: C.teal }}>+ Line</button>
+                      <button onClick={() => executeAction(txn)} style={{ padding: '8px 16px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Post Split</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {txn.is_reconciled && (
+              <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.08em' }}>
+                  Matched to {totalMatched} ledger entr{totalMatched === 1 ? 'y' : 'ies'}
+                </div>
+                {totalMatched === 0 ? (
+                  <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>
+                    ⚠️ Marked reconciled but no ledger entry found. May have been deleted.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {matchedExpenses.map((x: any) => (
+                      <div key={`e-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Expense · {x.category}</span>
+                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>{fmt(-Math.abs(Number(x.cost)))}</span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: C.muted }}>{x.purchase_date} · {x.notes || '(no notes)'}</div>
+                      </div>
+                    ))}
+                    {matchedSales.map((x: any) => (
+                      <div key={`s-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Sale · {x.platform}</span>
+                          <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>{fmt(Math.abs(Number(x.amount)))}</span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: C.muted }}>{x.sale_date}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )
       })}
