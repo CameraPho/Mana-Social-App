@@ -56,6 +56,7 @@ export default function Dashboard() {
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
   const [supplyCosts, setSupplyCosts] = useState<any[]>([])
   const [reconTransactions, setReconTransactions] = useState<any[]>([])
+  const [vendorMappings, setVendorMappings] = useState<any[]>([])
 
   useEffect(() => {
     const link = document.createElement('link')
@@ -70,7 +71,7 @@ export default function Dashboard() {
       const d = new Date(i[key])
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth)
     })
-    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst] = await Promise.all([
+    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst, vm] = await Promise.all([
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
       supabase.from('accounts_payable').select('*').order('invoice_date', { ascending: false }),
@@ -83,6 +84,7 @@ export default function Dashboard() {
       supabase.from('bank_accounts').select('*'),
       supabase.from('supply_costs').select('*').order('effective_date', { ascending: false }),
       supabase.from('bank_statement_transactions').select('*').order('transaction_date', { ascending: false }),
+      supabase.from('vendor_mappings').select('*').order('correction_count', { ascending: false }),
     ])
     setSales(fd(s.data || [], 'sale_date'))
     setExpenses(fd(e.data || [], 'purchase_date'))
@@ -96,6 +98,7 @@ export default function Dashboard() {
     setBankAccounts(ba.data || [])
     setSupplyCosts(sc.data || [])
     setReconTransactions(bst.data || [])
+    setVendorMappings(vm.data || [])
   }, [selectedYear, selectedMonth])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -186,7 +189,7 @@ export default function Dashboard() {
   const shared = { C, isDark, fetchData, startEdit, handleDelete, selectedYear, selectedMonth,
     sales, expenses, accountsPayable, payroll, disbursements, mileageLog,
     cogsInventory, allCogsInventory, assets, bankAccounts, supplyCosts, reconTransactions,
-    setEditingItem }
+    vendorMappings, setEditingItem }
 
   return (
     <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text }}>
