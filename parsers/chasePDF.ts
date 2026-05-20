@@ -8,6 +8,8 @@ const DEBIT_HINTS = [
   'sortswift', 'tcg automate', 'usps', 'stamps.com', 'shopify',
   'google', 'adobe', 'verizon', 'amazon web services', 'aws',
   'vercel', 'supabase', 'bcw', 'ultra pro', 'web id:',
+  'purchase interest charge', 'interest charge', 'cash advance fee',
+  'finance charge', 'late fee', 'overdraft fee', 'service charge',
 ]
 // Words/phrases that indicate money ENTERING the account.
 const CREDIT_HINTS = [
