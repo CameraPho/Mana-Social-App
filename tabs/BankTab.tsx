@@ -7,7 +7,7 @@ import { parseChaseStatementPDF } from '@/parsers/chasePDF'
 import { parseWellsFargoStatementPDF } from '@/parsers/wellsFargoStatementPDF'
 
 export default function BankTab(p: any) {
-  const { C, reconTransactions, bankAccounts, fetchData } = p
+  const { C, reconTransactions, bankAccounts, fetchData, expenses, sales } = p
 
   const [account, setAccount] = useState('All')
   const [showReconciled, setShowReconciled] = useState(false)
@@ -271,6 +271,45 @@ export default function BankTab(p: any) {
                 )}
               </div>
             )}
+
+            {txn.is_reconciled && (() => {
+              const matchedExpenses = (expenses || []).filter((x: any) => x.bank_txn_id === txn.id)
+              const matchedSales = (sales || []).filter((x: any) => x.bank_txn_id === txn.id)
+              const total = matchedExpenses.length + matchedSales.length
+              return (
+                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.08em' }}>
+                    Matched to {total} ledger entr{total === 1 ? 'y' : 'ies'}
+                  </div>
+                  {total === 0 ? (
+                    <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>
+                      ⚠️ Marked reconciled but no ledger entry found. May have been deleted.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {matchedExpenses.map((x: any) => (
+                        <div key={`e-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Expense · {x.category}</span>
+                            <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>{fmt(-Math.abs(Number(x.cost)))}</span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: C.muted }}>{x.purchase_date} · {x.notes || '(no notes)'}</div>
+                        </div>
+                      ))}
+                      {matchedSales.map((x: any) => (
+                        <div key={`s-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Sale · {x.platform}</span>
+                            <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>{fmt(Math.abs(Number(x.amount)))}</span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: C.muted }}>{x.sale_date}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )
       })}
