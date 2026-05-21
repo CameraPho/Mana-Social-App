@@ -71,6 +71,62 @@ function buildLoanRepaymentPayload(txn: any, loanId: string, principal: number, 
 
 type FilterMode = 'unreconciled' | 'reconciled' | 'all'
 
+/**
+ * Robust structural text parser to decode bank text and extract transactions 
+ * without relying on external PDF.js core library modules
+ */
+const parseBankTextEngine = (rawText: string): any[] => {
+  const transactions: any[] = [];
+  
+  // Clean up structural formatting noise from the upload stream
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  
+  let isPaymentsSection = false;
+  let isPurchasesSection = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    if (line.includes("PAYMENTS") && line.includes("CREDITS")) {
+      isPaymentsSection = true;
+      isPurchasesSection = false;
+      continue;
+    }
+    if (line.includes("PURCHASE") && !line.includes("SUMMARY")) {
+      isPurchasesSection = true;
+      isPaymentsSection = false;
+      continue;
+    }
+    if (line.includes("2026 Totals Year-to-Date") || line.includes("INTEREST CHARGES")) {
+      break; // End of transaction logs
+    }
+
+    // Match CSV patterned rows: "MM/DD","Description","Amount"
+    if ((isPaymentsSection || isPurchasesSection) && line.includes('","')) {
+      const parts = line.split('","').map(p => p.replace(/"/g, '').trim());
+      if (parts.length >= 3) {
+        const dateStr = parts[0];       // e.g., "04/03"
+        const description = parts[1];   // e.g., "FARMER BOYS-1044-ECOM"
+        let amountNum = parseFloat(parts[2]);
+
+        if (!isNaN(amountNum) && dateStr.match(/^\d{2}\/\d{2}$/)) {
+          // Payments/Credits are reductions (negative sign adjustments)
+          if (isPaymentsSection && amountNum > 0) amountNum = -amountNum;
+          
+          transactions.push({
+            id: `tx-${dateStr.replace('/', '')}-${Math.abs(amountNum)}-${i}`,
+            transaction_date: `2026-${dateStr.replace('/', '-')}`, // Normalized to 2026
+            description,
+            amount: amountNum,
+            is_reconciled: false
+          });
+        }
+      }
+    }
+  }
+  return transactions;
+};
+
 const MEMBERS = ['Cam', 'Kenny']
 
 function detectBank(text: string): 'wells_fargo' | 'chase_checking' | 'costco_citi' | 'citi_diamond' | 'amazon_chase' | 'chase_sapphire' | 'barclays' {
