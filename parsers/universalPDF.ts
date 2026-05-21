@@ -135,7 +135,6 @@ export async function parsePDF(
 
     // Track sections for labeling (fees, interest, cash advances)
     if (/^payments.*credits|^payments.*adjustments/i.test(line)) { currentSection = 'payments'; continue; }
-    if (/^cash\s+advances?\s*$/i.test(line)) { currentSection = 'cash_advance'; continue; }
     if (/^promo\s+purchase|^purchase\s*$/i.test(line)) { currentSection = 'purchase'; continue; }
     if (/^fees?\s+charged/i.test(line)) { currentSection = 'fees'; continue; }
     if (/^interest\s+charged/i.test(line)) { currentSection = 'interest'; continue; }
@@ -199,11 +198,9 @@ export async function parsePDF(
 
     // --- ADD DESCRIPTION PREFIXES ---
     const descUpper = description.toUpperCase()
-    if (currentSection === 'cash_advance' && !/\[Cash Advance\]/.test(description)) {
-      description = `[Cash Advance] ${description}`
-    } else if ((currentSection === 'fees' || descUpper.includes('FEE')) && !/\[Fee\]/.test(description)) {
+    if (descUpper.includes('FEE') && !/\[Fee\]/.test(description)) {
       description = `[Fee] ${description}`
-    } else if ((currentSection === 'interest' || descUpper.includes('INTEREST CHARGED')) && !/\[Interest\]/.test(description)) {
+    } else if (descUpper.includes('INTEREST CHARGED') && !/\[Interest\]/.test(description)) {
       description = `[Interest] ${description}`
     }
 
