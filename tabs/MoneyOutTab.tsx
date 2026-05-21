@@ -2,9 +2,10 @@
 import React, { useState } from 'react'
 import { FONT, EXPENSE_CATEGORIES, DEDUCTIBILITY } from '@/lib/constants'
 import { fmt } from '@/lib/format'
+import SalesTaxSection from '@/components/SalesTaxSection'
 
 export default function MoneyOutTab(p: any) {
-  const { C, expenses, payroll, accountsPayable, supplyCosts, startEdit, handleDelete, setEditingItem } = p
+  const { C, expenses, payroll, accountsPayable, supplyCosts, sales, salesTaxRemittances, fetchData, startEdit, handleDelete, setEditingItem } = p
   const [view, setView] = useState<'expenses'|'payroll'>('expenses')
   const [expandedTiles, setExpandedTiles] = useState<Record<string, boolean>>({})
 
@@ -32,6 +33,8 @@ export default function MoneyOutTab(p: any) {
           <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL EXPENSES + A/P</div>
           <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(opExpenses + totalAPOwed)}</div>
         </div>
+
+        <SalesTaxSection C={C} sales={sales} salesTaxRemittances={salesTaxRemittances} fetchData={fetchData} />
 
         <div style={{ ...card, border: `1px solid rgba(240,192,64,0.4)`, padding: 0, overflow: 'hidden' }}>
           <div onClick={() => toggle('ap')} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer' }}>
