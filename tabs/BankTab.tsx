@@ -3,13 +3,7 @@ import React, { useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS, CHECKING_ACCOUNTS, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
 import { fmt, getEntity, today } from '@/lib/format'
-import { parseChaseStatementPDF } from '@/parsers/chasePDF'
-import { parseWellsFargoStatementPDF } from '@/parsers/wellsFargoStatementPDF'
-import { parseCostcoCitiPDF } from '@/parsers/costcoCitiPDF'
-import { parseCitiDiamondPDF } from '@/parsers/citiDiamondPDF'
-import { parseAmazonChasePDF } from '@/parsers/amazonChasePDF'
-import { parseChaseSapphirePDF } from '@/parsers/chaseSapphirePDF'
-import { parseBarclaysPDF } from '@/parsers/barclaysPDF'
+import { parsePDF } from '@/parsers/universalPDF'
 import { findVendorMatch, buildLedgerPayloadFromMatch } from '@/lib/vendorMatch'
 import {
   ActionType, ACTION_LABELS, ACTION_HINTS, getValidActions, suggestActionType,
@@ -19,7 +13,6 @@ import {
 type FilterMode = 'unreconciled' | 'reconciled' | 'all'
 const MEMBERS = ['Cam', 'Kenny']
 
-// Detect which parser to use based on PDF first-page text
 function detectBank(text: string): 'wells_fargo' | 'chase_checking' | 'costco_citi' | 'citi_diamond' | 'amazon_chase' | 'chase_sapphire' | 'barclays' {
   const t = text.toLowerCase()
   if (/wells fargo/.test(t)) return 'wells_fargo'
@@ -28,7 +21,6 @@ function detectBank(text: string): 'wells_fargo' | 'chase_checking' | 'costco_ci
   if (/diamond preferred/.test(t)) return 'citi_diamond'
   if (/amazon.*chase|chase.*amazon|prime visa/.test(t)) return 'amazon_chase'
   if (/sapphire/.test(t)) return 'chase_sapphire'
-  // Default to Chase Business Checking
   return 'chase_checking'
 }
 
@@ -60,7 +52,15 @@ export default function BankTab(p: any) {
   const [bulkApplying, setBulkApplying] = useState(false)
   const [splitLinesByTxn, setSplitLinesByTxn] = useState<Record<string, { amount: string, category: string, notes: string }[]>>({})
 
-  const [newTxn, setNewTxn] = useState({ account_name: 'Chase Business Checking', transaction_date: today(), description: '', amount: '', category: 'Other', is_business: true, notes: '' })
+  const [newTxn, setNewTxn] = useState({
+    account_name: 'Chase Business Checking',
+    transaction_date: today(),
+    description: '',
+    amount: '',
+    category: 'Other',
+    is_business: true,
+    notes: '',
+  })
   const fileRef = useRef<HTMLInputElement>(null)
 
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
@@ -70,74 +70,59 @@ export default function BankTab(p: any) {
   const editBtn: React.CSSProperties = { background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '3px 8px', fontSize: '12px', color: C.muted, cursor: 'pointer', fontFamily: FONT }
 
   const getForm = (txnId: string) => formByTxn[txnId] || {}
-  const setForm = (txnId: string, patch: any) => setFormByTxn(prev => ({ ...prev, [txnId]: { ...(prev[txnId] || {}), ...patch } }))
+  const setForm = (txnId: string, patch: any) =>
+    setFormByTxn(prev => ({ ...prev, [txnId]: { ...(prev[txnId] || {}), ...patch } }))
   const getAction = (txn: any): ActionType => {
     if (actionByTxn[txn.id]) return actionByTxn[txn.id]
     return suggestActionType(txn.description, Number(txn.amount)).action
   }
-  const setAction = (txnId: string, a: ActionType) => setActionByTxn(prev => ({ ...prev, [txnId]: a }))
-  const getSplitLines = (txnId: string) => splitLinesByTxn[txnId] || [{ amount: '', category: 'Supplies & Packaging', notes: '' }]
-  const setSplitLines = (txnId: string, lines: any[]) => setSplitLinesByTxn(prev => ({ ...prev, [txnId]: lines }))
+  const setAction = (txnId: string, a: ActionType) =>
+    setActionByTxn(prev => ({ ...prev, [txnId]: a }))
+  const getSplitLines = (txnId: string) =>
+    splitLinesByTxn[txnId] || [{ amount: '', category: 'Supplies & Packaging', notes: '' }]
+  const setSplitLines = (txnId: string, lines: any[]) =>
+    setSplitLinesByTxn(prev => ({ ...prev, [txnId]: lines }))
 
   const handlePdf = async (file: File) => {
     setUploadPreview([])
-    if (file.type !== 'application/pdf') { setUploadStatus('Please upload a PDF'); return }
+
+    if (file.type !== 'application/pdf') {
+      setUploadStatus('Please upload a PDF')
+      return
+    }
+
     setUploadStatus('Detecting bank...')
+
     try {
-      const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any)
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
+      const pdfjsLib = (await import('pdfjs-dist/legacy/build/pdf.mjs')).default as any
       const buf = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise
       const page = await pdf.getPage(1)
       const content = await page.getTextContent()
       const firstPageText = content.items.map((item: any) => item.str).join(' ')
-      const bank = detectBank(firstPageText)
 
+      const bank = detectBank(firstPageText)
       setUploadStatus(`Reading ${BANK_LABELS[bank]} statement...`)
 
-      let result
-      switch (bank) {
-        case 'wells_fargo':     result = await parseWellsFargoStatementPDF(file); break
-        case 'costco_citi':     result = await parseCostcoCitiPDF(file); break
-        case 'citi_diamond':    result = await parseCitiDiamondPDF(file); break
-        case 'amazon_chase':    result = await parseAmazonChasePDF(file); break
-        case 'chase_sapphire':  result = await parseChaseSapphirePDF(file); break
-        case 'barclays':        result = await parseBarclaysPDF(file); break
-        case 'chase_checking':
-        default:                result = await parseChaseStatementPDF(file); break
-      }
-
+      const result = await parsePDF(file, BANK_LABELS[bank])
       const { records, meta } = result
+
       if (records.length === 0) {
-        setUploadStatus(`No transactions found in ${BANK_LABELS[bank]} statement. Check the file format.`)
+        setUploadStatus(
+          `No transactions found in ${BANK_LABELS[bank]} statement. Check the file format.`
+        )
         return
       }
+
       setUploadPreview(records.map((r: any) => ({ ...r, _selected: true })))
-      setUploadStatus(`Found ${records.length} transactions from ${meta.year}. (${BANK_LABELS[bank]})`)
-    } catch (err: any) { setUploadStatus('Parse error: ' + err.message) }
+      setUploadStatus(
+        `Found ${records.length} transactions from ${meta.year}. (${BANK_LABELS[bank]})`
+      )
+    } catch (err: any) {
+      setUploadStatus('Parse error: ' + err.message)
+    }
   }
 
-  const confirmImport = async () => {
-    const toImport = uploadPreview.filter(r => r._selected)
-    if (toImport.length === 0) return alert('Nothing selected')
-    setUploadStatus('Importing...')
-    const { error } = await supabase.from('bank_statement_transactions').insert(
-      toImport.map(r => ({ account_name: r.account_name, transaction_date: r.transaction_date, description: r.description, amount: r.amount, category: 'Other', is_business: true, is_reconciled: false, entity: getEntity(r.transaction_date), notes: '' }))
-    )
-    if (error) { setUploadStatus('Error: ' + error.message); return }
-    setUploadPreview([]); setUploadStatus(`Imported ${toImport.length} ✓`); fetchData()
-    setTimeout(() => setUploadStatus(''), 4000)
-  }
-
-  const extractKeyword = (desc: string): string => {
-    const tokens = (desc || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
-    return tokens.slice(0, 2).join(' ').trim()
-  }
-
-  const learnVendor = async (txn: any, category: string, isSale: boolean) => {
-    const keyword = extractKeyword(txn.description)
-    if (!keyword) return
-    const vendorName = keyword.toUpperCase()
     const targetTable = isSale ? 'sales' : 'expenses'
     const { data: existing } = await supabase.from('vendor_mappings').select('id, vendor_keywords, correction_count').eq('vendor_name', vendorName).maybeSingle()
     if (existing) {
