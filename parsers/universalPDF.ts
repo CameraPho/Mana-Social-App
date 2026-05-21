@@ -173,4 +173,55 @@ export async function parsePDF(
     let description = line.substring(dateEndIndex, amtStartIndex).trim()
 
     // Clean secondary posting date (MM/DD at start of description)
-    description = descrip
+    description = description.replace(/^\s*\d{2}\/\d{2}\s*/, '')
+
+    // Clean trailing/leading punctuation, quotes, dollar signs
+    description = description.replace(/^[\s,;"'$\-]+|[\s,;"'$\-]+$/g, '').trim()
+
+    // Remove trailing isolated numbers (reward points, tracking IDs)
+    description = description.replace(/\s+\d{1,3}\s*$/, '').trim()
+
+    // Final cleanup pass
+    description = description.replace(/^[\s,;"'$]+|[\s,;"'$]+$/g, '').trim()
+
+    // Skip if description is too short or non-meaningful
+    if (!description || description.length < 3) continue
+    if (/^\d+$/.test(description)) continue
+
+    // --- APPLY SIGN LOGIC ---
+    if (isCreditCard) {
+      // Credit card: negate the statement amount
+      // Statement shows -$41 for payments → we want +41 (green)
+      // Statement shows $34.99 for purchases → we want -34.99 (red)
+      amount = -amount
+    }
+    // Checking accounts: keep as-is (negative = debit, positive = deposit)
+
+    // --- ADD DESCRIPTION PREFIXES ---
+    const descUpper = description.toUpperCase()
+    if (currentSection === 'cash_advance' && !/\[Cash Advance\]/.test(description)) {
+      description = `[Cash Advance] ${description}`
+    } else if ((currentSection === 'fees' || descUpper.includes('FEE')) && !/\[Fee\]/.test(description)) {
+      description = `[Fee] ${description}`
+    } else if ((currentSection === 'interest' || descUpper.includes('INTEREST CHARGED')) && !/\[Interest\]/.test(description)) {
+      description = `[Interest] ${description}`
+    }
+
+    records.push({
+      transaction_date: `${stmtYear}-${mm}-${dd}`,
+      description: description.slice(0, 200),
+      amount,
+      account_name: finalAccountName,
+    })
+  }
+
+  // Deduplicate
+  const uniqueRecords = records.filter((v, i, a) =>
+    a.findIndex(t => t.transaction_date === v.transaction_date && t.description === v.description && t.amount === v.amount) === i
+  )
+
+  return {
+    records: uniqueRecords,
+    meta: { rows: uniqueRecords.length, year: stmtYear, fileName: file.name }
+  }
+}
