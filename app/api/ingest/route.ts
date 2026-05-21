@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
-import { parsePDF } from '@/lib/parsePDF';
-import { reconcileTransactions } from '@/lib/ledger/reconciliation';
+import { createClient } from '@/lib/supabase-server';
 
 export async function POST(req: Request) {
   const supabase = await createClient();
-  const { rawText, accountName } = await req.json();
+  const { records } = await req.json();
 
-  const records = parsePDF(rawText, accountName);
+  if (!records || !Array.isArray(records)) {
+    return NextResponse.json({ error: 'records array required' }, { status: 400 });
+  }
 
   const { data: inserted, error: dbError } = await supabase
     .from('bank_statement_transactions')
@@ -15,8 +15,6 @@ export async function POST(req: Request) {
     .select('id');
 
   if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
-
-  await reconcileTransactions();
 
   return NextResponse.json({ success: true, ingested: inserted?.length });
 }
