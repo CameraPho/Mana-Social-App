@@ -1,6 +1,6 @@
 'use client'
-import React, { useState, useEffect, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { createClient } from '@/lib/supabase-client'
 import { FONT, LIGHT_COLORS, DARK_COLORS, USEFUL_LIFE } from '@/lib/constants'
 import { today } from '@/lib/format'
 import Nav from '@/components/Nav'
@@ -25,6 +25,7 @@ export const emptyForm = {
 }
 
 export default function Dashboard() {
+  const supabase = useMemo(() => createClient(), [])
   const [themeMode, setThemeMode] = useState<'light'|'dark'|'auto'>(() => {
     if (typeof window !== 'undefined') return (localStorage.getItem('mana_theme') as any) || 'auto'
     return 'auto'
@@ -111,7 +112,7 @@ export default function Dashboard() {
     setEquityTransactions(eq.data || [])
     setMemberLoans(mln.data || [])
     setMemberLoanPayments(mlp.data || [])
-  }, [selectedYear, selectedMonth])
+  }, [selectedYear, selectedMonth, supabase])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -202,7 +203,7 @@ export default function Dashboard() {
     sales, expenses, accountsPayable, payroll, disbursements, mileageLog,
     cogsInventory, allCogsInventory, assets, bankAccounts, supplyCosts, reconTransactions,
     vendorMappings, collections, equityTransactions, memberLoans, memberLoanPayments,
-    setEditingItem }
+    setEditingItem, supabase }
 
   return (
     <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text }}>
