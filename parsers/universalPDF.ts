@@ -88,31 +88,34 @@ export async function parsePDF(
       continue
     }
     if (upperLine.includes("TOTALS YEAR-TO-DATE") || upperLine.includes("FEES CHARGED") || upperLine.includes("INTEREST CHARGED")) {
-      // Check if it's an interest item line vs summary block boundary
       if (!/\d{2}\/\d{2}/.test(line)) continue
     }
 
-    // Capture standard transaction patterns: "MM/DD [Optional MM/DD] Description Amount"
-    // Handles trailing values with optional minus tokens, commas, and dollar symbols natively
-    const txnMatch = line.match(/^(\d{2})\/(\d{2})\s+(?:\d{2}\/\d{2}\s+)?(.+?)\s+([-+]?\s*\$?\s*[\d,]+\.\d{2})\s*[-+=]?$/)
+    // Capture standard and multi-column transaction rows (e.g. Barclays posting dates and rewards markers)
+    // Anchors on the opening MM/DD date stamp, filters through middling segments, captures the final monetary amount string
+    const txnMatch = line.match(/^(\d{2})\/(\d{2})\s+(.+?)\s+([-+]?\s*\$?\s*[\d,]+\.\d{2})\s*[-+=]?$/)
     
     if (txnMatch) {
       const [, mm, dd, rawDesc, rawAmt] = txnMatch
       let desc = rawDesc.replace(/["']/g, '').trim()
       
-      // Clean up the trailing currency string value to parse it cleanly
+      // Clean up secondary sub-column fields specific to Barclays (e.g., removing leading "MM/DD" posting dates or isolated reward digits)
+      if (bankType === 'BARCLAYS') {
+        desc = desc.replace(/^^\d{2}\/\d{2}\s+/, '') // Remove optional posting date duplicates
+        desc = desc.replace(/\s+\d+\s*$/, '')       // Remove trailing isolated reward points numbers
+      }
+
       let cleanAmt = rawAmt.replace(/[$\s,]/g, '')
       let amount = parseFloat(cleanAmt)
       if (isNaN(amount)) continue
 
-      // Filter out meta summaries masquerading as real purchase lines
+      // Filter out total statements masquerading as line transactions
       if (/PREVIOUS BALANCE|NEW BALANCE|MINIMUM PAYMENT|TOTAL PURCHASES/i.test(desc)) continue
 
-      // Normalize sign mapping depending on bank layout rules
+      // Normalize arithmetic math directions dynamically depending on bank platform rules
       if (bankType === 'CHASE') {
         amount = currentSection === 'PAYMENT' ? -Math.abs(amount) : Math.abs(amount)
       } else {
-        // Citi and Barclays print unified text matrices (payments explicitly include a minus or keyword trigger)
         if (rawAmt.includes('-') || cleanAmt.includes('-') || /PAYMENT|THANK YOU|CREDIT/i.test(desc)) {
           amount = -Math.abs(amount)
         } else {
@@ -129,7 +132,7 @@ export async function parsePDF(
     }
   }
 
-  // Deduplicate overlapping multi-page record references automatically
+  // Deduplicate overlapping multi-page record lines
   const uniqueRecords = records.filter((v, i, a) => 
     a.findIndex(t => t.transaction_date === v.transaction_date && t.description === v.description && t.amount === v.amount) === i
   )
