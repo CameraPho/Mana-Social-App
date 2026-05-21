@@ -21,29 +21,51 @@ export default function MoneyInTab(p: any) {
   const totalFees = sales.reduce((s: number, r: any) => s + Number(r.fees || 0) + Number(r.shipping || 0), 0)
 
   const handleUpload = async (file: File) => {
-    setUploadPreview([])
-    const name = file.name.toLowerCase()
-    try {
-      if ((name.endsWith('.xlsx') || name.endsWith('.xls')) && !name.includes('ebay')) {
-        setUploadStatus('Parsing TCGplayer report...')
-        const { records, meta } = await parseTCGplayerXLSX(file)
-        setUploadPreview(records.map((r: any) => ({ ...r, _label: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}` })))
-        setUploadStatus(`TCGplayer: ${meta.numOrders} orders · Gross ${fmt(meta.grossSales)}`)
-      } else if (name.endsWith('.csv') && (name.includes('manapool') || name.includes('mana_pool') || name.includes('mana pool'))) {
-        setUploadStatus('Parsing ManaPool report...')
-        const { records, meta } = await parseManaPoolCSV(file)
-        setUploadPreview(records.map((r: any) => ({ ...r, _label: `ManaPool · ${meta.totalOrders} orders` })))
-        setUploadStatus(`ManaPool: Gross ${fmt(meta.totalGross)}`)
-      } else if (name.endsWith('.csv')) {
-        setUploadStatus('Parsing eBay report...')
-        const { records, meta } = await parseEbayCSV(file)
-        setUploadPreview(records.map((r: any) => ({ ...r, _label: `eBay · ${meta.rows} listings` })))
-        setUploadStatus(`eBay: Gross ${fmt(meta.totalGross)}`)
-      } else {
-        setUploadStatus('Unrecognized file — use TCGplayer .xlsx, eBay .csv, or ManaPool .csv')
-      }
-    } catch (err: any) { setUploadStatus('Error: ' + err.message) }
+  setUploadPreview([]);
+  const name = file.name.toLowerCase();
+
+  try {
+    // TCGplayer XLSX
+    if ((name.endsWith('.xlsx') || name.endsWith('.xls')) && !name.includes('ebay')) {
+      setUploadStatus('Parsing TCGplayer report...');
+      const { records, meta } = await parsePDF(file, 'TCGplayer');
+      setUploadPreview(records.map((r: any) => ({
+        ...r,
+        _label: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}`
+      })));
+      setUploadStatus(`TCGplayer: ${meta.numOrders} orders · Gross ${fmt(meta.grossSales)}`);
+      return;
+    }
+
+    // ManaPool CSV
+    if (name.endsWith('.csv') && (name.includes('manapool') || name.includes('mana_pool') || name.includes('mana pool'))) {
+      setUploadStatus('Parsing ManaPool report...');
+      const { records, meta } = await parsePDF(file, 'ManaPool');
+      setUploadPreview(records.map((r: any) => ({
+        ...r,
+        _label: `ManaPool · ${meta.totalOrders} orders`
+      })));
+      setUploadStatus(`ManaPool: Gross ${fmt(meta.totalGross)}`);
+      return;
+    }
+
+    // eBay CSV
+    if (name.endsWith('.csv')) {
+      setUploadStatus('Parsing eBay report...');
+      const { records, meta } = await parsePDF(file, 'eBay');
+      setUploadPreview(records.map((r: any) => ({
+        ...r,
+        _label: `eBay · ${meta.rows} listings`
+      })));
+      setUploadStatus(`eBay: Gross ${fmt(meta.totalGross)}`);
+      return;
+    }
+
+    setUploadStatus('Unrecognized file — use TCGplayer .xlsx, eBay .csv, or ManaPool .csv');
+  } catch (err: any) {
+    setUploadStatus('Error: ' + err.message);
   }
+};
 
   const confirmUpload = async () => {
     setUploadStatus('Saving...')
