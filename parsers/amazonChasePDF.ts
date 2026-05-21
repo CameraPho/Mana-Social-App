@@ -1,19 +1,5 @@
 import type { ParseResult } from '@/lib/types'
 
-const HEADER_PAYMENTS = /payments?\s+and\s+other\s+credits/i
-const HEADER_PURCHASE = /^purchase$/i
-const HEADER_INTEREST = /^interest\s+charged/i
-const HEADER_FEES     = /^fees?\s+charged/i
-
-const END_MARKERS = [
-  /total\s+interest\s+for\s+this\s+period/i,
-  /year-to-date\s+totals/i,
-  /chase\s+pay\s+over\s+time/i,
-  /plans?\s+set\s+up\s+after\s+purchase/i,
-]
-
-type Section = 'payments' | 'purchase' | 'interest' | 'fees' | null
-
 // Amazon Chase Prime Visa wrapper
 export async function parseAmazonChasePDF(file: File): Promise<ParseResult> {
   return parseChaseConsumerPDF(file, 'Amazon Chase Prime Visa')
@@ -70,11 +56,66 @@ export async function parseChaseConsumerPDF(
     .filter(Boolean)
 
   const records: any[] = []
-  let section: Section = null
-  let inActivitySection = false
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
-    // Detect start of activity section
-    if (/account\s+activity/i.test
+    // Skip obvious headers/footers
+    if (
+      /^(sale|post|date|merchant|description|amount|payments|purchase|interest|fees|order\s+number|total|year-to-date)/i
+        .test(line)
+    ) continue
+
+    // Match transaction lines: MM/DD DESCRIPTION ... AMOUNT
+    const match = line.match(/^(\d{2})\/(\d{2})\s+(.+)/)
+    if (!match) continue
+
+    const [, mm, dd, rest] = match
+
+    // Extract all currency values
+    const moneyMatches = [...rest.matchAll(/([\d,]+\.\d{2})/g)]
+    if (moneyMatches.length === 0) continue
+
+    // Last amount = transaction amount
+    const rawAmt = moneyMatches[moneyMatches.length - 1][1]
+    const amount = parseFloat(rawAmt.replace(/,/g, ''))
+    if (!amount || isNaN(amount)) continue
+
+    // Remove amounts from description
+    let desc = rest
+      .replace(/([\d,]+\.\d{2})/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    if (!desc || desc.length < 2) continue
+
+    // Determine sign
+    let signedAmount: number
+
+    if (/payment|thank\s+you|credit/i.test(desc)) {
+      signedAmount = Math.abs(amount) // Payment (credit)
+    } else if (/interest|fee/i.test(desc)) {
+      signedAmount = -Math.abs(amount)
+      if (/interest/i.test(desc)) desc = `[Interest] ${desc}`
+      if (/fee/i.test(desc)) desc = `[Fee] ${desc}`
+    } else {
+      signedAmount = -Math.abs(amount) // Purchase (default)
+    }
+
+    records.push({
+      transaction_date: `${stmtYear}-${mm}-${dd}`,
+      description: desc.slice(0, 200),
+      amount: signedAmount,
+      account_name: accountName,
+    })
+  }
+
+  return {
+    records,
+    meta: {
+      rows: records.length,
+      year: stmtYear,
+      fileName: file.name,
+    }
+  }
+}
