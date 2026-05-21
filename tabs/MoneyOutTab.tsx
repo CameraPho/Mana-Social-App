@@ -15,7 +15,7 @@ export default function MoneyOutTab(p: any) {
   const delBtn: React.CSSProperties = { background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '18px', fontFamily: FONT }
 
   const opExpenses = expenses.filter((e: any) => !e.asset_created).reduce((s: number, r: any) => s + Number(r.cost), 0)
-  const totalAPOwed = accountsPayable.reduce((a: number, r: any) => a + Math.max(0, Number(r.total_amount) - Number(r.amount_paid || 0)), 0)
+  const totalAPOwed = accountsPayable.reduce((a: number, r: any) => a + Math.max(0, (Number(r.total_amount) || 0) - (Number(r.amount_paid) || 0)), 0)
   const staffing = payroll.reduce((s: number, r: any) => s + Number(r.amount), 0)
 
   const toggle = (k: string) => setExpandedTiles(prev => ({ ...prev, [k]: !prev[k] }))
