@@ -1,11 +1,12 @@
 'use client'
-import React, { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import React, { useState, useEffect, useMemo } from 'react'
+import { createClient } from '@/lib/supabase-client'
 import { LIGHT_COLORS } from '@/lib/constants'
 import LoginScreen from '@/components/LoginScreen'
 import Dashboard from '@/components/Dashboard'
 
 export default function Page() {
+  const supabase = useMemo(() => createClient(), [])
   const [authed, setAuthed] = useState(false)
   const [checkingAuth, setCheckingAuth] = useState(true)
 
@@ -18,7 +19,7 @@ export default function Page() {
       setAuthed(!!session)
     })
     return () => subscription.unsubscribe()
-  }, [])
+  }, [supabase])
 
   if (checkingAuth) return (
     <div style={{ minHeight: '100vh', background: LIGHT_COLORS.navyDark, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
