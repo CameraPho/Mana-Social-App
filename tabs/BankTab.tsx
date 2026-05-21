@@ -619,113 +619,181 @@ export default function BankTab(p: any) {
             </div>
 
             {!txn.is_reconciled && (
-              <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
-                {suggestion.note && <div style={{ marginBottom: '8px', padding: '6px 10px', background: 'rgba(45,191,184,0.06)', border: `1px solid rgba(45,191,184,0.2)`, borderRadius: '6px', fontSize: '11px', color: C.teal }}>ℹ️ {suggestion.note}</div>}
-                <div style={{ marginBottom: '12px' }}>
-                  <span style={lbl}>Action Type</span>
-                  <select value={currentAction} onChange={e => setAction(txn.id, e.target.value as ActionType)} style={inp}>
-                    {validActions.map(a => <option key={a} value={a}>{ACTION_LABELS[a]}{a === suggestion.action ? ' ✨' : ''}</option>)}
-                  </select>
-                  <div style={{ fontSize: '11px', color: C.muted, marginTop: '4px' }}>{ACTION_HINTS[currentAction]}</div>
-                </div>
-                {renderActionForm(txn, currentAction)}
-                <button onClick={() => executeAction(txn)} style={{ marginTop: '12px', padding: '10px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT, width: '100%' }}>
-                  Confirm &amp; Clear Line
-                </button>
-              </div>
-            )}
+  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
+    {suggestion.note && (
+      <div style={{ marginBottom: '8px', padding: '6px 10px', background: 'rgba(45,191,184,0.06)', border: `1px solid rgba(45,191,184,0.2)`, borderRadius: '6px', fontSize: '11px', color: C.teal }}>
+        ℹ️ {suggestion.note}
+      </div>
+    )}
 
-            {txn.is_reconciled && (
-              <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Matched to {totalMatched} ledger entr{totalMatched === 1 ? 'y' : 'ies'}</div>
-                  <button onClick={() => unreconcileTxn(txn)} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '4px 10px', fontSize: '11px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>↩ Unreconcile</button>
-                </div>
-                {totalMatched === 0 && (txn.action_type === 'platform_payout' || txn.action_type === 'card_payment' || txn.action_type === 'transfer') ? (
-                  <div style={{ fontSize: '13px', color: C.muted, padding: '8px 10px', background: 'rgba(45,191,184,0.04)', borderRadius: '6px' }}>ℹ️ Reconcile-only action ({ACTION_LABELS[txn.action_type as ActionType]}) — no ledger entry required.</div>
-                ) : totalMatched === 0 ? (
-                  <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>⚠️ Marked reconciled but no ledger entry found.</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {matchedExpenses.map((x: any) => (
-                      <div key={`e-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Expense · {x.category}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>{fmt(-Math.abs(Number(x.cost)))}</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>{x.purchase_date} · {x.notes || '(no notes)'}</div>
-                      </div>
-                    ))}
-                    {matchedSales.map((x: any) => (
-                      <div key={`s-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Sale · {x.platform}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>{fmt(Math.abs(Number(x.amount)))}</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>{x.sale_date}</div>
-                      </div>
-                    ))}
-                    {matchedDisb.map((x: any) => (
-                      <div key={`d-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Owner Draw · {x.recipient}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>{fmt(-Math.abs(Number(x.amount)))}</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>{x.disbursement_date} · {x.notes || '(no notes)'}</div>
-                      </div>
-                    ))}
-                    {matchedEquity.map((x: any) => (
-                      <div key={`eq-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Owner Contribution · {x.member_name}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>{fmt(Math.abs(Number(x.amount)))}</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>{x.transaction_date} · {x.notes || '(no notes)'}</div>
-                      </div>
-                    ))}
-                    {matchedLoans.map((x: any) => (
-                      <div key={`ln-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Loan from {x.member_name}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>{fmt(Math.abs(Number(x.principal)))}</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>{x.loan_date} · {x.interest_rate ? `${x.interest_rate}% APR · ` : ''}{fmt(x.outstanding_balance)} outstanding</div>
-                      </div>
-                    ))}
-                    {matchedLoanPmts.map((x: any) => (
-                      <div key={`lp-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Loan Repayment</span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>{fmt(-(Number(x.principal_paid) + Number(x.interest_paid)))}</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>{x.payment_date} · Principal {fmt(x.principal_paid)} · Interest {fmt(x.interest_paid)}</div>
-                      </div>
-                    ))}
-                    {matchedAp.map((x: any) => (
-                      <div key={`ap-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>AP Payment · {x.vendor_name}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>{fmt(-Math.abs(Number(txn.amount)))}</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>Paid {fmt(x.amount_paid)} of {fmt(x.total_amount)}</div>
-                      </div>
-                    ))}
-                    {matchedCol.map((x: any) => (
-                      <div key={`co-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>Collection Payment · {x.seller_name}</span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>{fmt(-Math.abs(Number(txn.amount)))}</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>Paid {fmt(x.amount_paid)} of {fmt(x.total_cost)}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )
-      })}
+    <div style={{ marginBottom: '12px' }}>
+      <span style={lbl}>Action Type</span>
+      <select value={currentAction} onChange={e => setAction(txn.id, e.target.value as ActionType)} style={inp}>
+        {validActions.map(a => (
+          <option key={a} value={a}>
+            {ACTION_LABELS[a]}
+            {a === suggestion.action ? ' ✨' : ''}
+          </option>
+        ))}
+      </select>
+      <div style={{ fontSize: '11px', color: C.muted, marginTop: '4px' }}>
+        {ACTION_HINTS[currentAction]}
+      </div>
     </div>
-  )
-}
+
+    {renderActionForm(txn, currentAction)}
+
+    <button
+      onClick={() => executeAction(txn)}
+      style={{
+        marginTop: '12px',
+        padding: '10px',
+        background: C.green,
+        color: '#fff',
+        border: 'none',
+        borderRadius: '8px',
+        fontWeight: 'bold',
+        cursor: 'pointer',
+        fontFamily: FONT,
+        width: '100%'
+      }}
+    >
+      Confirm & Clear Line
+    </button>
+  </div>
+)}
+
+{txn.is_reconciled && (
+  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+      <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        Matched to {totalMatched} ledger entr{totalMatched === 1 ? 'y' : 'ies'}
+      </div>
+      <button
+        onClick={() => unreconcileTxn(txn)}
+        style={{
+          background: 'none',
+          border: `1px solid ${C.border}`,
+          borderRadius: '6px',
+          padding: '4px 10px',
+          fontSize: '11px',
+          color: C.muted,
+          cursor: 'pointer',
+          fontFamily: FONT
+        }}
+      >
+        ↩ Unreconcile
+      </button>
+    </div>
+
+    {totalMatched === 0 && (txn.action_type === 'platform_payout' || txn.action_type === 'card_payment' || txn.action_type === 'transfer') ? (
+      <div style={{ fontSize: '13px', color: C.muted, padding: '8px 10px', background: 'rgba(45,191,184,0.04)', borderRadius: '6px' }}>
+        ℹ️ Reconcile-only action ({ACTION_LABELS[txn.action_type as ActionType]}) — no ledger entry required.
+      </div>
+    ) : totalMatched === 0 ? (
+      <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>
+        ⚠️ Marked reconciled but no ledger entry found.
+      </div>
+    ) : (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+
+        {matchedAp.map((x: any) => (
+          <div key={`ap-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
+                AP Payment · {x.vendor_name}
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>
+                {fmt(-Math.abs(Number(x.amount)))}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: C.muted }}>
+              Paid {fmt(x.amount_paid)} of {fmt(x.total_amount)}
+            </div>
+          </div>
+        ))}
+
+        {matchedCol.map((x: any) => (
+          <div key={`co-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
+                Collection Payment · {x.seller_name}
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>
+                {fmt(-Math.abs(Number(x.amount)))}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: C.muted }}>
+              Paid {fmt(x.amount_paid)} of {fmt(x.total_cost)}
+            </div>
+          </div>
+        ))}
+
+        {matchedDisb.map((x: any) => (
+          <div key={`d-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
+                Owner Draw · {x.recipient}
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>
+                {fmt(-Math.abs(Number(x.amount)))}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: C.muted }}>
+              {x.disbursement_date} · {x.notes || '(no notes)'}
+            </div>
+          </div>
+        ))}
+
+        {matchedEquity.map((x: any) => (
+          <div key={`eq-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
+                Owner Contribution · {x.member_name}
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>
+                {fmt(Math.abs(Number(x.amount)))}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: C.muted }}>
+              {x.transaction_date} · {x.notes || '(no notes)'}
+            </div>
+          </div>
+        ))}
+
+        {matchedLoans.map((x: any) => (
+          <div key={`ln-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
+                Loan from {x.member_name}
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>
+                {fmt(Math.abs(Number(x.principal)))}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: C.muted }}>
+              {x.loan_date} · {x.interest_rate ? `${x.interest_rate}% APR · ` : ''}{fmt(x.outstanding_balance)} outstanding
+            </div>
+          </div>
+        ))}
+
+        {matchedLoanPmts.map((x: any) => (
+          <div key={`lp-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
+                Loan Repayment
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>
+                {fmt(-(Number(x.principal_paid) + Number(x.interest_paid)))}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: C.muted }}>
+              {x.payment_date} · Principal {fmt(x.principal_paid)} · Interest {fmt(x.interest_paid)}
+            </div>
+          </div>
+        ))}
+
+      </div>
+    )}
+  </div>
+)}
