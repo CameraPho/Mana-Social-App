@@ -12,9 +12,9 @@ export async function parseChaseConsumerPDF(
 ): Promise<ParseResult> {
 
   // FIXED: proper ESM import — no "as any", no global pollution
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.js')
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js'
 
   const arrayBuf = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise
