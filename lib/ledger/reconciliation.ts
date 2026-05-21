@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+⁠import { createClient } from '@/lib/supabase';
 
 /**
  * Automatically matches bank transactions to domain records 
