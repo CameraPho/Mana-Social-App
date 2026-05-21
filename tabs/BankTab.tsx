@@ -1,10 +1,15 @@
 'use client'
 import React, { useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS } from '@/lib/constants'
+import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS, CHECKING_ACCOUNTS, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
 import { fmt, getEntity, today } from '@/lib/format'
 import { parseChaseStatementPDF } from '@/parsers/chasePDF'
 import { parseWellsFargoStatementPDF } from '@/parsers/wellsFargoStatementPDF'
+import { parseCostcoCitiPDF } from '@/parsers/costcoCitiPDF'
+import { parseCitiDiamondPDF } from '@/parsers/citiDiamondPDF'
+import { parseAmazonChasePDF } from '@/parsers/amazonChasePDF'
+import { parseChaseSapphirePDF } from '@/parsers/chaseSapphirePDF'
+import { parseBarclaysPDF } from '@/parsers/barclaysPDF'
 import { findVendorMatch, buildLedgerPayloadFromMatch } from '@/lib/vendorMatch'
 import {
   ActionType, ACTION_LABELS, ACTION_HINTS, getValidActions, suggestActionType,
@@ -13,6 +18,29 @@ import {
 
 type FilterMode = 'unreconciled' | 'reconciled' | 'all'
 const MEMBERS = ['Cam', 'Kenny']
+
+// Detect which parser to use based on PDF first-page text
+function detectBank(text: string): 'wells_fargo' | 'chase_checking' | 'costco_citi' | 'citi_diamond' | 'amazon_chase' | 'chase_sapphire' | 'barclays' {
+  const t = text.toLowerCase()
+  if (/wells fargo/.test(t)) return 'wells_fargo'
+  if (/barclays/.test(t)) return 'barclays'
+  if (/costco anywhere visa/.test(t) || /costco.*citi/.test(t)) return 'costco_citi'
+  if (/diamond preferred/.test(t)) return 'citi_diamond'
+  if (/amazon.*chase|chase.*amazon|prime visa/.test(t)) return 'amazon_chase'
+  if (/sapphire/.test(t)) return 'chase_sapphire'
+  // Default to Chase Business Checking
+  return 'chase_checking'
+}
+
+const BANK_LABELS: Record<string, string> = {
+  wells_fargo: 'Wells Fargo',
+  chase_checking: 'Chase Business Checking',
+  costco_citi: 'Costco Citi Visa',
+  citi_diamond: 'Citi Diamond Preferred',
+  amazon_chase: 'Amazon Chase Prime Visa',
+  chase_sapphire: 'Chase Sapphire Preferred',
+  barclays: 'Barclays View Mastercard',
+}
 
 export default function BankTab(p: any) {
   const { C, reconTransactions, bankAccounts, fetchData, expenses, sales, vendorMappings,
@@ -27,7 +55,6 @@ export default function BankTab(p: any) {
   const [uploadStatus, setUploadStatus] = useState('')
   const [statementEndBal, setStatementEndBal] = useState('')
 
-  // Per-transaction action selections (keyed by txn.id)
   const [actionByTxn, setActionByTxn] = useState<Record<string, ActionType>>({})
   const [formByTxn, setFormByTxn] = useState<Record<string, any>>({})
   const [bulkApplying, setBulkApplying] = useState(false)
@@ -42,20 +69,16 @@ export default function BankTab(p: any) {
   const secHdr: React.CSSProperties = { fontSize: '11px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '12px', fontFamily: FONT, display: 'block' }
   const editBtn: React.CSSProperties = { background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '3px 8px', fontSize: '12px', color: C.muted, cursor: 'pointer', fontFamily: FONT }
 
-  // ---- Form state helpers ----------------------------------------
   const getForm = (txnId: string) => formByTxn[txnId] || {}
   const setForm = (txnId: string, patch: any) => setFormByTxn(prev => ({ ...prev, [txnId]: { ...(prev[txnId] || {}), ...patch } }))
-
   const getAction = (txn: any): ActionType => {
     if (actionByTxn[txn.id]) return actionByTxn[txn.id]
     return suggestActionType(txn.description, Number(txn.amount)).action
   }
   const setAction = (txnId: string, a: ActionType) => setActionByTxn(prev => ({ ...prev, [txnId]: a }))
-
   const getSplitLines = (txnId: string) => splitLinesByTxn[txnId] || [{ amount: '', category: 'Supplies & Packaging', notes: '' }]
   const setSplitLines = (txnId: string, lines: any[]) => setSplitLinesByTxn(prev => ({ ...prev, [txnId]: lines }))
 
-  // ---- PDF upload --------------------------------------------------
   const handlePdf = async (file: File) => {
     setUploadPreview([])
     if (file.type !== 'application/pdf') { setUploadStatus('Please upload a PDF'); return }
@@ -68,19 +91,29 @@ export default function BankTab(p: any) {
       const page = await pdf.getPage(1)
       const content = await page.getTextContent()
       const firstPageText = content.items.map((item: any) => item.str).join(' ')
-      const isWellsFargo = /wells fargo/i.test(firstPageText)
+      const bank = detectBank(firstPageText)
 
-      setUploadStatus(isWellsFargo ? 'Reading Wells Fargo statement...' : 'Reading Chase statement...')
-      const { records, meta } = isWellsFargo
-        ? await parseWellsFargoStatementPDF(file)
-        : await parseChaseStatementPDF(file)
+      setUploadStatus(`Reading ${BANK_LABELS[bank]} statement...`)
 
+      let result
+      switch (bank) {
+        case 'wells_fargo':     result = await parseWellsFargoStatementPDF(file); break
+        case 'costco_citi':     result = await parseCostcoCitiPDF(file); break
+        case 'citi_diamond':    result = await parseCitiDiamondPDF(file); break
+        case 'amazon_chase':    result = await parseAmazonChasePDF(file); break
+        case 'chase_sapphire':  result = await parseChaseSapphirePDF(file); break
+        case 'barclays':        result = await parseBarclaysPDF(file); break
+        case 'chase_checking':
+        default:                result = await parseChaseStatementPDF(file); break
+      }
+
+      const { records, meta } = result
       if (records.length === 0) {
-        setUploadStatus('No transactions found — check that this is a supported bank statement.')
+        setUploadStatus(`No transactions found in ${BANK_LABELS[bank]} statement. Check the file format.`)
         return
       }
       setUploadPreview(records.map((r: any) => ({ ...r, _selected: true })))
-      setUploadStatus(`Found ${records.length} transactions from ${meta.year}. (${isWellsFargo ? 'Wells Fargo' : 'Chase'})`)
+      setUploadStatus(`Found ${records.length} transactions from ${meta.year}. (${BANK_LABELS[bank]})`)
     } catch (err: any) { setUploadStatus('Parse error: ' + err.message) }
   }
 
@@ -96,7 +129,6 @@ export default function BankTab(p: any) {
     setTimeout(() => setUploadStatus(''), 4000)
   }
 
-  // ---- Vendor learning ---------------------------------------------
   const extractKeyword = (desc: string): string => {
     const tokens = (desc || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(t => t.length >= 3)
     return tokens.slice(0, 2).join(' ').trim()
@@ -116,7 +148,6 @@ export default function BankTab(p: any) {
     }
   }
 
-  // ---- Main action handler -----------------------------------------
   const executeAction = async (txn: any) => {
     const action = getAction(txn)
     const f = getForm(txn.id)
@@ -124,7 +155,6 @@ export default function BankTab(p: any) {
     const entity = getEntity(txn.transaction_date)
 
     try {
-      // Action-specific handling
       if (action === 'categorize') {
         const isOutflow = txn.amount < 0
         if (isOutflow) {
@@ -136,34 +166,23 @@ export default function BankTab(p: any) {
           await supabase.from('sales').insert({ platform, amount: absAmt, fees: 0, shipping: 0, sale_date: txn.transaction_date, period_start: txn.transaction_date, period_end: txn.transaction_date, entity, net_sales: absAmt, num_orders: 1, bank_txn_id: txn.id })
           if (f.saveAsRule) await learnVendor(txn, platform, true)
         }
-      }
-
-      else if (action === 'split') {
+      } else if (action === 'split') {
         const lines = getSplitLines(txn.id)
         const total = lines.reduce((a, l) => a + (parseFloat(l.amount) || 0), 0)
         if (Math.abs(total - absAmt) > 0.01) { alert(`Split total ${fmt(total)} must equal ${fmt(absAmt)}`); return }
         await supabase.from('expenses').insert(lines.map(l => ({ category: l.category, cost: parseFloat(l.amount) || 0, purchase_date: txn.transaction_date, notes: l.notes || `Split from: ${txn.description}`, entity, user_name: 'Cam', paid_by_company: true, bank_txn_id: txn.id })))
-      }
-
-      else if (action === 'platform_payout' || action === 'card_payment' || action === 'transfer') {
-        // Reconcile-only — no ledger row. Just record the action type.
-        // For transfer, optionally pair with another bank line (left as future enhancement; manual for now)
-      }
-
-      else if (action === 'owner_contribution') {
+      } else if (action === 'platform_payout' || action === 'card_payment' || action === 'transfer') {
+        // reconcile-only
+      } else if (action === 'owner_contribution') {
         const memberName = f.memberName || 'Cam'
         const built = buildOwnerContributionPayload(txn, memberName, entity, f.notes)
         if (built) await supabase.from(built.targetTable).insert(built.payload)
-      }
-
-      else if (action === 'owner_loan') {
+      } else if (action === 'owner_loan') {
         const memberName = f.memberName || 'Cam'
         const rate = f.interestRate ? parseFloat(f.interestRate) : undefined
         const built = buildOwnerLoanPayload(txn, memberName, entity, rate, f.notes)
         if (built) await supabase.from(built.targetTable).insert(built.payload)
-      }
-
-      else if (action === 'loan_repayment') {
+      } else if (action === 'loan_repayment') {
         if (!f.loanId) { alert('Pick a loan to repay'); return }
         const principalPaid = parseFloat(f.principalPaid || '0') || 0
         const interestPaid = parseFloat(f.interestPaid || '0') || 0
@@ -172,29 +191,22 @@ export default function BankTab(p: any) {
         }
         const built = buildLoanRepaymentPayload(txn, f.loanId, principalPaid, interestPaid, f.notes)
         if (built) await supabase.from(built.targetTable).insert(built.payload)
-        // Reduce outstanding balance on the loan
         const loan = (memberLoans || []).find((l: any) => l.id === f.loanId)
         if (loan) {
           const newBalance = Math.max(0, Number(loan.outstanding_balance) - principalPaid)
           await supabase.from('member_loans').update({ outstanding_balance: newBalance, is_active: newBalance > 0 }).eq('id', f.loanId)
         }
-      }
-
-      else if (action === 'owner_draw') {
+      } else if (action === 'owner_draw') {
         const recipient = f.memberName || 'Cam'
         const built = buildOwnerDrawPayload(txn, recipient, f.notes)
         if (built) await supabase.from(built.targetTable).insert(built.payload)
-      }
-
-      else if (action === 'ap_payment') {
+      } else if (action === 'ap_payment') {
         if (!f.apId) { alert('Pick an AP bill to apply this payment to'); return }
         const ap = (accountsPayable || []).find((a: any) => a.id === f.apId)
         if (!ap) { alert('AP bill not found'); return }
         const newPaid = Number(ap.amount_paid || 0) + absAmt
         await supabase.from('accounts_payable').update({ amount_paid: newPaid, payment_date: txn.transaction_date, bank_txn_id: txn.id }).eq('id', f.apId)
-      }
-
-      else if (action === 'collection_payment') {
+      } else if (action === 'collection_payment') {
         if (!f.collectionId) { alert('Pick a collection to apply this payment to'); return }
         const col = (collections || []).find((c: any) => c.id === f.collectionId)
         if (!col) { alert('Collection not found'); return }
@@ -202,10 +214,7 @@ export default function BankTab(p: any) {
         await supabase.from('collections').update({ amount_paid: newPaid, bank_txn_id: txn.id }).eq('id', f.collectionId)
       }
 
-      // Mark reconciled with the action type for audit
       await supabase.from('bank_statement_transactions').update({ is_reconciled: true, action_type: action }).eq('id', txn.id)
-
-      // Clear form state for this txn
       setFormByTxn(prev => { const next = { ...prev }; delete next[txn.id]; return next })
       setSplitLinesByTxn(prev => { const next = { ...prev }; delete next[txn.id]; return next })
       setActionByTxn(prev => { const next = { ...prev }; delete next[txn.id]; return next })
@@ -215,7 +224,6 @@ export default function BankTab(p: any) {
     }
   }
 
-  // ---- Bulk auto-apply via vendor matching -------------------------
   const bulkAutoApply = async () => {
     setBulkApplying(true)
     try {
@@ -235,7 +243,6 @@ export default function BankTab(p: any) {
     setBulkApplying(false)
   }
 
-  // ---- Delete & Unreconcile ----------------------------------------
   const deleteTxn = async (txn: any) => {
     if (txn.is_reconciled) { alert('Cannot delete a reconciled transaction. Unreconcile it first.'); return }
     if (!confirm(`Delete this transaction?\n\n${txn.description}\n${fmt(txn.amount)}`)) return
@@ -244,7 +251,6 @@ export default function BankTab(p: any) {
     fetchData()
   }
 
-  // Unreconcile: handle all linked table types
   const unreconcileTxn = async (txn: any) => {
     const linkedE = (expenses || []).filter((x: any) => x.bank_txn_id === txn.id)
     const linkedS = (sales || []).filter((x: any) => x.bank_txn_id === txn.id)
@@ -254,29 +260,19 @@ export default function BankTab(p: any) {
     const linkedLoanPmts = (memberLoanPayments || []).filter((x: any) => x.bank_txn_id === txn.id)
     const linkedAp = (accountsPayable || []).filter((x: any) => x.bank_txn_id === txn.id)
     const linkedCol = (collections || []).filter((x: any) => x.bank_txn_id === txn.id)
-
     const total = linkedE.length + linkedS.length + linkedD.length + linkedEq.length + linkedLoans.length + linkedLoanPmts.length + linkedAp.length + linkedCol.length
     if (!confirm(`Unreconcile this transaction?\n\nThis will reverse ${total} linked ledger entr${total === 1 ? 'y' : 'ies'} and mark the bank line as unreconciled.`)) return
-
     try {
       if (linkedE.length > 0) await supabase.from('expenses').delete().in('id', linkedE.map((x: any) => x.id))
       if (linkedS.length > 0) await supabase.from('sales').delete().in('id', linkedS.map((x: any) => x.id))
       if (linkedD.length > 0) await supabase.from('disbursements').delete().in('id', linkedD.map((x: any) => x.id))
       if (linkedEq.length > 0) await supabase.from('equity_transactions').delete().in('id', linkedEq.map((x: any) => x.id))
-
-      // For loan PAYMENTS: restore the outstanding balance on the loan, then delete the payment row
       for (const pmt of linkedLoanPmts) {
         const loan = (memberLoans || []).find((l: any) => l.id === pmt.loan_id)
-        if (loan) {
-          await supabase.from('member_loans').update({ outstanding_balance: Number(loan.outstanding_balance) + Number(pmt.principal_paid), is_active: true }).eq('id', loan.id)
-        }
+        if (loan) await supabase.from('member_loans').update({ outstanding_balance: Number(loan.outstanding_balance) + Number(pmt.principal_paid), is_active: true }).eq('id', loan.id)
       }
       if (linkedLoanPmts.length > 0) await supabase.from('member_loan_payments').delete().in('id', linkedLoanPmts.map((x: any) => x.id))
-
-      // For new LOANS originated from this bank line: delete (only if no payments exist)
       if (linkedLoans.length > 0) await supabase.from('member_loans').delete().in('id', linkedLoans.map((x: any) => x.id))
-
-      // For AP/Collection PAYMENTS: subtract from amount_paid and null bank_txn_id
       for (const ap of linkedAp) {
         const newPaid = Math.max(0, Number(ap.amount_paid || 0) - Math.abs(Number(txn.amount)))
         await supabase.from('accounts_payable').update({ amount_paid: newPaid, payment_date: null, bank_txn_id: null }).eq('id', ap.id)
@@ -285,13 +281,11 @@ export default function BankTab(p: any) {
         const newPaid = Math.max(0, Number(col.amount_paid || 0) - Math.abs(Number(txn.amount)))
         await supabase.from('collections').update({ amount_paid: newPaid, bank_txn_id: null }).eq('id', col.id)
       }
-
       await supabase.from('bank_statement_transactions').update({ is_reconciled: false, action_type: null }).eq('id', txn.id)
       fetchData()
     } catch (err: any) { alert('Unreconcile error: ' + err.message) }
   }
 
-  // ---- Filtering & search ------------------------------------------
   const byAccount = reconTransactions.filter((t: any) => account === 'All' || t.account_name === account)
   const search = searchText.trim().toLowerCase()
   const bySearch = !search ? byAccount : byAccount.filter((t: any) => {
@@ -324,7 +318,6 @@ export default function BankTab(p: any) {
     cursor: 'pointer', fontFamily: FONT, whiteSpace: 'nowrap'
   })
 
-  // ---- Render the action-specific form ----------------------------
   const renderActionForm = (txn: any, action: ActionType) => {
     const f = getForm(txn.id)
     const isOutflow = txn.amount < 0
@@ -373,29 +366,9 @@ export default function BankTab(p: any) {
       )
     }
 
-    if (action === 'platform_payout') {
-      return (
-        <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>
-          ℹ️ This will mark the deposit as reconciled. The actual sale revenue should already be in your books from the CSV import for this platform&apos;s sales period. No new ledger entry will be created.
-        </div>
-      )
-    }
-
-    if (action === 'card_payment') {
-      return (
-        <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>
-          ℹ️ This is a transfer from bank to credit card. It reduces your card liability — not an expense. The matching charge on the card statement is the actual expense.
-        </div>
-      )
-    }
-
-    if (action === 'transfer') {
-      return (
-        <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>
-          ℹ️ This is moving money between your own accounts. No ledger entry will be created. When you import the matching statement on the other side, reconcile that line as Transfer too.
-        </div>
-      )
-    }
+    if (action === 'platform_payout') return <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>ℹ️ This will mark the deposit as reconciled. The actual sale revenue should already be in your books from the CSV import for this platform&apos;s sales period.</div>
+    if (action === 'card_payment') return <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>ℹ️ This is a transfer from bank to credit card. It reduces your card liability — not an expense.</div>
+    if (action === 'transfer') return <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>ℹ️ Moving money between your own accounts. No ledger entry will be created.</div>
 
     if (action === 'owner_contribution') {
       return (
@@ -406,9 +379,6 @@ export default function BankTab(p: any) {
             </select>
           </div>
           <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. Business funding" style={inp} /></div>
-          <div style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.08)', borderRadius: '6px', fontSize: '12px', color: C.muted }}>
-            Recorded as permanent capital contribution to <b>{f.memberName || 'Cam'}</b>&apos;s capital account.
-          </div>
         </div>
       )
     }
@@ -425,9 +395,6 @@ export default function BankTab(p: any) {
             <input type="number" step="0.01" value={f.interestRate || ''} onChange={e => setForm(txn.id, { interestRate: e.target.value })} placeholder="e.g. 5.5" style={inp} />
           </div>
           <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="Loan terms / purpose" style={inp} /></div>
-          <div style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.08)', borderRadius: '6px', fontSize: '12px', color: C.muted }}>
-            Loan principal: <b>{fmt(absAmt)}</b> from {f.memberName || 'Cam'} to the LLC. Will appear in Active Loans for repayment tracking.
-          </div>
         </div>
       )
     }
@@ -445,16 +412,10 @@ export default function BankTab(p: any) {
             </select>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Principal Paid</span>
-              <input type="number" step="0.01" value={f.principalPaid || ''} onChange={e => setForm(txn.id, { principalPaid: e.target.value })} style={inp} />
-            </div>
-            <div><span style={lbl}>Interest Paid</span>
-              <input type="number" step="0.01" value={f.interestPaid || '0'} onChange={e => setForm(txn.id, { interestPaid: e.target.value })} style={inp} />
-            </div>
+            <div><span style={lbl}>Principal Paid</span><input type="number" step="0.01" value={f.principalPaid || ''} onChange={e => setForm(txn.id, { principalPaid: e.target.value })} style={inp} /></div>
+            <div><span style={lbl}>Interest Paid</span><input type="number" step="0.01" value={f.interestPaid || '0'} onChange={e => setForm(txn.id, { interestPaid: e.target.value })} style={inp} /></div>
           </div>
-          <div style={{ fontSize: '12px', color: C.muted }}>
-            Total payment: <b>{fmt(absAmt)}</b>. Principal + Interest must equal this amount.
-          </div>
+          <div style={{ fontSize: '12px', color: C.muted }}>Total payment: <b>{fmt(absAmt)}</b>. Principal + Interest must equal this amount.</div>
           <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} style={inp} /></div>
         </div>
       )
@@ -486,11 +447,7 @@ export default function BankTab(p: any) {
               })}
             </select>
           </div>
-          {openAp.length === 0 && (
-            <div style={{ fontSize: '12px', color: C.muted, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: '6px' }}>
-              No open AP bills found. You may need to add one in Money Out → Accounts Payable first.
-            </div>
-          )}
+          {openAp.length === 0 && <div style={{ fontSize: '12px', color: C.muted, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: '6px' }}>No open AP bills found.</div>}
         </div>
       )
     }
@@ -508,11 +465,7 @@ export default function BankTab(p: any) {
               })}
             </select>
           </div>
-          {openCol.length === 0 && (
-            <div style={{ fontSize: '12px', color: C.muted, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: '6px' }}>
-              No open collections found. Add one in Money Out → Collections first.
-            </div>
-          )}
+          {openCol.length === 0 && <div style={{ fontSize: '12px', color: C.muted, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', borderRadius: '6px' }}>No open collections found.</div>}
         </div>
       )
     }
@@ -523,7 +476,7 @@ export default function BankTab(p: any) {
   return (
     <div>
       <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
-        🏦 Bank Reconciliation — upload Chase or Wells Fargo statements, then pick the right action for each transaction.
+        🏦 Bank Reconciliation — upload statements from Chase, Wells Fargo, Costco Citi, Citi Diamond, Amazon Chase, Chase Sapphire, or Barclays.
       </div>
 
       <div style={{ ...card, background: C.navyDark, color: '#fff' }}>
@@ -550,7 +503,7 @@ export default function BankTab(p: any) {
         <span style={secHdr}>Upload Bank Statement</span>
         <button onClick={() => fileRef.current?.click()} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${C.teal}`, background: 'rgba(45,191,184,0.08)', fontSize: '14px', fontWeight: 'bold', color: C.teal, cursor: 'pointer', fontFamily: FONT }}>Import File</button>
         <input ref={fileRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handlePdf(f); e.target.value = '' }} />
-        <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Chase · Wells Fargo · more banks coming soon</div>
+        <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px' }}>Auto-detects: Chase · Wells Fargo · Costco Citi · Citi Diamond · Amazon Chase · Chase Sapphire · Barclays</div>
         {uploadStatus && <div style={{ marginTop: '8px', fontSize: '13px', color: C.teal }}>{uploadStatus}</div>}
       </div>
 
@@ -580,12 +533,17 @@ export default function BankTab(p: any) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
-        {['All', ...BANK_ACCOUNTS].map(acct => (
-          <button key={acct} onClick={() => setAccount(acct)} style={{ padding: '6px 12px', borderRadius: '20px', border: `1px solid ${account === acct ? C.teal : C.border}`, background: account === acct ? 'rgba(45,191,184,0.12)' : C.inputBg, fontSize: '12px', fontWeight: account === acct ? 'bold' : 'normal', color: account === acct ? C.teal : C.muted, cursor: 'pointer', fontFamily: FONT }}>
-            {acct === 'All' ? 'All' : acct}
-          </button>
-        ))}
+      <div style={{ marginBottom: '10px' }}>
+        <span style={lbl}>Account</span>
+        <select value={account} onChange={e => setAccount(e.target.value)} style={inp}>
+          <option value="All">All Accounts</option>
+          <optgroup label="Checking Accounts">
+            {CHECKING_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+          </optgroup>
+          <optgroup label="Credit Cards">
+            {CREDIT_CARD_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+          </optgroup>
+        </select>
       </div>
 
       {matchCount > 0 && (
@@ -599,13 +557,7 @@ export default function BankTab(p: any) {
         </div>
       )}
 
-      <input
-        type="text"
-        placeholder="🔍 Search description, account, amount..."
-        value={searchText}
-        onChange={e => setSearchText(e.target.value)}
-        style={{ ...inp, marginBottom: '8px' }}
-      />
+      <input type="text" placeholder="🔍 Search description, account, amount..." value={searchText} onChange={e => setSearchText(e.target.value)} style={{ ...inp, marginBottom: '8px' }} />
 
       <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
         <button onClick={() => setFilterMode('unreconciled')} style={tabBtn('unreconciled')}>Unreconciled ({unreconciledCount})</button>
@@ -624,7 +576,12 @@ export default function BankTab(p: any) {
           <div style={{ display: 'grid', gap: '10px' }}>
             <div><span style={lbl}>Account</span>
               <select value={newTxn.account_name} onChange={e => setNewTxn({ ...newTxn, account_name: e.target.value })} style={inp}>
-                {BANK_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+                <optgroup label="Checking Accounts">
+                  {CHECKING_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+                </optgroup>
+                <optgroup label="Credit Cards">
+                  {CREDIT_CARD_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+                </optgroup>
               </select>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -672,32 +629,21 @@ export default function BankTab(p: any) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '15px', fontWeight: 900, color: txn.amount >= 0 ? C.green : '#ef4444' }}>{fmt(txn.amount)}</span>
                 {txn.is_reconciled && <span style={{ color: C.green, fontSize: '12px' }}>✓</span>}
-                {!txn.is_reconciled && (
-                  <button onClick={() => deleteTxn(txn)} title="Delete" style={{ background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '16px', padding: '2px 4px' }}>🗑️</button>
-                )}
+                {!txn.is_reconciled && <button onClick={() => deleteTxn(txn)} title="Delete" style={{ background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '16px', padding: '2px 4px' }}>🗑️</button>}
               </div>
             </div>
 
             {!txn.is_reconciled && (
               <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
-                {suggestion.note && (
-                  <div style={{ marginBottom: '8px', padding: '6px 10px', background: 'rgba(45,191,184,0.06)', border: `1px solid rgba(45,191,184,0.2)`, borderRadius: '6px', fontSize: '11px', color: C.teal }}>
-                    ℹ️ {suggestion.note}
-                  </div>
-                )}
-
+                {suggestion.note && <div style={{ marginBottom: '8px', padding: '6px 10px', background: 'rgba(45,191,184,0.06)', border: `1px solid rgba(45,191,184,0.2)`, borderRadius: '6px', fontSize: '11px', color: C.teal }}>ℹ️ {suggestion.note}</div>}
                 <div style={{ marginBottom: '12px' }}>
                   <span style={lbl}>Action Type</span>
                   <select value={currentAction} onChange={e => setAction(txn.id, e.target.value as ActionType)} style={inp}>
-                    {validActions.map(a => (
-                      <option key={a} value={a}>{ACTION_LABELS[a]}{a === suggestion.action ? ' ✨' : ''}</option>
-                    ))}
+                    {validActions.map(a => <option key={a} value={a}>{ACTION_LABELS[a]}{a === suggestion.action ? ' ✨' : ''}</option>)}
                   </select>
                   <div style={{ fontSize: '11px', color: C.muted, marginTop: '4px' }}>{ACTION_HINTS[currentAction]}</div>
                 </div>
-
                 {renderActionForm(txn, currentAction)}
-
                 <button onClick={() => executeAction(txn)} style={{ marginTop: '12px', padding: '10px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT, width: '100%' }}>
                   Confirm &amp; Clear Line
                 </button>
@@ -707,19 +653,13 @@ export default function BankTab(p: any) {
             {txn.is_reconciled && (
               <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${C.border}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    Matched to {totalMatched} ledger entr{totalMatched === 1 ? 'y' : 'ies'}
-                  </div>
+                  <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Matched to {totalMatched} ledger entr{totalMatched === 1 ? 'y' : 'ies'}</div>
                   <button onClick={() => unreconcileTxn(txn)} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '4px 10px', fontSize: '11px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>↩ Unreconcile</button>
                 </div>
                 {totalMatched === 0 && (txn.action_type === 'platform_payout' || txn.action_type === 'card_payment' || txn.action_type === 'transfer') ? (
-                  <div style={{ fontSize: '13px', color: C.muted, padding: '8px 10px', background: 'rgba(45,191,184,0.04)', borderRadius: '6px' }}>
-                    ℹ️ Reconcile-only action ({ACTION_LABELS[txn.action_type as ActionType]}) — no ledger entry required.
-                  </div>
+                  <div style={{ fontSize: '13px', color: C.muted, padding: '8px 10px', background: 'rgba(45,191,184,0.04)', borderRadius: '6px' }}>ℹ️ Reconcile-only action ({ACTION_LABELS[txn.action_type as ActionType]}) — no ledger entry required.</div>
                 ) : totalMatched === 0 ? (
-                  <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>
-                    ⚠️ Marked reconciled but no ledger entry found. May have been deleted.
-                  </div>
+                  <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>⚠️ Marked reconciled but no ledger entry found.</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {matchedExpenses.map((x: any) => (
