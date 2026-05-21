@@ -42,11 +42,25 @@ export const MILEAGE_RATE = 0.67
 export const ASSET_CATEGORIES = ['Equipment', 'Furniture & Fixtures', 'Vehicle']
 export const USEFUL_LIFE: Record<string, number> = { Equipment: 5, 'Furniture & Fixtures': 7, Vehicle: 5 }
 
-export const BANK_ACCOUNTS = [
+// Checking accounts (LLC business accounts)
+export const CHECKING_ACCOUNTS = [
   'Chase Business Checking',
   'Wells Fargo Business Checking',
-  'Chase Credit Card',
-  'Other Credit Card',
+]
+
+// Credit cards (personal cards used for business until LLC credit card is approved)
+export const CREDIT_CARD_ACCOUNTS = [
+  'Barclays View Mastercard',
+  'Amazon Chase Prime Visa',
+  'Costco Citi Visa',
+  'Citi Diamond Preferred',
+  'Chase Sapphire Preferred',
+]
+
+// All accounts — used wherever a flat list is needed (e.g., the +Add Transaction form)
+export const BANK_ACCOUNTS = [
+  ...CHECKING_ACCOUNTS,
+  ...CREDIT_CARD_ACCOUNTS,
 ]
 
 export const AI_LEARN_KEY = 'mana_social_ai_corrections'
