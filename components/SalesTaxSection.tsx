@@ -16,7 +16,7 @@ export default function SalesTaxSection(p: any) {
 
   // Build quarter-level summary from taxable sales
   const quarterSummary = useMemo(() => {
-    const buckets: { [key: string]: { taxableSales: number; taxCollected: number; count: number } } = {}
+    const buckets: { [key: string]: { taxableSales: number; taxCollected: number; count: number } } = {};
     (sales || []).filter((s: any) => s.is_taxable && Number(s.sales_tax_collected) > 0).forEach((s: any) => {
       const q = quarterLabel(s.sale_date)
       if (!buckets[q]) buckets[q] = { taxableSales: 0, taxCollected: 0, count: 0 }
