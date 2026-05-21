@@ -21,55 +21,69 @@ export default function MoneyInTab(p: any) {
   const totalFees = sales.reduce((s: number, r: any) => s + Number(r.fees || 0) + Number(r.shipping || 0), 0)
 
   const handleUpload = async (file: File) => {
-  setUploadPreview([]);
-  const name = file.name.toLowerCase();
+    setUploadPreview([]);
+    const name = file.name.toLowerCase();
 
-  try {
-    // TCGplayer XLSX
-    if ((name.endsWith('.xlsx') || name.endsWith('.xls')) && !name.includes('ebay')) {
-      setUploadStatus('Parsing TCGplayer report...');
-      const { records, meta } = await parsePDF(file, 'TCGplayer');
-      setUploadPreview(records.map((r: any) => ({
-        ...r,
-        _label: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}`
-      })));
-      setUploadStatus(`TCGplayer: ${meta.numOrders} orders · Gross ${fmt(meta.grossSales)}`);
-      return;
+    try {
+      // TCGplayer XLSX
+      if ((name.endsWith('.xlsx') || name.endsWith('.xls')) && !name.includes('ebay')) {
+        setUploadStatus('Parsing TCGplayer report...');
+        const { records, meta } = await parsePDF(file, 'TCGplayer');
+        setUploadPreview(records.map((r: any) => ({
+          ...r,
+          platform: 'TCGplayer',
+          _label: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}`
+        })));
+        setUploadStatus(`TCGplayer: ${meta.numOrders} orders · Gross ${fmt(meta.grossSales)}`);
+        return;
+      }
+
+      // ManaPool CSV
+      if (name.endsWith('.csv') && (name.includes('manapool') || name.includes('mana_pool') || name.includes('mana pool'))) {
+        setUploadStatus('Parsing ManaPool report...');
+        const { records, meta } = await parsePDF(file, 'ManaPool');
+        setUploadPreview(records.map((r: any) => ({
+          ...r,
+          platform: 'ManaPool',
+          _label: `ManaPool · ${meta.totalOrders} orders`
+        })));
+        setUploadStatus(`ManaPool: Gross ${fmt(meta.totalGross)}`);
+        return;
+      }
+
+      // eBay CSV
+      if (name.endsWith('.csv')) {
+        setUploadStatus('Parsing eBay report...');
+        const { records, meta } = await parsePDF(file, 'eBay');
+        setUploadPreview(records.map((r: any) => ({
+          ...r,
+          platform: 'eBay',
+          _label: `eBay · ${meta.rows} listings`
+        })));
+        setUploadStatus(`eBay: Gross ${fmt(meta.totalGross)}`);
+        return;
+      }
+
+      setUploadStatus('Unrecognized file — use TCGplayer .xlsx, eBay .csv, or ManaPool .csv');
+    } catch (err: any) {
+      setUploadStatus('Error: ' + err.message);
     }
-
-    // ManaPool CSV
-    if (name.endsWith('.csv') && (name.includes('manapool') || name.includes('mana_pool') || name.includes('mana pool'))) {
-      setUploadStatus('Parsing ManaPool report...');
-      const { records, meta } = await parsePDF(file, 'ManaPool');
-      setUploadPreview(records.map((r: any) => ({
-        ...r,
-        _label: `ManaPool · ${meta.totalOrders} orders`
-      })));
-      setUploadStatus(`ManaPool: Gross ${fmt(meta.totalGross)}`);
-      return;
-    }
-
-    // eBay CSV
-    if (name.endsWith('.csv')) {
-      setUploadStatus('Parsing eBay report...');
-      const { records, meta } = await parsePDF(file, 'eBay');
-      setUploadPreview(records.map((r: any) => ({
-        ...r,
-        _label: `eBay · ${meta.rows} listings`
-      })));
-      setUploadStatus(`eBay: Gross ${fmt(meta.totalGross)}`);
-      return;
-    }
-
-    setUploadStatus('Unrecognized file — use TCGplayer .xlsx, eBay .csv, or ManaPool .csv');
-  } catch (err: any) {
-    setUploadStatus('Error: ' + err.message);
-  }
-};
+  };
 
   const confirmUpload = async () => {
     setUploadStatus('Saving...')
-    const inserts = uploadPreview.map((r: any) => ({ platform: r.platform || 'other', amount: parseFloat(r.amount) || 0, fees: parseFloat(r.fees) || 0, shipping: parseFloat(r.shipping) || 0, sale_date: r.sale_date, period_start: r.period_start || r.sale_date, period_end: r.period_end || r.sale_date, entity: r.entity || getEntity(r.sale_date), net_sales: parseFloat(r.net_sales) || 0, num_orders: parseInt(r.num_orders) || 1 }))
+    const inserts = uploadPreview.map((r: any) => ({ 
+      platform: r.platform || 'other', 
+      amount: parseFloat(r.amount) || 0, 
+      fees: parseFloat(r.fees) || 0, 
+      shipping: parseFloat(r.shipping) || 0, 
+      sale_date: r.sale_date, 
+      period_start: r.period_start || r.sale_date, 
+      period_end: r.period_end || r.sale_date, 
+      entity: r.entity || getEntity(r.sale_date), 
+      net_sales: parseFloat(r.net_sales) || 0, 
+      num_orders: parseInt(r.num_orders) || 1 
+    }))
     const { error } = await supabase.from('sales').insert(inserts)
     if (error) { setUploadStatus('Error: ' + error.message); return }
     setUploadPreview([]); setUploadStatus('Saved!'); fetchData()
