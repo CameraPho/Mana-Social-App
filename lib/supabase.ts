@@ -1,3 +1,4 @@
+import 'server-only';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
@@ -10,8 +11,7 @@ export async function createClient() {
     {
       cookies: {
         async get(name: string) {
-          const cookie = await cookieStore.get(name);
-          return cookie?.value;
+          return (await cookieStore.get(name))?.value;
         },
       },
     }
