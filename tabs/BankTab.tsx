@@ -1,6 +1,5 @@
 'use client'
 import React, { useState, useRef } from 'react'
-import { supabase } from '@/lib/supabase'
 import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS, CHECKING_ACCOUNTS, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
 import { fmt, getEntity, today } from '@/lib/format'
 import { parsePDF } from '@/parsers/universalPDF'
@@ -153,7 +152,7 @@ const BANK_LABELS: Record<string, string> = {
 export default function BankTab(p: any) {
   const { C, reconTransactions, bankAccounts, fetchData, expenses, sales, vendorMappings,
     collections, equityTransactions, memberLoans, memberLoanPayments,
-    accountsPayable } = p
+    accountsPayable, supabase } = p
 
   const [account, setAccount] = useState('All')
   const [filterMode, setFilterMode] = useState<FilterMode>('unreconciled')
