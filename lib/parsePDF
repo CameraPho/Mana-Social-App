@@ -1,0 +1,37 @@
+export function parsePDF(rawText: string, accountName: string) {
+  const records = [];
+  const lines = rawText.split('\n');
+  const transactionRegex = /(\d{2}\/\d{2})\s+(.*?)\s+(-?[\d,]+\.\d{2})/;
+  const currentYear = new Date().getFullYear();
+
+  for (const line of lines) {
+    const match = line.match(transactionRegex);
+    if (match) {
+      const [_, dateStr, description, amountStr] = match;
+      const amount = parseFloat(amountStr.replace(/,/g, ''));
+      const [mm, dd] = dateStr.split('/').map(Number);
+      
+      // Robust date construction
+      const transactionDate = `${currentYear}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+      
+      const descUpper = description.trim().toUpperCase();
+      
+      records.push({
+        transaction_date: transactionDate,
+        description: description.trim().slice(0, 200),
+        amount: amount,
+        account_name: accountName,
+        type: amount > 0 ? 'credit' : 'debit', 
+        suggested_category: descUpper.includes("PAYMENT") ? 'Cash' : 'Uncategorized',
+        is_business: true,
+        metadata: {
+          raw_amount: amountStr,
+          is_interest_fee: descUpper.includes("INTEREST") || descUpper.includes("FEE"),
+          parser_version: "2.0-ledger-ready",
+          import_timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+  return records;
+}
