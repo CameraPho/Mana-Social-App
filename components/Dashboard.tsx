@@ -62,6 +62,7 @@ export default function Dashboard() {
   const [equityTransactions, setEquityTransactions] = useState<any[]>([])
   const [memberLoans, setMemberLoans] = useState<any[]>([])
   const [memberLoanPayments, setMemberLoanPayments] = useState<any[]>([])
+  const [salesTaxRemittances, setSalesTaxRemittances] = useState<any[]>([])
 
   useEffect(() => {
     const link = document.createElement('link')
@@ -76,7 +77,8 @@ export default function Dashboard() {
       const d = new Date(i[key])
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth)
     })
-    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst, vm, col, eq, mln, mlp] = await Promise.all([
+    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst, vm, col, eq, mln, mlp, str] = await Promise.all([
+      supabase.from('sales_tax_remittances').select('*').order('quarter_year', { ascending: false }),
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
       supabase.from('accounts_payable').select('*').order('invoice_date', { ascending: false }),
@@ -203,7 +205,7 @@ export default function Dashboard() {
     sales, expenses, accountsPayable, payroll, disbursements, mileageLog,
     cogsInventory, allCogsInventory, assets, bankAccounts, supplyCosts, reconTransactions,
     vendorMappings, collections, equityTransactions, memberLoans, memberLoanPayments,
-    setEditingItem, supabase }
+    salesTaxRemittances, setEditingItem, supabase }
 
   return (
     <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text }}>
