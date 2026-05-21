@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useMemo } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase-client'
+const supabase = createClient()
 import { FONT } from '@/lib/constants'
 import { fmt, getEntity } from '@/lib/format'
 import { DEFAULT_SALES_TAX_RATE, quarterLabel, quarterDateRange, cdtfaDueDate } from '@/lib/salesTax'
