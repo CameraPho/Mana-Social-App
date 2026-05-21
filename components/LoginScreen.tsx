@@ -1,9 +1,10 @@
 'use client'
-import React, { useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import React, { useState, useMemo } from 'react'
+import { createClient } from '@/lib/supabase-client'
 import { FONT, LIGHT_COLORS as C } from '@/lib/constants'
 
 export default function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const supabase = useMemo(() => createClient(), [])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
