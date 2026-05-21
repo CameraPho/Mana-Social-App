@@ -12,7 +12,7 @@ export async function parseChaseConsumerPDF(
 ): Promise<ParseResult> {
 
   // FIXED: proper ESM import — no "as any", no global pollution
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const pdfjsLib = (await import('pdfjs-dist/legacy/build/pdf.mjs')).default as any
   const arrayBuf = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise
 
