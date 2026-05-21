@@ -1,35 +1,10 @@
 import type { ParseResult } from '@/lib/types'
 
-// Words/phrases that indicate a row is money LEAVING the account.
-const DEBIT_HINTS = [
-  'payment to', 'online realtime transfer to', 'card online payment',
-  'epmt', 'eftpmt', 'eftps', 'cdtfa', 'franchise tax', 'gsbank',
-  'withdrawal', 'fee', 'acctverify td',
-  'sortswift', 'tcg automate', 'usps', 'stamps.com', 'shopify',
-  'google', 'adobe', 'verizon', 'amazon web services', 'aws',
-  'vercel', 'supabase', 'bcw', 'ultra pro', 'web id:',
-  'purchase interest charge', 'interest charge', 'cash advance fee',
-  'finance charge', 'late fee', 'overdraft fee', 'service charge',
-]
-// Words/phrases that indicate money ENTERING the account.
-const CREDIT_HINTS = [
-  'transfer recd', 'real time transfer recd', 'from preferred',
-  'tcgplayer inc', 'ebay com', 'mana pool payout', 'payroll',
-  'cash redemption', 'cash back', 'deposit', 'real time payment credit',
-  'redemption',
-]
-
-function classifyAmount(desc: string, rawAmt: string, amount: number): number {
-  // Explicit minus sign always wins.
-  if (rawAmt.trim().startsWith('-')) return -Math.abs(amount)
-  const d = desc.toLowerCase()
-  if (DEBIT_HINTS.some(h => d.includes(h))) return -Math.abs(amount)
-  if (CREDIT_HINTS.some(h => d.includes(h))) return Math.abs(amount)
-  // Unknown — leave positive, user can flip it in the Reconcile tab.
-  return Math.abs(amount)
+export async function parseAmazonChasePDF(file: File): Promise<ParseResult> {
+  return parseChaseConsumerPDF(file, 'Amazon Chase Prime Visa')
 }
 
-export async function parseChaseStatementPDF(file: File): Promise<ParseResult> {
+export async function parseChaseConsumerPDF(file: File, accountName: string): Promise<ParseResult> {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any)
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
   const arrayBuf = await file.arrayBuffer()
@@ -50,59 +25,55 @@ export async function parseChaseStatementPDF(file: File): Promise<ParseResult> {
     fullText += '\n'
   }
 
-  const yearMatch = fullText.match(/through\s+\w+\s+\d{1,2},\s+(\d{4})/)
-  const stmtYear = yearMatch ? yearMatch[1] : String(new Date().getFullYear())
+  const periodMatch = fullText.match(/opening\/closing\s+date\s+(\d{2})\/(\d{2})\/(\d{2})\s*-\s*(\d{2})\/(\d{2})\/(\d{2})/i)
+  const stmtYear = periodMatch ? `20${periodMatch[6]}` : String(new Date().getFullYear())
 
   const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean)
-
-  // A line that STARTS a transaction row: begins with MM/DD.
-  const dateStart = /^(\d{2})\/(\d{2})\s+(.*)$/
-  // Any currency-shaped number, e.g. 1,234.56 or -99.95
-  const moneyRe = /-?[\d,]+\.\d{2}/g
-
   const records: any[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(dateStart)
-    if (!m) continue
-    const [, mm, dd] = m
-    let rest = m[3]
+    const line = lines[i]
 
-    // If this row has no money value yet, it's a wrapped row —
-    // pull in following lines until we find currency numbers.
-    let lookahead = 0
-    while (!moneyRe.test(rest) && lookahead < 3 && (i + lookahead + 1) < lines.length) {
-      moneyRe.lastIndex = 0
-      lookahead++
-      // stop if the next line starts a new transaction
-      if (dateStart.test(lines[i + lookahead])) break
-      rest += ' ' + lines[i + lookahead]
-    }
-    moneyRe.lastIndex = 0
+    // Skip obvious header/footer lines
+    if (/^(sale|post|date|merchant|description|amount|payments|purchase|interest|fees|order\s+number|total|year-to-date)/i.test(line)) continue
 
-    const nums = rest.match(moneyRe)
-    if (!nums || nums.length === 0) continue
+    // Match transaction lines: MM/DD DESCRIPTION ... AMOUNT
+    const match = line.match(/^(\d{2})\/(\d{2})\s+(.+)/)
+    if (!match) continue
 
-    // First currency number = transaction amount.
-    // (If two numbers, the second is the running balance — ignore it.)
-    const rawAmt = nums[0]
+    const [, mm, dd, rest] = match
+
+    // Extract all dollar amounts from the line
+    const moneyMatches = [...rest.matchAll(/([\d,]+\.\d{2})/g)]
+    if (moneyMatches.length === 0) continue
+
+    // Last amount is the transaction amount
+    const rawAmt = moneyMatches[moneyMatches.length - 1][1]
     const amount = parseFloat(rawAmt.replace(/,/g, ''))
     if (!amount || isNaN(amount)) continue
 
-    // Description = everything before the first money number.
-    const cutAt = rest.indexOf(rawAmt)
-    let desc = (cutAt > 0 ? rest.slice(0, cutAt) : rest).replace(/\s+/g, ' ').trim()
-    if (!desc) desc = 'Chase transaction'
-    if (/^(beginning|ending)\s+balance/i.test(desc)) continue
+    // Remove all amounts from description
+    let desc = rest.replace(/([\d,]+\.\d{2})/g, '').replace(/\s+/g, ' ').trim()
+    if (!desc || desc.length < 2) continue
+
+    // Determine sign by context keywords
+    let signedAmount: number
+    if (/payment|thank\s+you|credit/i.test(desc)) {
+      signedAmount = Math.abs(amount) // Payment (credit)
+    } else if (/interest|fee/i.test(desc)) {
+      signedAmount = -Math.abs(amount)
+      if (/interest/i.test(desc)) desc = `[Interest] ${desc}`
+      if (/fee/i.test(desc)) desc = `[Fee] ${desc}`
+    } else {
+      signedAmount = -Math.abs(amount) // Purchase (default)
+    }
 
     records.push({
       transaction_date: `${stmtYear}-${mm}-${dd}`,
       description: desc.slice(0, 200),
-      amount: classifyAmount(desc, rawAmt, amount),
-      account_name: 'Chase Business Checking',
+      amount: signedAmount,
+      account_name: accountName,
     })
-
-    i += lookahead // skip lines we already consumed
   }
 
   return { records, meta: { rows: records.length, year: stmtYear, fileName: file.name } }
