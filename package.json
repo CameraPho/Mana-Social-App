@@ -14,7 +14,7 @@
     "react-dom": "^18",
     "xlsx": "0.18.5",
     "@supabase/supabase-js": "^2.43.2",
-
+    "@supabase/ssr": "^0.5.0",
     "pdfjs-dist": "4.0.379"
   },
   "devDependencies": {
