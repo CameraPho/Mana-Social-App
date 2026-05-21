@@ -3,9 +3,7 @@ import React, { useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { FONT } from '@/lib/constants'
 import { fmt, getEntity } from '@/lib/format'
-import { parseTCGplayerXLSX } from '@/parsers/tcgplayer'
-import { parseEbayCSV } from '@/parsers/ebay'
-import { parseManaPoolCSV } from '@/parsers/manapool'
+import { parsePDF } from '@/parsers/universalPDF'
 
 export default function MoneyInTab(p: any) {
   const { C, sales, fetchData, startEdit, handleDelete } = p
