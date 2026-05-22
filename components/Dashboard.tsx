@@ -177,7 +177,7 @@ export default function Dashboard() {
   }, [fetchData])
 
   const startEdit = (table: string, row: any) => {
-    const pre: any = { ...emptyForm, date: row.sale_date || row.purchase_date || row.due_date || row.pay_date || row.disbursement_date || row.date || emptyForm.date }
+    const pre: any = { ...emptyForm, date: row.invoice_date || row.sale_date || row.purchase_date || row.due_date || row.pay_date || row.disbursement_date || row.date || emptyForm.date }
 
     if (table === 'sales') {
       pre.label = row.platform
