@@ -104,7 +104,7 @@ export default function MoneyOutTab(p: any) {
     const days = relevantDue ? daysOverdue(relevantDue) : 0
     const isPlan = !!b.payment_plan
     const planProgress = isPlan ? getPlanProgress(b) : null
-
+    
     return (
       <div key={b.id} style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -134,7 +134,9 @@ export default function MoneyOutTab(p: any) {
         {isPlan && planProgress && (
           <div style={{ marginTop: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-              <span style={{ fontSize: '11px', color: C.muted, fontWeight: 600 }}> Payment {planProgress.paymentsMade} of {planProgress.totalPayments} </span>
+              <span style={{ fontSize: '11px', color: C.muted, fontWeight: 600 }}>
+                Payment {planProgress.paymentsMade} of {planProgress.totalPayments}
+              </span>
               <span style={{ fontSize: '11px', color: C.muted, fontWeight: 600 }}>{planProgress.percentPaid.toFixed(0)}% paid</span>
             </div>
             <div style={{ width: '100%', height: '8px', background: C.inputBg, borderRadius: '4px', overflow: 'hidden' }}>
