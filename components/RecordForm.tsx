@@ -111,26 +111,33 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
 
         {t === 'accounts_payable' && <>
           <div><span style={lbl}>Vendor</span>
-            {vendors.length > 0 ? (
-              <select value={formData.apVendorId || ''} onChange={e => onVendorPick(e.target.value)} style={inp}>
-                <option value="">— Pick a vendor or type new below —</option>
-                {vendors.filter((v: any) => v.is_active !== false).map((v: any) => (
-                  <option key={v.id} value={v.id}>{v.vendor_name} ({PAYMENT_TERM_LABELS[v.default_payment_terms as PaymentTerm] || 'Net 30'})</option>
-                ))}
-              </select>
-            ) : null}
-            <input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value, apVendorId: '' })} placeholder="Or type vendor name (new vendor)" style={{ ...inp, marginTop: vendors.length > 0 ? '6px' : 0 }} />
+            <input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value })} placeholder="e.g. Brett, ACD Distribution, Oscar" style={inp} />
+            {vendors.length > 0 && formData.apVendor && (
+              (() => {
+                const matched = vendors.find((v: any) => v.vendor_name.toLowerCase() === formData.apVendor.toLowerCase() && v.is_active !== false)
+                if (matched && !formData.apTerms_userSet) {
+                  return <div style={{ marginTop: '6px', padding: '6px 8px', background: 'rgba(45,191,184,0.06)', borderRadius: '6px', fontSize: '11px', color: C.teal }}>
+                    💾 Saved vendor — default terms: {PAYMENT_TERM_LABELS[matched.default_payment_terms as PaymentTerm] || 'Net 30'}
+                  </div>
+                }
+                return null
+              })()
+            )}
           </div>
           <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => { set({ date: e.target.value }); if (formData.apTerms) set({ apDue: calculateDueDate(e.target.value, formData.apTerms as PaymentTerm) }) }} style={inp} /></div>
+            <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => { set({ date: e.target.value, apDue: formData.apTerms === 'custom' ? formData.apDue : calculateDueDate(e.target.value, (formData.apTerms || 'net_30') as PaymentTerm) }) }} style={inp} /></div>
             <div><span style={lbl}>Payment Terms</span>
               <select value={formData.apTerms || 'net_30'} onChange={e => onTermsChange(e.target.value)} style={inp}>
                 {Object.entries(PAYMENT_TERM_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
               </select>
             </div>
           </div>
-          <div><span style={lbl}>Due Date (auto-calculated, can override)</span><input type="date" value={formData.apDue} onChange={e => set({ apDue: e.target.value })} style={inp} /></div>
+          {!formData.paymentPlan && (
+            <div><span style={lbl}>Due Date {formData.apTerms !== 'custom' ? '(auto-calculated, can override)' : '(set manually)'}</span>
+              <input type="date" value={formData.apDue} onChange={e => set({ apDue: e.target.value })} style={inp} />
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => set({ apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => set({ amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
@@ -162,9 +169,16 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
                 const perPayment = parseFloat(formData.planPaymentAmount) || 0
                 if (perPayment === 0) return null
                 const numPayments = Math.ceil(total / perPayment)
+                const startDate = formData.planStartDate || formData.date
+                const d = new Date(startDate + 'T00:00:00')
+                const lastD = new Date(d)
+                if (formData.planFrequency === 'weekly') lastD.setDate(d.getDate() + (numPayments - 1) * 7)
+                else if (formData.planFrequency === 'biweekly') lastD.setDate(d.getDate() + (numPayments - 1) * 14)
+                else lastD.setMonth(d.getMonth() + (numPayments - 1))
+                const endDate = lastD.toISOString().slice(0, 10)
                 return (
                   <div style={{ marginTop: '8px', padding: '8px 10px', background: 'rgba(45,191,184,0.1)', borderRadius: '6px', fontSize: '12px', color: '#1A7A75' }}>
-                    <strong>{numPayments}</strong> payments of <strong>${perPayment.toFixed(2)}</strong> over {numPayments} {formData.planFrequency === 'weekly' ? 'weeks' : formData.planFrequency === 'biweekly' ? 'biweekly periods' : 'months'}
+                    <strong>{numPayments}</strong> payments of <strong>${perPayment.toFixed(2)}</strong> {formData.planFrequency === 'weekly' ? 'weekly' : formData.planFrequency === 'biweekly' ? 'every 2 weeks' : 'monthly'} — ends approximately <strong>{endDate}</strong>
                   </div>
                 )
               })()}
