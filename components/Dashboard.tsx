@@ -23,7 +23,7 @@ export const emptyForm = {
   payPeriod: '', hoursWorked: '', hourlyRate: '16', rothEligible: '', rothContributed: '',
   bankName: 'Chase', accountType: 'Checking', accountLast4: '', bankBalance: '',
   apVendor: '', apTotal: '', apPaid: '', apDue: '', apTerms: 'net_30', apVendorId: '',
-  supplyItem: '', supplyUnit: '', supplyCost: '',
+  paymentPlan: false, planFrequency: 'monthly', planPaymentAmount: '', planStartDate: '',
 }
 
 export default function Dashboard() {
@@ -127,7 +127,20 @@ export default function Dashboard() {
   const startEdit = (table: string, row: any) => {
     const pre: any = { ...emptyForm, date: row.sale_date || row.purchase_date || row.due_date || row.pay_date || row.disbursement_date || row.date || emptyForm.date }
     if (table === 'sales') { pre.label = row.platform; pre.amount = String(row.amount); pre.fees = String(row.fees || 0); pre.shipping = String(row.shipping || 0); pre.isTaxable = !!row.is_taxable; pre.taxRate = String(row.tax_rate_applied ? (Number(row.tax_rate_applied) * 100).toFixed(2) : '7.75') }
-    else if (table === 'accounts_payable') { pre.apVendor = row.vendor_name; pre.label = row.description || ''; pre.apTotal = String(row.total_amount); pre.amountPaid = String(row.amount_paid || 0); pre.apDue = row.due_date || ''; pre.apTerms = row.payment_terms || 'net_30'; pre.apVendorId = row.vendor_id || ''; pre.notes = row.notes || '' }
+    else if (table === 'accounts_payable') { 
+      pre.apVendor = row.vendor_name; 
+      pre.label = row.description || ''; 
+      pre.apTotal = String(row.total_amount); 
+      pre.amountPaid = String(row.amount_paid || 0); 
+      pre.apDue = row.due_date || ''; 
+      pre.apTerms = row.payment_terms || 'net_30'; 
+      pre.apVendorId = row.vendor_id || ''; 
+      pre.notes = row.notes || '';
+      pre.paymentPlan = !!row.payment_plan;
+      pre.planFrequency = row.plan_frequency || 'monthly';
+      pre.planPaymentAmount = String(row.plan_payment_amount || '');
+      pre.planStartDate = row.plan_start_date || '';
+    }
     else if (table === 'expenses') { pre.label = row.notes || ''; pre.amount = String(row.cost); pre.category = row.category || 'Other'; pre.userName = row.user_name || 'Cam'; pre.paidByCompany = row.paid_by_company ?? true }
     else if (table === 'payroll') { pre.label = row.employee_name; pre.amount = String(row.amount); pre.hoursWorked = String(row.hours_worked || ''); pre.hourlyRate = String(row.hourly_rate || 16); pre.payPeriod = row.pay_period || '' }
     else if (table === 'disbursements') { pre.label = row.recipient; pre.amount = String(row.amount); pre.notes = row.notes || '' }
@@ -184,8 +197,14 @@ export default function Dashboard() {
         amount_paid: paid, 
         status,
         entity: getEntity(formData.date), 
-        notes: formData.notes + (cardCount > 0 ? ` | ${cardCount.toLocaleString()} cards @ $${(parseFloat(formData.apTotal)/cardCount).toFixed(4)}/card` : '') 
+        notes: formData.notes + (cardCount > 0 ? ` | ${cardCount.toLocaleString()} cards @ $${(parseFloat(formData.apTotal)/cardCount).toFixed(4)}/card` : '') ,
+        payment_plan: !!formData.paymentPlan,
+        plan_frequency: formData.paymentPlan ? formData.planFrequency : null,
+        plan_payment_amount: formData.paymentPlan ? Number(formData.planPaymentAmount) || null : null,
+        plan_start_date: formData.paymentPlan ? (formData.planStartDate || formData.date) : null,
+        plan_next_due: null,  // calculated dynamically in helpers
       }
+    }
     } else if (t === 'expenses') {
       if (!formData.amount) return alert('Missing amount')
       payload = { category: formData.category, cost: Number(formData.amount), purchase_date: formData.date, notes: formData.label, entity: getEntity(formData.date), user_name: formData.userName || 'Cam', paid_by_company: formData.paidByCompany }
