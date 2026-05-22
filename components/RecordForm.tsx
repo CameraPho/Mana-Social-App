@@ -135,6 +135,42 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
             <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => set({ apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => set({ amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
           </div>
+          
+          {/* PAYMENT PLAN TOGGLE + CONFIG */}
+          <div style={{ padding: '12px', background: formData.paymentPlan ? 'rgba(45,191,184,0.06)' : C.inputBg, borderRadius: '10px', border: `1px solid ${formData.paymentPlan ? C.teal : C.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: formData.paymentPlan ? '10px' : 0 }}>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: C.text }}>📅 Payment Plan</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!formData.paymentPlan} onChange={e => set({ paymentPlan: e.target.checked })} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                <span style={{ fontSize: '12px', color: C.muted }}>{formData.paymentPlan ? 'Enabled' : 'One-time'}</span>
+              </label>
+            </div>
+            {formData.paymentPlan && <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                <div><span style={lbl}>Frequency</span>
+                  <select value={formData.planFrequency || 'monthly'} onChange={e => set({ planFrequency: e.target.value })} style={inp}>
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Every 2 Weeks</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                <div><span style={lbl}>Payment Amount ($)</span><input type="number" step="0.01" value={formData.planPaymentAmount || ''} onChange={e => set({ planPaymentAmount: e.target.value })} placeholder="100.00" style={inp} /></div>
+              </div>
+              <div><span style={lbl}>First Payment Date</span><input type="date" value={formData.planStartDate || formData.date} onChange={e => set({ planStartDate: e.target.value })} style={inp} /></div>
+              {formData.apTotal && formData.planPaymentAmount && (() => {
+                const total = parseFloat(formData.apTotal) || 0
+                const perPayment = parseFloat(formData.planPaymentAmount) || 0
+                if (perPayment === 0) return null
+                const numPayments = Math.ceil(total / perPayment)
+                return (
+                  <div style={{ marginTop: '8px', padding: '8px 10px', background: 'rgba(45,191,184,0.1)', borderRadius: '6px', fontSize: '12px', color: '#1A7A75' }}>
+                    <strong>{numPayments}</strong> payments of <strong>${perPayment.toFixed(2)}</strong> over {numPayments} {formData.planFrequency === 'weekly' ? 'weeks' : formData.planFrequency === 'biweekly' ? 'biweekly periods' : 'months'}
+                  </div>
+                )
+              })()}
+            </>}
+          </div>
+
           <div><span style={lbl}>Card Count (optional)</span>
             <input type="number" value={formData.apCardCount || ''} onChange={e => set({ apCardCount: e.target.value })} placeholder="e.g. 5000" style={inp} />
             {formData.apCardCount && formData.apTotal && (
