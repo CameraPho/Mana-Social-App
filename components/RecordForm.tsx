@@ -2,6 +2,7 @@
 import React from 'react'
 import { FONT, type Palette, EXPENSE_CATEGORIES, ASSET_CATEGORIES, USEFUL_LIFE, MILEAGE_RATE } from '@/lib/constants'
 import { fmt, getEntity } from '@/lib/format'
+import { PAYMENT_TERM_LABELS, calculateDueDate, type PaymentTerm } from '@/lib/paymentTerms'
 
 interface Props {
   table: string
@@ -11,9 +12,10 @@ interface Props {
   onSave: () => void
   onClose: () => void
   C: Palette
+  vendors?: any[]
 }
 
-export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, C }: Props) {
+export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, C, vendors = [] }: Props) {
   const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: C.inputBg, boxSizing: 'border-box', fontFamily: FONT, color: C.text }
   const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: FONT }
   const set = (patch: any) => setFormData({ ...formData, ...patch })
@@ -22,6 +24,20 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
     const cost = parseFloat(formData.cogsCost) || 0, qty = parseInt(formData.cogsQty) || 1, total = cost * qty
     const units = formData.cogsType === 'collection' ? parseInt(formData.cogsCards) || 0 : ['booster_box','precon'].includes(formData.cogsType) ? (parseInt(formData.cogsCardsPerBox) || 0) * qty : qty
     return { total, units, cpu: units > 0 ? total / units : 0 }
+  }
+
+  // When vendor is picked, auto-fill terms + due date
+  const onVendorPick = (vendorId: string) => {
+    const v = vendors.find((vv: any) => vv.id === vendorId)
+    if (!v) { set({ apVendorId: '' }); return }
+    const terms = v.default_payment_terms || 'net_30'
+    const dueDate = calculateDueDate(formData.date, terms as PaymentTerm)
+    set({ apVendorId: vendorId, apVendor: v.vendor_name, apTerms: terms, apDue: dueDate })
+  }
+
+  const onTermsChange = (terms: string) => {
+    const dueDate = calculateDueDate(formData.date, terms as PaymentTerm)
+    set({ apTerms: terms, apDue: dueDate })
   }
 
   return (
@@ -94,12 +110,27 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
         </>}
 
         {t === 'accounts_payable' && <>
-          <div><span style={lbl}>Vendor / Seller Name</span><input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} /></div>
-          <div><span style={lbl}>Transaction Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
-            <div><span style={lbl}>Due Date</span><input type="date" value={formData.apDue} onChange={e => set({ apDue: e.target.value })} style={inp} /></div>
+          <div><span style={lbl}>Vendor</span>
+            {vendors.length > 0 ? (
+              <select value={formData.apVendorId || ''} onChange={e => onVendorPick(e.target.value)} style={inp}>
+                <option value="">— Pick a vendor or type new below —</option>
+                {vendors.filter((v: any) => v.is_active !== false).map((v: any) => (
+                  <option key={v.id} value={v.id}>{v.vendor_name} ({PAYMENT_TERM_LABELS[v.default_payment_terms as PaymentTerm] || 'Net 30'})</option>
+                ))}
+              </select>
+            ) : null}
+            <input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value, apVendorId: '' })} placeholder="Or type vendor name (new vendor)" style={{ ...inp, marginTop: vendors.length > 0 ? '6px' : 0 }} />
           </div>
+          <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => { set({ date: e.target.value }); if (formData.apTerms) set({ apDue: calculateDueDate(e.target.value, formData.apTerms as PaymentTerm) }) }} style={inp} /></div>
+            <div><span style={lbl}>Payment Terms</span>
+              <select value={formData.apTerms || 'net_30'} onChange={e => onTermsChange(e.target.value)} style={inp}>
+                {Object.entries(PAYMENT_TERM_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+          <div><span style={lbl}>Due Date (auto-calculated, can override)</span><input type="date" value={formData.apDue} onChange={e => set({ apDue: e.target.value })} style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => set({ apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => set({ amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
