@@ -59,6 +59,14 @@ export const emptyForm = {
   planFrequency: 'monthly',
   planPaymentAmount: '',
   planStartDate: '',
+
+  // --- supply_costs fields (added to fix TypeScript error) ---
+  supplyItem: '',
+  supplyUnit: '',
+  supplyCost: '',
+  supplyQty: '',
+  supplyTotalCost: '',
+  supplyVendor: '',
 }
 
 export default function Dashboard() {
