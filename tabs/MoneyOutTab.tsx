@@ -4,14 +4,16 @@ import { FONT, EXPENSE_CATEGORIES, DEDUCTIBILITY } from '@/lib/constants'
 import { fmt } from '@/lib/format'
 import SalesTaxSection from '@/components/SalesTaxSection'
 import VendorManager from '@/components/VendorManager'
+import RecordPaymentModal from '@/components/RecordPaymentModal'
 import { getAgingBucket, getBillStatus, AGING_BUCKET_LABELS, AGING_BUCKET_COLORS, PAYMENT_TERM_LABELS, daysOverdue, getRelevantDueDate, getPlanProgress, type AgingBucket, type PaymentTerm } from '@/lib/paymentTerms'
 
 export default function MoneyOutTab(p: any) {
-  const { C, expenses, payroll, accountsPayable, supplyCosts, sales, salesTaxRemittances, vendors, supabase, fetchData, startEdit, handleDelete, setEditingItem } = p
+  const { C, expenses, payroll, accountsPayable, supplyCosts, sales, salesTaxRemittances, vendors, billPayments, supabase, fetchData, startEdit, handleDelete, setEditingItem } = p
   const [view, setView] = useState<'expenses'|'payroll'>('expenses')
   const [apView, setApView] = useState<'aging'|'list'>('aging')
   const [showVendorManager, setShowVendorManager] = useState(false)
   const [expandedTiles, setExpandedTiles] = useState<Record<string, boolean>>({})
+  const [paymentModalBill, setPaymentModalBill] = useState<any>(null)
 
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
   const editBtn: React.CSSProperties = { background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '3px 8px', fontSize: '12px', color: C.muted, cursor: 'pointer', fontFamily: FONT }
@@ -23,7 +25,6 @@ export default function MoneyOutTab(p: any) {
 
   const toggle = (k: string) => setExpandedTiles(prev => ({ ...prev, [k]: !prev[k] }))
 
-  // Group bills by aging bucket
   const apByBucket = useMemo(() => {
     const buckets: Record<AgingBucket, any[]> = { not_due: [], '0_30': [], '31_60': [], '61_90': [], '90_plus': [], paid: [] }
     accountsPayable.forEach((bill: any) => {
@@ -45,6 +46,8 @@ export default function MoneyOutTab(p: any) {
     const days = relevantDue ? daysOverdue(relevantDue) : 0
     const isPlan = !!b.payment_plan
     const planProgress = isPlan ? getPlanProgress(b) : null
+    const billPmts = (billPayments || []).filter((p: any) => p.bill_id === b.id).sort((a: any, c: any) => c.payment_date.localeCompare(a.payment_date))
+    const expandKey = `bp_${b.id}`
     
     return (
       <div key={b.id} style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
@@ -86,7 +89,32 @@ export default function MoneyOutTab(p: any) {
           </div>
         )}
 
+        {/* Payment History (collapsible) */}
+        {billPmts.length > 0 && (
+          <div style={{ marginTop: '10px' }}>
+            <button onClick={() => toggle(expandKey)} style={{ background: 'none', border: 'none', color: C.teal, fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', padding: '4px 0', fontFamily: FONT, textTransform: 'uppercase' }}>
+              {expandedTiles[expandKey] ? '▲ Hide' : '▼ Show'} Payment History ({billPmts.length})
+            </button>
+            {expandedTiles[expandKey] && (
+              <div style={{ background: C.inputBg, borderRadius: '8px', padding: '8px', marginTop: '6px' }}>
+                {billPmts.map((pmt: any) => (
+                  <div key={pmt.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${C.border}`, fontSize: '12px' }}>
+                    <div>
+                      <div style={{ color: C.text, fontWeight: 600 }}>{pmt.payment_date}</div>
+                      <div style={{ color: C.muted, fontSize: '11px' }}>{pmt.payment_method?.replace(/_/g, ' ')}{pmt.reference_number ? ` · ${pmt.reference_number}` : ''}</div>
+                    </div>
+                    <div style={{ fontWeight: 700, color: C.teal }}>{fmt(Number(pmt.amount))}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+          {owed > 0 && (
+            <button onClick={() => setPaymentModalBill(b)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Record Payment</button>
+          )}
           <button onClick={() => startEdit('accounts_payable', b)} style={editBtn}>Update</button>
           <button onClick={() => handleDelete('accounts_payable', b.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
         </div>
@@ -96,6 +124,11 @@ export default function MoneyOutTab(p: any) {
 
   return (
     <div>
+      {/* Record Payment Modal */}
+      {paymentModalBill && (
+        <RecordPaymentModal bill={paymentModalBill} C={C} supabase={supabase} fetchData={fetchData} onClose={() => setPaymentModalBill(null)} />
+      )}
+
       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
         {(['expenses','payroll'] as const).map(v => (
           <button key={v} onClick={() => setView(v)} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: `1px solid ${view===v?C.teal:C.border}`, background: view===v?'rgba(45,191,184,0.1)':C.cardBg, fontSize: '14px', fontWeight: view===v?900:400, color: view===v?C.teal:C.muted, cursor: 'pointer', fontFamily: FONT, textTransform: 'capitalize' }}>{v}</button>
@@ -108,12 +141,10 @@ export default function MoneyOutTab(p: any) {
           <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(opExpenses + totalAPOwed)}</div>
         </div>
 
-        {/* Vendor Manager (toggle) */}
         {showVendorManager && (
           <VendorManager C={C} vendors={vendors} supabase={supabase} fetchData={fetchData} onClose={() => setShowVendorManager(false)} />
         )}
 
-        {/* AP HEADER with view toggle */}
         <div style={{ ...card, border: `1px solid rgba(240,192,64,0.4)`, padding: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <div>
@@ -126,7 +157,6 @@ export default function MoneyOutTab(p: any) {
             </div>
           </div>
 
-          {/* View toggle: Aging vs List */}
           <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
             {(['aging','list'] as const).map(v => (
               <button key={v} onClick={() => setApView(v)} style={{ flex: 1, padding: '8px', borderRadius: '8px', border: `1px solid ${apView===v?C.teal:C.border}`, background: apView===v?'rgba(45,191,184,0.1)':C.cardBg, fontSize: '12px', fontWeight: apView===v?700:400, color: apView===v?C.teal:C.muted, cursor: 'pointer', fontFamily: FONT, textTransform: 'capitalize' }}>{v === 'aging' ? 'Aging Buckets' : 'List View'}</button>
@@ -136,7 +166,6 @@ export default function MoneyOutTab(p: any) {
           {accountsPayable.length === 0 ? (
             <div style={{ padding: '20px', textAlign: 'center', color: C.muted, fontSize: '13px' }}>No accounts payable yet</div>
           ) : apView === 'aging' ? (
-            // AGING BUCKET VIEW
             <div>
               {bucketOrder.map((bucket) => {
                 const bills = apByBucket[bucket]
@@ -166,7 +195,6 @@ export default function MoneyOutTab(p: any) {
               })}
             </div>
           ) : (
-            // LIST VIEW (simple list, sorted by due date)
             <div style={{ background: C.cardBg, borderRadius: '10px', overflow: 'hidden' }}>
               {[...accountsPayable].sort((a: any, b: any) => {
                 const da = getRelevantDueDate(a) || a.invoice_date || ''
@@ -216,7 +244,6 @@ export default function MoneyOutTab(p: any) {
           )
         })}
 
-        {/* Sales Tax Section at the bottom */}
         <SalesTaxSection C={C} sales={sales} salesTaxRemittances={salesTaxRemittances} fetchData={fetchData} />
       </>}
 
