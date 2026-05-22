@@ -4,6 +4,7 @@ import { FONT, EXPENSE_CATEGORIES, DEDUCTIBILITY } from '@/lib/constants'
 import { fmt } from '@/lib/format'
 import SalesTaxSection from '@/components/SalesTaxSection'
 import VendorManager from '@/components/VendorManager'
+import { getAgingBucket, getBillStatus, AGING_BUCKET_LABELS, AGING_BUCKET_COLORS, PAYMENT_TERM_LABELS, daysOverdue, getRelevantDueDate, getPlanProgress, type AgingBucket, type PaymentTerm } from '@/lib/paymentTerms'
 import { getAgingBucket, getBillStatus, AGING_BUCKET_LABELS, AGING_BUCKET_COLORS, PAYMENT_TERM_LABELS, daysOverdue, type AgingBucket, type PaymentTerm } from '@/lib/paymentTerms'
 
 export default function MoneyOutTab(p: any) {
@@ -41,7 +42,11 @@ export default function MoneyOutTab(p: any) {
     const total = Number(b.total_amount || 0)
     const owed = total - paid
     const status = getBillStatus(b)
-    const days = b.due_date ? daysOverdue(b.due_date) : 0
+    const relevantDue = getRelevantDueDate(b)
+    const days = relevantDue ? daysOverdue(relevantDue) : 0
+    const isPlan = !!b.payment_plan
+    const planProgress = isPlan ? getPlanProgress(b) : null
+    
     return (
       <div key={b.id} style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -49,12 +54,15 @@ export default function MoneyOutTab(p: any) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 700, fontSize: '15px', color: C.text }}>{b.vendor_name}</span>
               <span style={{ padding: '2px 6px', borderRadius: '4px', background: `${status.color}20`, color: status.color, fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }}>{status.label}</span>
+              {isPlan && <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(124,58,237,0.15)', color: '#7C3AED', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }}>📅 Plan</span>}
             </div>
             {b.description && <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{b.description}</div>}
             <div style={{ fontSize: '11px', color: C.muted, marginTop: '4px' }}>
               Invoice {b.invoice_date}
-              {b.due_date && ` · Due ${b.due_date}`}
-              {b.payment_terms && ` · ${PAYMENT_TERM_LABELS[b.payment_terms as PaymentTerm] || b.payment_terms}`}
+              {!isPlan && b.due_date && ` · Due ${b.due_date}`}
+              {isPlan && relevantDue && ` · Next payment ${relevantDue}`}
+              {!isPlan && b.payment_terms && ` · ${PAYMENT_TERM_LABELS[b.payment_terms as PaymentTerm] || b.payment_terms}`}
+              {isPlan && b.plan_frequency && ` · ${b.plan_frequency === 'weekly' ? 'Weekly' : b.plan_frequency === 'biweekly' ? 'Biweekly' : 'Monthly'} $${Number(b.plan_payment_amount).toFixed(2)}`}
               {days > 0 && owed > 0 && <span style={{ color: '#ef4444', fontWeight: 'bold' }}> · {days} days late</span>}
             </div>
           </div>
@@ -63,6 +71,22 @@ export default function MoneyOutTab(p: any) {
             <div style={{ fontSize: '11px', color: C.muted }}>of {fmt(total)}</div>
           </div>
         </div>
+
+        {/* PAYMENT PLAN PROGRESS BAR */}
+        {isPlan && planProgress && (
+          <div style={{ marginTop: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', color: C.muted, fontWeight: 600 }}>
+                Payment {planProgress.paymentsMade} of {planProgress.totalPayments}
+              </span>
+              <span style={{ fontSize: '11px', color: C.muted, fontWeight: 600 }}>{planProgress.percentPaid.toFixed(0)}% paid</span>
+            </div>
+            <div style={{ width: '100%', height: '8px', background: C.inputBg, borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ width: `${planProgress.percentPaid}%`, height: '100%', background: `linear-gradient(90deg, ${C.teal}, #7C3AED)`, transition: 'width 0.3s ease' }} />
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
           <button onClick={() => startEdit('accounts_payable', b)} style={editBtn}>Update</button>
           <button onClick={() => handleDelete('accounts_payable', b.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
