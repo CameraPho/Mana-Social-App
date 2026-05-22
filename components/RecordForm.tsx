@@ -26,19 +26,21 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
     return { total, units, cpu: units > 0 ? total / units : 0 }
   }
 
-  // When vendor is picked, auto-fill terms + due date
-  const onVendorPick = (vendorId: string) => {
-    const v = vendors.find((vv: any) => vv.id === vendorId)
-    if (!v) { set({ apVendorId: '' }); return }
-    const terms = v.default_payment_terms || 'net_30'
-    const dueDate = calculateDueDate(formData.date, terms as PaymentTerm)
-    set({ apVendorId: vendorId, apVendor: v.vendor_name, apTerms: terms, apDue: dueDate })
+  const onTermsChange = (terms: string) => {
+    if (terms === 'custom') {
+      // Custom = no auto-calc, user sets due date or plan drives it
+      set({ apTerms: terms })
+    } else {
+      const dueDate = calculateDueDate(formData.date, terms as PaymentTerm)
+      set({ apTerms: terms, apDue: dueDate })
+    }
   }
 
-  const onTermsChange = (terms: string) => {
-    const dueDate = calculateDueDate(formData.date, terms as PaymentTerm)
-    set({ apTerms: terms, apDue: dueDate })
-  }
+  const matchedVendor = vendors.find((v: any) => 
+    formData.apVendor && 
+    v.vendor_name.toLowerCase() === formData.apVendor.toLowerCase() && 
+    v.is_active !== false
+  )
 
   return (
     <div style={{ background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.teal}`, marginBottom: '12px', fontFamily: FONT }}>
@@ -110,23 +112,17 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
         </>}
 
         {t === 'accounts_payable' && <>
-          <div><span style={lbl}>Vendor</span>
-            <input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value })} placeholder="e.g. Brett, ACD Distribution, Oscar" style={inp} />
-            {vendors.length > 0 && formData.apVendor && (
-              (() => {
-                const matched = vendors.find((v: any) => v.vendor_name.toLowerCase() === formData.apVendor.toLowerCase() && v.is_active !== false)
-                if (matched && !formData.apTerms_userSet) {
-                  return <div style={{ marginTop: '6px', padding: '6px 8px', background: 'rgba(45,191,184,0.06)', borderRadius: '6px', fontSize: '11px', color: C.teal }}>
-                    💾 Saved vendor — default terms: {PAYMENT_TERM_LABELS[matched.default_payment_terms as PaymentTerm] || 'Net 30'}
-                  </div>
-                }
-                return null
-              })()
+          <div><span style={lbl}>Vendor / Seller Name</span>
+            <input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value })} placeholder="e.g. Brett, Oscar, ACD Distribution" style={inp} />
+            {matchedVendor && (
+              <div style={{ marginTop: '6px', padding: '6px 10px', background: 'rgba(45,191,184,0.06)', borderRadius: '6px', fontSize: '11px', color: C.teal }}>
+                💾 Saved vendor — default terms: {PAYMENT_TERM_LABELS[matchedVendor.default_payment_terms as PaymentTerm] || 'Net 30'}
+              </div>
             )}
           </div>
-          <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
+          <div><span style={lbl}>Transaction Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => { set({ date: e.target.value, apDue: formData.apTerms === 'custom' ? formData.apDue : calculateDueDate(e.target.value, (formData.apTerms || 'net_30') as PaymentTerm) }) }} style={inp} /></div>
+            <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => { const newDate = e.target.value; set({ date: newDate, apDue: formData.apTerms === 'custom' ? formData.apDue : calculateDueDate(newDate, (formData.apTerms || 'net_30') as PaymentTerm) }) }} style={inp} /></div>
             <div><span style={lbl}>Payment Terms</span>
               <select value={formData.apTerms || 'net_30'} onChange={e => onTermsChange(e.target.value)} style={inp}>
                 {Object.entries(PAYMENT_TERM_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
