@@ -250,4 +250,45 @@ export default function Dashboard() {
 
   return (
     <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text }}>
-      <div style={{ maxWidth:
+      <div style={{ maxWidth: '500px', margin: '0 auto', padding: '16px' }}>
+        <header style={{ marginBottom: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ fontWeight: 900, color: C.navy, fontSize: '17px', fontFamily: FONT }}>MANA SOCIAL LLC</div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button onClick={cycleTheme} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 10px', fontSize: '15px', cursor: 'pointer' }}>{themeIcon}</button>
+              <button onClick={() => supabase.auth.signOut()} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>Sign out</button>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: `2px solid ${C.border}`, fontWeight: 'bold', background: C.white, fontFamily: FONT, fontSize: '14px', color: C.text }}>
+              <option value={2026}>2026</option>
+            </select>
+            <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} style={{ flex: 2, padding: '10px', borderRadius: '10px', border: `2px solid ${C.border}`, fontWeight: 'bold', background: C.white, fontFamily: FONT, fontSize: '14px', color: C.text }}>
+              <option value={0}>Full Year</option>
+              {Array.from({ length: 12 }, (_, i) => <option key={i} value={i + 1}>{new Date(0, i).toLocaleString('default', { month: 'long' })}</option>)}
+            </select>
+          </div>
+        </header>
+
+        {editingItem ? (
+          <RecordForm table={editingItem.table} isEditing={!!editingItem.data?.id} formData={formData} setFormData={setFormData} onSave={handleSave} onClose={() => { setEditingItem(null); setFormData(emptyForm) }} C={C} vendors={vendors} />
+        ) : (
+          <>
+            {activeTab === 'home'    && <HomeTab {...shared} setActiveTab={setActiveTab} />}
+            {activeTab === 'in'      && <MoneyInTab {...shared} />}
+            {activeTab === 'out'     && <MoneyOutTab {...shared} />}
+            {activeTab === 'bank'    && <BankTab {...shared} />}
+            {activeTab === 'reports' && <ReportsTab {...shared} />}
+          </>
+        )}
+
+        {!editingItem && (
+          <button onClick={() => setIsQuickAddOpen(true)} style={{ position: 'fixed', bottom: '120px', right: '20px', width: '62px', height: '62px', borderRadius: '31px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', fontSize: '30px', border: '3px solid #fff', boxShadow: '0 8px 16px rgba(0,0,0,0.2)', zIndex: 500, cursor: 'pointer' }}>+</button>
+        )}
+
+        <QuickAddModal open={isQuickAddOpen} onClose={() => setIsQuickAddOpen(false)} onPick={(table) => setEditingItem({ table })} onBulk={() => setEditingItem({ table: 'expenses' })} onDraw={() => setEditingItem({ table: 'disbursements' })} C={C} />
+      </div>
+      <Nav activeTab={activeTab} setActiveTab={setActiveTab} C={C} isDark={isDark} />
+    </div>
+  )
+}
