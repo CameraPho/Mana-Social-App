@@ -22,7 +22,8 @@ export const emptyForm = {
   userName: 'Cam', paidByCompany: true, assetCategory: 'Equipment', assetLife: '5',
   payPeriod: '', hoursWorked: '', hourlyRate: '16', rothEligible: '', rothContributed: '',
   bankName: 'Chase', accountType: 'Checking', accountLast4: '', bankBalance: '',
-  apVendor: '', apTotal: '', apPaid: '', apDue: '', supplyItem: '', supplyUnit: '', supplyCost: '',
+  apVendor: '', apTotal: '', apPaid: '', apDue: '', apTerms: 'net_30', apVendorId: '',
+  supplyItem: '', supplyUnit: '', supplyCost: '',
 }
 
 export default function Dashboard() {
@@ -64,6 +65,7 @@ export default function Dashboard() {
   const [memberLoans, setMemberLoans] = useState<any[]>([])
   const [memberLoanPayments, setMemberLoanPayments] = useState<any[]>([])
   const [salesTaxRemittances, setSalesTaxRemittances] = useState<any[]>([])
+  const [vendors, setVendors] = useState<any[]>([])
 
   useEffect(() => {
     const link = document.createElement('link')
@@ -78,7 +80,7 @@ export default function Dashboard() {
       const d = new Date(i[key])
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth)
     })
-    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst, vm, col, eq, mln, mlp, str] = await Promise.all([
+    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst, vm, col, eq, mln, mlp, str, ven] = await Promise.all([
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
       supabase.from('accounts_payable').select('*').order('invoice_date', { ascending: false }),
@@ -97,6 +99,7 @@ export default function Dashboard() {
       supabase.from('member_loans').select('*').eq('is_active', true).order('loan_date', { ascending: false }),
       supabase.from('member_loan_payments').select('*').order('payment_date', { ascending: false }),
       supabase.from('sales_tax_remittances').select('*').order('quarter_year', { ascending: false }),
+      supabase.from('vendors').select('*').order('vendor_name', { ascending: true }),
     ])
     setSales(fd(s.data || [], 'sale_date'))
     setExpenses(fd(e.data || [], 'purchase_date'))
@@ -116,6 +119,7 @@ export default function Dashboard() {
     setMemberLoans(mln.data || [])
     setMemberLoanPayments(mlp.data || [])
     setSalesTaxRemittances(str.data || [])
+    setVendors(ven.data || [])
   }, [selectedYear, selectedMonth, supabase])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -123,7 +127,7 @@ export default function Dashboard() {
   const startEdit = (table: string, row: any) => {
     const pre: any = { ...emptyForm, date: row.sale_date || row.purchase_date || row.due_date || row.pay_date || row.disbursement_date || row.date || emptyForm.date }
     if (table === 'sales') { pre.label = row.platform; pre.amount = String(row.amount); pre.fees = String(row.fees || 0); pre.shipping = String(row.shipping || 0); pre.isTaxable = !!row.is_taxable; pre.taxRate = String(row.tax_rate_applied ? (Number(row.tax_rate_applied) * 100).toFixed(2) : '7.75') }
-    else if (table === 'accounts_payable') { pre.apVendor = row.vendor_name; pre.label = row.description || ''; pre.apTotal = String(row.total_amount); pre.amountPaid = String(row.amount_paid || 0); pre.apDue = row.due_date || ''; pre.notes = row.notes || '' }
+    else if (table === 'accounts_payable') { pre.apVendor = row.vendor_name; pre.label = row.description || ''; pre.apTotal = String(row.total_amount); pre.amountPaid = String(row.amount_paid || 0); pre.apDue = row.due_date || ''; pre.apTerms = row.payment_terms || 'net_30'; pre.apVendorId = row.vendor_id || ''; pre.notes = row.notes || '' }
     else if (table === 'expenses') { pre.label = row.notes || ''; pre.amount = String(row.cost); pre.category = row.category || 'Other'; pre.userName = row.user_name || 'Cam'; pre.paidByCompany = row.paid_by_company ?? true }
     else if (table === 'payroll') { pre.label = row.employee_name; pre.amount = String(row.amount); pre.hoursWorked = String(row.hours_worked || ''); pre.hourlyRate = String(row.hourly_rate || 16); pre.payPeriod = row.pay_period || '' }
     else if (table === 'disbursements') { pre.label = row.recipient; pre.amount = String(row.amount); pre.notes = row.notes || '' }
@@ -139,6 +143,7 @@ export default function Dashboard() {
     const t = editingItem?.table
     if (!t) return
     const { getEntity } = await import('@/lib/format')
+    const { calculateDueDate } = await import('@/lib/paymentTerms')
     let payload: any = {}
     if (t === 'sales') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
@@ -163,7 +168,24 @@ export default function Dashboard() {
     } else if (t === 'accounts_payable') {
       if (!formData.apTotal || !formData.apVendor) return alert('Missing fields')
       const cardCount = parseInt((formData as any).apCardCount || '0') || 0
-      payload = { vendor_name: formData.apVendor, description: formData.label, invoice_date: formData.date, due_date: formData.apDue || formData.date, total_amount: Number(formData.apTotal), amount_paid: Number(formData.amountPaid || 0), entity: getEntity(formData.date), notes: formData.notes + (cardCount > 0 ? ` | ${cardCount.toLocaleString()} cards @ $${(parseFloat(formData.apTotal)/cardCount).toFixed(4)}/card` : '') }
+      const terms = (formData as any).apTerms || 'net_30'
+      const dueDate = formData.apDue || calculateDueDate(formData.date, terms as any)
+      const total = Number(formData.apTotal)
+      const paid = Number(formData.amountPaid || 0)
+      const status = paid >= total ? 'paid' : paid > 0 ? 'partial' : 'open'
+      payload = { 
+        vendor_name: formData.apVendor, 
+        vendor_id: (formData as any).apVendorId || null,
+        description: formData.label, 
+        invoice_date: formData.date, 
+        due_date: dueDate, 
+        payment_terms: terms,
+        total_amount: total, 
+        amount_paid: paid, 
+        status,
+        entity: getEntity(formData.date), 
+        notes: formData.notes + (cardCount > 0 ? ` | ${cardCount.toLocaleString()} cards @ $${(parseFloat(formData.apTotal)/cardCount).toFixed(4)}/card` : '') 
+      }
     } else if (t === 'expenses') {
       if (!formData.amount) return alert('Missing amount')
       payload = { category: formData.category, cost: Number(formData.amount), purchase_date: formData.date, notes: formData.label, entity: getEntity(formData.date), user_name: formData.userName || 'Cam', paid_by_company: formData.paidByCompany }
@@ -224,49 +246,8 @@ export default function Dashboard() {
     sales, expenses, accountsPayable, payroll, disbursements, mileageLog,
     cogsInventory, allCogsInventory, assets, bankAccounts, supplyCosts, reconTransactions,
     vendorMappings, collections, equityTransactions, memberLoans, memberLoanPayments,
-    salesTaxRemittances, setEditingItem, supabase }
+    salesTaxRemittances, vendors, setEditingItem, supabase }
 
   return (
     <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text }}>
-      <div style={{ maxWidth: '500px', margin: '0 auto', padding: '16px' }}>
-        <header style={{ marginBottom: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ fontWeight: 900, color: C.navy, fontSize: '17px', fontFamily: FONT }}>MANA SOCIAL LLC</div>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button onClick={cycleTheme} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 10px', fontSize: '15px', cursor: 'pointer' }}>{themeIcon}</button>
-              <button onClick={() => supabase.auth.signOut()} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>Sign out</button>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: `2px solid ${C.border}`, fontWeight: 'bold', background: C.white, fontFamily: FONT, fontSize: '14px', color: C.text }}>
-              <option value={2026}>2026</option>
-            </select>
-            <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} style={{ flex: 2, padding: '10px', borderRadius: '10px', border: `2px solid ${C.border}`, fontWeight: 'bold', background: C.white, fontFamily: FONT, fontSize: '14px', color: C.text }}>
-              <option value={0}>Full Year</option>
-              {Array.from({ length: 12 }, (_, i) => <option key={i} value={i + 1}>{new Date(0, i).toLocaleString('default', { month: 'long' })}</option>)}
-            </select>
-          </div>
-        </header>
-
-        {editingItem ? (
-          <RecordForm table={editingItem.table} isEditing={!!editingItem.data?.id} formData={formData} setFormData={setFormData} onSave={handleSave} onClose={() => { setEditingItem(null); setFormData(emptyForm) }} C={C} />
-        ) : (
-          <>
-            {activeTab === 'home'    && <HomeTab {...shared} setActiveTab={setActiveTab} />}
-            {activeTab === 'in'      && <MoneyInTab {...shared} />}
-            {activeTab === 'out'     && <MoneyOutTab {...shared} />}
-            {activeTab === 'bank'    && <BankTab {...shared} />}
-            {activeTab === 'reports' && <ReportsTab {...shared} />}
-          </>
-        )}
-
-        {!editingItem && (
-          <button onClick={() => setIsQuickAddOpen(true)} style={{ position: 'fixed', bottom: '120px', right: '20px', width: '62px', height: '62px', borderRadius: '31px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', fontSize: '30px', border: '3px solid #fff', boxShadow: '0 8px 16px rgba(0,0,0,0.2)', zIndex: 500, cursor: 'pointer' }}>+</button>
-        )}
-
-        <QuickAddModal open={isQuickAddOpen} onClose={() => setIsQuickAddOpen(false)} onPick={(table) => setEditingItem({ table })} onBulk={() => setEditingItem({ table: 'expenses' })} onDraw={() => setEditingItem({ table: 'disbursements' })} C={C} />
-      </div>
-      <Nav activeTab={activeTab} setActiveTab={setActiveTab} C={C} isDark={isDark} />
-    </div>
-  )
-}
+      <div style={{ maxWidth:
