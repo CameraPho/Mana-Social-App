@@ -85,8 +85,6 @@ export default function MoneyOutTab(p: any) {
           <div style={{ fontSize: '30px', fontWeight: 900, color: '#fda4af' }}>{fmt(opExpenses + totalAPOwed)}</div>
         </div>
 
-        <SalesTaxSection C={C} sales={sales} salesTaxRemittances={salesTaxRemittances} fetchData={fetchData} />
-
         {/* Vendor Manager (toggle) */}
         {showVendorManager && (
           <VendorManager C={C} vendors={vendors} supabase={supabase} fetchData={fetchData} onClose={() => setShowVendorManager(false)} />
@@ -194,6 +192,7 @@ export default function MoneyOutTab(p: any) {
             </div>
           )
         })}
+        <SalesTaxSection C={C} sales={sales} salesTaxRemittances={salesTaxRemittances} fetchData={fetchData} />
       </>}
 
       {view === 'payroll' && <>
