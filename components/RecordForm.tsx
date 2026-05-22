@@ -42,7 +42,7 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
         {t === 'supply_costs' && <>
           <div><span style={lbl}>Supply Item Name</span><input value={formData.supplyItem} onChange={e => set({ supplyItem: e.target.value })} placeholder="e.g. Penny Sleeve, Forever Stamp" style={inp} /></div>
           <div><span style={lbl}>Unit Description</span><input value={formData.supplyUnit} onChange={e => set({ supplyUnit: e.target.value })} placeholder="e.g. per sleeve, per stamp" style={inp} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          : '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Total Cost ($)</span><input type="number" step="0.01" value={formData.supplyTotalCost || ''} onChange={e => { const tc = e.target.value; const qty = parseFloat(formData.supplyQty || '1') || 1; set({ supplyTotalCost: tc, supplyCost: tc ? (parseFloat(tc)/qty).toFixed(4) : '' }) }} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Quantity</span><input type="number" step="1" value={formData.supplyQty || ''} onChange={e => { const qty = e.target.value; const tc = parseFloat(formData.supplyTotalCost || '0'); set({ supplyQty: qty, supplyCost: tc && qty ? (tc/parseFloat(qty)).toFixed(4) : '' }) }} placeholder="1" style={inp} /></div>
           </div>
@@ -58,11 +58,11 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
             </select>
           </div>
           <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Epson DS-530 II Scanner" style={inp} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          : '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Cost ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Tax Paid ($)</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          : '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Useful Life (yrs)</span><input type="number" value={formData.assetLife} onChange={e => set({ assetLife: e.target.value })} style={inp} /></div>
             <div><span style={lbl}>Purchased By</span>
               <select value={formData.userName} onChange={e => set({ userName: e.target.value })} style={inp}>
@@ -85,7 +85,7 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
               <option value="Checking">Checking</option><option value="Savings">Savings</option><option value="Credit">Credit Card</option>
             </select>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          : '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Last 4</span><input value={formData.accountLast4} onChange={e => set({ accountLast4: e.target.value })} placeholder="2035" style={inp} /></div>
             <div><span style={lbl}>As of Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
           </div>
@@ -96,11 +96,11 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
         {t === 'accounts_payable' && <>
           <div><span style={lbl}>Vendor / Seller Name</span><input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} /></div>
           <div><span style={lbl}>Transaction Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          : '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
             <div><span style={lbl}>Due Date</span><input type="date" value={formData.apDue} onChange={e => set({ apDue: e.target.value })} style={inp} /></div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          : '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => set({ apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => set({ amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
           </div>
@@ -181,12 +181,34 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
             </div>
           </> : <div><span style={lbl}>{t==='sales'?'Platform':t==='payroll'?'Employee':'Recipient'}</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="..." style={inp} /></div>}
           <div><span style={lbl}>Amount ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-          {t==='sales' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <div><span style={lbl}>Fees ($)</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
-              <div><span style={lbl}>Shipping Cost ($)</span><input type="number" step="0.01" value={formData.shipping} onChange={e => set({ shipping: e.target.value })} placeholder="0.00" style={inp} /></div>
-            </div>
-          )}
+          {t==='sales' && <>
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+    <div><span style={lbl}>Fees ($)</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
+    <div><span style={lbl}>Shipping Cost ($)</span><input type="number" step="0.01" value={formData.shipping} onChange={e => set({ shipping: e.target.value })} placeholder="0.00" style={inp} /></div>
+  </div>
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+    <div><span style={lbl}>Sales Tax Applied</span>
+      <select value={String(formData.isTaxable)} onChange={e => set({ isTaxable: e.target.value === 'true' })} style={inp}>
+        <option value="false">No — Tax exempt / online</option>
+        <option value="true">Yes — In-person CA sale</option>
+      </select>
+    </div>
+    <div><span style={lbl}>Tax Rate (%)</span><input type="number" step="0.01" value={formData.taxRate} onChange={e => set({ taxRate: e.target.value })} placeholder="7.75" disabled={!formData.isTaxable} style={{ ...inp, opacity: formData.isTaxable ? 1 : 0.4 }} /></div>
+  </div>
+  {formData.isTaxable && formData.amount && (() => {
+    const gross = parseFloat(formData.amount) || 0
+    const rate = (parseFloat(formData.taxRate) || 0) / 100
+    const net = rate > 0 ? gross / (1 + rate) : gross
+    const tax = gross - net
+    return (
+      <div style={{ padding: '10px', borderRadius: '8px', background: 'rgba(45,191,184,0.08)', fontSize: '13px', color: '#1A7A75', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+        <span>Net: <strong>{fmt(net)}</strong></span>
+        <span>Tax: <strong>{fmt(tax)}</strong></span>
+        <span>Gross: <strong>{fmt(gross)}</strong></span>
+      </div>
+    )
+  })()}
+</>}
           {t==='payroll' && <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div><span style={lbl}>Hours Worked</span><input type="number" step="0.5" value={formData.hoursWorked} onChange={e => set({ hoursWorked: e.target.value })} placeholder="10" style={inp} /></div>
