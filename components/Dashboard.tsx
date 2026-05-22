@@ -15,6 +15,7 @@ import ReportsTab from '@/tabs/ReportsTab'
 export const emptyForm = {
   label: '', amount: '', date: today(),
   fees: '', shipping: '', notes: '', itemCount: '', category: 'Supplies & Packaging',
+  isTaxable: false, taxRate: '7.75',
   miles: '', mileFrom: '', mileTo: '', milePurpose: '',
   cogsType: 'collection', cogsSet: '', cogsCost: '', cogsQty: '1',
   cogsCards: '', cogsCardsPerBox: '', cogsEstValue: '', amountPaid: '',
@@ -78,7 +79,6 @@ export default function Dashboard() {
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth)
     })
     const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst, vm, col, eq, mln, mlp, str] = await Promise.all([
-      supabase.from('sales_tax_remittances').select('*').order('quarter_year', { ascending: false }),
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
       supabase.from('accounts_payable').select('*').order('invoice_date', { ascending: false }),
@@ -96,6 +96,7 @@ export default function Dashboard() {
       supabase.from('equity_transactions').select('*').order('transaction_date', { ascending: false }),
       supabase.from('member_loans').select('*').eq('is_active', true).order('loan_date', { ascending: false }),
       supabase.from('member_loan_payments').select('*').order('payment_date', { ascending: false }),
+      supabase.from('sales_tax_remittances').select('*').order('quarter_year', { ascending: false }),
     ])
     setSales(fd(s.data || [], 'sale_date'))
     setExpenses(fd(e.data || [], 'purchase_date'))
@@ -114,13 +115,14 @@ export default function Dashboard() {
     setEquityTransactions(eq.data || [])
     setMemberLoans(mln.data || [])
     setMemberLoanPayments(mlp.data || [])
+    setSalesTaxRemittances(str.data || [])
   }, [selectedYear, selectedMonth, supabase])
 
   useEffect(() => { fetchData() }, [fetchData])
 
   const startEdit = (table: string, row: any) => {
     const pre: any = { ...emptyForm, date: row.sale_date || row.purchase_date || row.due_date || row.pay_date || row.disbursement_date || row.date || emptyForm.date }
-    if (table === 'sales') { pre.label = row.platform; pre.amount = String(row.amount); pre.fees = String(row.fees || 0); pre.shipping = String(row.shipping || 0) }
+    if (table === 'sales') { pre.label = row.platform; pre.amount = String(row.amount); pre.fees = String(row.fees || 0); pre.shipping = String(row.shipping || 0); pre.isTaxable = !!row.is_taxable; pre.taxRate = String(row.tax_rate_applied ? (Number(row.tax_rate_applied) * 100).toFixed(2) : '7.75') }
     else if (table === 'accounts_payable') { pre.apVendor = row.vendor_name; pre.label = row.description || ''; pre.apTotal = String(row.total_amount); pre.amountPaid = String(row.amount_paid || 0); pre.apDue = row.due_date || ''; pre.notes = row.notes || '' }
     else if (table === 'expenses') { pre.label = row.notes || ''; pre.amount = String(row.cost); pre.category = row.category || 'Other'; pre.userName = row.user_name || 'Cam'; pre.paidByCompany = row.paid_by_company ?? true }
     else if (table === 'payroll') { pre.label = row.employee_name; pre.amount = String(row.amount); pre.hoursWorked = String(row.hours_worked || ''); pre.hourlyRate = String(row.hourly_rate || 16); pre.payPeriod = row.pay_period || '' }
@@ -140,7 +142,24 @@ export default function Dashboard() {
     let payload: any = {}
     if (t === 'sales') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
-      payload = { platform: formData.label, amount: Number(formData.amount), fees: Number(formData.fees || 0), shipping: Number(formData.shipping || 0), sale_date: formData.date, period_start: formData.date, period_end: formData.date, entity: getEntity(formData.date), net_sales: Number(formData.amount) - Number(formData.fees || 0), num_orders: editingItem!.data?.num_orders ?? 1 }
+      const gross = Number(formData.amount)
+      const rate = formData.isTaxable ? (Number(formData.taxRate) || 0) / 100 : 0
+      const tax = rate > 0 ? gross - (gross / (1 + rate)) : 0
+      payload = { 
+        platform: formData.label, 
+        amount: gross, 
+        fees: Number(formData.fees || 0), 
+        shipping: Number(formData.shipping || 0), 
+        sale_date: formData.date, 
+        period_start: formData.date, 
+        period_end: formData.date, 
+        entity: getEntity(formData.date), 
+        net_sales: gross - Number(formData.fees || 0), 
+        num_orders: editingItem!.data?.num_orders ?? 1,
+        is_taxable: !!formData.isTaxable,
+        tax_rate_applied: rate,
+        sales_tax_collected: Math.round(tax * 100) / 100,
+      }
     } else if (t === 'accounts_payable') {
       if (!formData.apTotal || !formData.apVendor) return alert('Missing fields')
       const cardCount = parseInt((formData as any).apCardCount || '0') || 0
