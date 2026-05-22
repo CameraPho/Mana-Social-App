@@ -12,6 +12,7 @@ export type PaymentTerm =
   | 'net_90'
   | 'eom'
   | '2_10_net_30'
+  | 'custom'
 
 export type PaymentFrequency = 'weekly' | 'biweekly' | 'monthly'
 
@@ -26,6 +27,7 @@ export const PAYMENT_TERM_LABELS: Record<PaymentTerm, string> = {
   net_90:         'Net 90',
   eom:            'End of Month',
   '2_10_net_30':  '2/10 Net 30',
+  custom:         'Custom (Payment Plan)',
 }
 
 export const PAYMENT_FREQUENCY_LABELS: Record<PaymentFrequency, string> = {
@@ -34,7 +36,7 @@ export const PAYMENT_FREQUENCY_LABELS: Record<PaymentFrequency, string> = {
   monthly:  'Monthly',
 }
 
-const TERM_DAYS: Record<PaymentTerm, number | 'eom'> = {
+const TERM_DAYS: Record<PaymentTerm, number | 'eom' | 'custom'> = {
   due_on_receipt: 0,
   net_7:          7,
   net_10:         10,
@@ -45,6 +47,7 @@ const TERM_DAYS: Record<PaymentTerm, number | 'eom'> = {
   net_90:         90,
   eom:            'eom',
   '2_10_net_30':  30,
+  custom:         'custom',
 }
 
 export function calculateDueDate(invoiceDate: string, terms: PaymentTerm): string {
@@ -53,6 +56,10 @@ export function calculateDueDate(invoiceDate: string, terms: PaymentTerm): strin
   if (days === 'eom') {
     const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0)
     return lastDay.toISOString().slice(0, 10)
+  }
+  if (days === 'custom') {
+    // Custom terms — caller sets due date manually OR via payment plan
+    return invoiceDate
   }
   d.setDate(d.getDate() + (days as number))
   return d.toISOString().slice(0, 10)
@@ -66,7 +73,7 @@ export function calculatePlanNextDue(
   amountPaid: number,
   totalAmount: number
 ): string {
-  if (amountPaid >= totalAmount) return startDate  // fully paid — doesn't matter
+  if (amountPaid >= totalAmount) return startDate
   const paymentsMade = Math.floor(amountPaid / paymentAmount)
   const d = new Date(startDate + 'T00:00:00')
   if (frequency === 'weekly') d.setDate(d.getDate() + paymentsMade * 7)
@@ -75,7 +82,6 @@ export function calculatePlanNextDue(
   return d.toISOString().slice(0, 10)
 }
 
-// Generate all scheduled payment dates for a plan
 export function generatePaymentSchedule(
   startDate: string,
   frequency: PaymentFrequency,
@@ -129,7 +135,6 @@ export const AGING_BUCKET_COLORS: Record<AgingBucket, string> = {
   paid:     '#10B981',
 }
 
-// For payment plan bills, use plan_next_due instead of due_date
 export function getRelevantDueDate(bill: any): string {
   if (bill.payment_plan && bill.plan_start_date && bill.plan_payment_amount && bill.plan_frequency) {
     return calculatePlanNextDue(
@@ -175,7 +180,6 @@ export function getBillStatus(bill: any): { label: string; color: string } {
   return { label: 'Open', color: '#2DD4BF' }
 }
 
-// Payment plan progress calculations
 export function getPlanProgress(bill: any): { 
   paymentsMade: number
   totalPayments: number
