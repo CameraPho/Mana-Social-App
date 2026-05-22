@@ -1,16 +1,19 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { FONT, EXPENSE_CATEGORIES, DEDUCTIBILITY } from '@/lib/constants'
 import { fmt } from '@/lib/format'
 import SalesTaxSection from '@/components/SalesTaxSection'
+import VendorManager from '@/components/VendorManager'
+import { getAgingBucket, getBillStatus, AGING_BUCKET_LABELS, AGING_BUCKET_COLORS, PAYMENT_TERM_LABELS, daysOverdue, type AgingBucket, type PaymentTerm } from '@/lib/paymentTerms'
 
 export default function MoneyOutTab(p: any) {
-  const { C, expenses, payroll, accountsPayable, supplyCosts, sales, salesTaxRemittances, fetchData, startEdit, handleDelete, setEditingItem } = p
+  const { C, expenses, payroll, accountsPayable, supplyCosts, sales, salesTaxRemittances, vendors, supabase, fetchData, startEdit, handleDelete, setEditingItem } = p
   const [view, setView] = useState<'expenses'|'payroll'>('expenses')
+  const [apView, setApView] = useState<'aging'|'list'>('aging')
+  const [showVendorManager, setShowVendorManager] = useState(false)
   const [expandedTiles, setExpandedTiles] = useState<Record<string, boolean>>({})
 
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
-  const secHdr: React.CSSProperties = { fontSize: '11px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '12px', fontFamily: FONT, display: 'block' }
   const editBtn: React.CSSProperties = { background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '3px 8px', fontSize: '12px', color: C.muted, cursor: 'pointer', fontFamily: FONT }
   const delBtn: React.CSSProperties = { background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '18px', fontFamily: FONT }
 
@@ -19,6 +22,54 @@ export default function MoneyOutTab(p: any) {
   const staffing = payroll.reduce((s: number, r: any) => s + Number(r.amount), 0)
 
   const toggle = (k: string) => setExpandedTiles(prev => ({ ...prev, [k]: !prev[k] }))
+
+  // Group bills by aging bucket
+  const apByBucket = useMemo(() => {
+    const buckets: Record<AgingBucket, any[]> = { not_due: [], '0_30': [], '31_60': [], '61_90': [], '90_plus': [], paid: [] }
+    accountsPayable.forEach((bill: any) => {
+      if (!bill.due_date) return
+      const b = getAgingBucket(bill)
+      buckets[b].push(bill)
+    })
+    return buckets
+  }, [accountsPayable])
+
+  const bucketOrder: AgingBucket[] = ['90_plus', '61_90', '31_60', '0_30', 'not_due', 'paid']
+
+  const renderBill = (b: any) => {
+    const paid = Number(b.amount_paid || 0)
+    const total = Number(b.total_amount || 0)
+    const owed = total - paid
+    const status = getBillStatus(b)
+    const days = b.due_date ? daysOverdue(b.due_date) : 0
+    return (
+      <div key={b.id} style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, fontSize: '15px', color: C.text }}>{b.vendor_name}</span>
+              <span style={{ padding: '2px 6px', borderRadius: '4px', background: `${status.color}20`, color: status.color, fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }}>{status.label}</span>
+            </div>
+            {b.description && <div style={{ fontSize: '12px', color: C.muted, marginTop: '2px' }}>{b.description}</div>}
+            <div style={{ fontSize: '11px', color: C.muted, marginTop: '4px' }}>
+              Invoice {b.invoice_date}
+              {b.due_date && ` · Due ${b.due_date}`}
+              {b.payment_terms && ` · ${PAYMENT_TERM_LABELS[b.payment_terms as PaymentTerm] || b.payment_terms}`}
+              {days > 0 && owed > 0 && <span style={{ color: '#ef4444', fontWeight: 'bold' }}> · {days} days late</span>}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right', marginLeft: '8px' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: owed > 0 ? C.pink : C.teal }}>{fmt(owed)} {owed <= 0 ? '✓' : ''}</div>
+            <div style={{ fontSize: '11px', color: C.muted }}>of {fmt(total)}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+          <button onClick={() => startEdit('accounts_payable', b)} style={editBtn}>Update</button>
+          <button onClick={() => handleDelete('accounts_payable', b.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -36,43 +87,71 @@ export default function MoneyOutTab(p: any) {
 
         <SalesTaxSection C={C} sales={sales} salesTaxRemittances={salesTaxRemittances} fetchData={fetchData} />
 
-        <div style={{ ...card, border: `1px solid rgba(240,192,64,0.4)`, padding: 0, overflow: 'hidden' }}>
-          <div onClick={() => toggle('ap')} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer' }}>
+        {/* Vendor Manager (toggle) */}
+        {showVendorManager && (
+          <VendorManager C={C} vendors={vendors} supabase={supabase} fetchData={fetchData} onClose={() => setShowVendorManager(false)} />
+        )}
+
+        {/* AP HEADER with view toggle */}
+        <div style={{ ...card, border: `1px solid rgba(240,192,64,0.4)`, padding: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <div>
               <div style={{ fontWeight: 900, fontSize: '15px', color: '#7A5A00' }}>Accounts Payable</div>
-              <div style={{ fontSize: '12px', color: C.muted }}>{accountsPayable.length} transaction{accountsPayable.length !== 1 ? 's' : ''}</div>
+              <div style={{ fontSize: '12px', color: C.muted }}>{accountsPayable.length} bills · {fmt(totalAPOwed)} owed</div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ fontWeight: 900, fontSize: '17px', color: totalAPOwed > 0 ? C.pink : C.teal }}>{fmt(totalAPOwed)}</div>
-              <button onClick={e => { e.stopPropagation(); setEditingItem({ table: 'accounts_payable' }) }} style={{ background: C.gold, color: '#7A5A00', border: 'none', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Add</button>
-              <span style={{ color: C.muted }}>{expandedTiles.ap ? '▲' : '▼'}</span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button onClick={() => setShowVendorManager(!showVendorManager)} style={{ background: 'none', border: `1px solid ${C.gold}`, borderRadius: '6px', padding: '6px 10px', fontSize: '11px', color: '#7A5A00', cursor: 'pointer', fontFamily: FONT, fontWeight: 'bold' }}>{showVendorManager ? 'Hide' : 'Vendors'}</button>
+              <button onClick={() => setEditingItem({ table: 'accounts_payable' })} style={{ background: C.gold, color: '#7A5A00', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Bill</button>
             </div>
           </div>
-          {expandedTiles.ap && (
-            <div style={{ borderTop: `1px solid rgba(240,192,64,0.3)` }}>
-              {accountsPayable.length === 0 ? <div style={{ padding: '20px', textAlign: 'center', color: C.muted, fontSize: '13px' }}>None recorded</div> :
-                accountsPayable.map((b: any) => {
-                  const paid = Number(b.amount_paid||0), owed = Number(b.total_amount) - paid
-                  return (
-                    <div key={b.id} style={{ padding: '14px 16px', borderBottom: `1px solid rgba(240,192,64,0.2)` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '15px' }}>{b.vendor_name}</div>
-                          {b.description && <div style={{ fontSize: '12px', color: C.muted }}>{b.description}</div>}
-                          <div style={{ fontSize: '11px', color: C.muted }}>{b.invoice_date}{b.due_date && b.due_date !== b.invoice_date ? ` · Due ${b.due_date}` : ''}</div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '15px', fontWeight: 700, color: owed > 0 ? C.pink : C.teal }}>{fmt(owed)} {owed <= 0 ? '✓' : 'left'}</div>
-                          <div style={{ fontSize: '11px', color: C.muted }}>of {fmt(Number(b.total_amount))}</div>
-                        </div>
+
+          {/* View toggle: Aging vs List */}
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+            {(['aging','list'] as const).map(v => (
+              <button key={v} onClick={() => setApView(v)} style={{ flex: 1, padding: '8px', borderRadius: '8px', border: `1px solid ${apView===v?C.teal:C.border}`, background: apView===v?'rgba(45,191,184,0.1)':C.cardBg, fontSize: '12px', fontWeight: apView===v?700:400, color: apView===v?C.teal:C.muted, cursor: 'pointer', fontFamily: FONT, textTransform: 'capitalize' }}>{v === 'aging' ? 'Aging Buckets' : 'List View'}</button>
+            ))}
+          </div>
+
+          {accountsPayable.length === 0 ? (
+            <div style={{ padding: '20px', textAlign: 'center', color: C.muted, fontSize: '13px' }}>No accounts payable yet</div>
+          ) : apView === 'aging' ? (
+            // AGING BUCKET VIEW
+            <div>
+              {bucketOrder.map((bucket) => {
+                const bills = apByBucket[bucket]
+                if (bills.length === 0) return null
+                const bucketTotal = bills.reduce((sum: number, b: any) => sum + ((Number(b.total_amount) || 0) - (Number(b.amount_paid) || 0)), 0)
+                const color = AGING_BUCKET_COLORS[bucket]
+                const key = `b_${bucket}`
+                return (
+                  <div key={bucket} style={{ background: C.inputBg, borderRadius: '10px', marginBottom: '8px', borderLeft: `3px solid ${color}`, overflow: 'hidden' }}>
+                    <div onClick={() => toggle(key)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', cursor: 'pointer' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '13px', color }}>{AGING_BUCKET_LABELS[bucket]}</div>
+                        <div style={{ fontSize: '11px', color: C.muted }}>{bills.length} bill{bills.length !== 1 ? 's' : ''}</div>
                       </div>
-                      <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                        <button onClick={() => startEdit('accounts_payable', b)} style={editBtn}>Update</button>
-                        <button onClick={() => handleDelete('accounts_payable', b.id)} style={{ ...editBtn, color: C.pink }}>Delete</button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 900, fontSize: '15px', color: bucket === 'paid' ? C.teal : color }}>{fmt(bucketTotal)}</span>
+                        <span style={{ color: C.muted, fontSize: '12px' }}>{expandedTiles[key] ? '▲' : '▼'}</span>
                       </div>
                     </div>
-                  )
-                })}
+                    {expandedTiles[key] && (
+                      <div style={{ background: C.cardBg }}>
+                        {bills.map(renderBill)}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            // LIST VIEW (simple list, sorted by due date)
+            <div style={{ background: C.cardBg, borderRadius: '10px', overflow: 'hidden' }}>
+              {[...accountsPayable].sort((a: any, b: any) => {
+                const da = a.due_date || a.invoice_date || ''
+                const db = b.due_date || b.invoice_date || ''
+                return da.localeCompare(db)
+              }).map(renderBill)}
             </div>
           )}
         </div>
