@@ -85,7 +85,6 @@ export default function BankTab(p: any) {
   const [statementEndBal, setStatementEndBal] = useState('')
   const [importing, setImporting] = useState(false)
 
-  // Statement metadata (auto-populated from parser, can be manually overridden)
   const [stmtMeta, setStmtMeta] = useState({
     detectedAccount: '',
     startingBalance: '',
@@ -144,7 +143,7 @@ export default function BankTab(p: any) {
     setUploadStatus('Parsing statement...')
 
     try {
-      const result = await parsePDF(file, 'Chase Business Checking') // initial guess, parser detects actual
+      const result = await parsePDF(file, 'Chase Business Checking')
       const { records, meta } = result as any
 
       if (records.length === 0) {
@@ -175,7 +174,6 @@ export default function BankTab(p: any) {
     
     setImporting(true)
     try {
-      // 1. Create the bank_statements row (parent record)
       const { data: stmt, error: stmtErr } = await supabase
         .from('bank_statements')
         .insert({
@@ -193,7 +191,6 @@ export default function BankTab(p: any) {
       
       if (stmtErr) throw stmtErr
 
-      // 2. Insert transactions linked to the statement
       const txnRecords = selected.map((r: any) => ({
         account_name: r.account_name,
         transaction_date: r.transaction_date,
@@ -427,7 +424,6 @@ export default function BankTab(p: any) {
 
   const matchCount = byAccount.filter((t: any) => !t.is_reconciled && findVendorMatch(t.description, Number(t.amount), vendorMappings || [])).length
 
-  // Variance check for preview
   const previewSum = uploadPreview.filter(r => r._selected).reduce((sum: number, r: any) => sum + Number(r.amount), 0)
   const previewStart = parseFloat(stmtMeta.startingBalance) || 0
   const previewEnd = parseFloat(stmtMeta.endingBalance) || 0
@@ -603,27 +599,7 @@ export default function BankTab(p: any) {
   return (
     <div>
       <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(45,191,184,0.1)', border: `1px solid rgba(45,191,184,0.25)`, marginBottom: '12px', fontSize: '12px', color: '#1A7A75', fontWeight: 'bold', fontFamily: FONT }}>
-        🏦 Bank Reconciliation — upload statements from Chase, Wells Fargo, Costco Citi, Citi Diamond, Amazon Chase, Chase Sapphire, or Barclays.
-      </div>
-
-      <div style={{ ...card, background: C.navyDark, color: '#fff' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-          <div>
-            <span style={lbl}>Statement End Balance</span>
-            <input type="number" placeholder="0.00" value={statementEndBal} onChange={e => setStatementEndBal(e.target.value)} style={{ ...inp, background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }} />
-          </div>
-          <div>
-            <span style={lbl}>Live Cleared</span>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: C.teal, paddingTop: '4px' }}>{fmt(liveCleared)}</div>
-          </div>
-          <div>
-            <span style={lbl}>Variance</span>
-            <div style={{ fontSize: '20px', fontWeight: 900, color: Math.abs(variance) < 0.01 ? C.green : '#fda4af', paddingTop: '4px' }}>
-              {Math.abs(variance) < 0.01 ? '✓ Balanced' : fmt(variance)}
-            </div>
-          </div>
-        </div>
-        <div style={{ fontSize: '11px', opacity: 0.5, marginTop: '8px' }}>Pick a single account below for variance to calculate.</div>
+        🏦 Bank Statement Import — upload statements, capture balances, then reconcile in the Reports tab.
       </div>
 
       <div style={{ ...card, padding: '14px' }}>
@@ -638,7 +614,6 @@ export default function BankTab(p: any) {
         <div style={{ ...card, border: `1px solid ${C.teal}` }}>
           <div style={{ fontSize: '12px', fontWeight: 'bold', color: C.teal, marginBottom: '8px', textTransform: 'uppercase' }}>Import Preview — {uploadPreview.filter(r => r._selected).length} selected</div>
           
-          {/* Statement metadata — auto-populated, can be overridden */}
           <div style={{ background: C.inputBg, padding: '12px', borderRadius: '10px', marginBottom: '10px' }}>
             <div style={{ fontSize: '11px', fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', marginBottom: '8px' }}>Statement Details</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
@@ -668,13 +643,16 @@ export default function BankTab(p: any) {
             {hasBalances && (
               <div style={{ marginTop: '8px', padding: '8px 10px', borderRadius: '6px', background: previewVariance < 0.01 ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${previewVariance < 0.01 ? C.green : '#ef4444'}40` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                  <span style={{ color: C.muted }}>Reconciliation Check:</span>
+                  <span style={{ color: C.muted, fontWeight: 'bold' }}>Statement Integrity Check:</span>
                   <span style={{ fontWeight: 'bold', color: previewVariance < 0.01 ? C.green : '#ef4444' }}>
                     {previewVariance < 0.01 ? '✓ Balanced' : `${fmt(previewVariance)} variance`}
                   </span>
                 </div>
                 <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>
                   Sum: {fmt(previewSum)} · Expected: {fmt(expectedDelta)}
+                </div>
+                <div style={{ fontSize: '10px', color: C.muted, marginTop: '4px', fontStyle: 'italic' }}>
+                  Verifies PDF extraction. Final reconciliation against your books happens in the Reports tab.
                 </div>
               </div>
             )}
