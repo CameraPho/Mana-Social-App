@@ -3,10 +3,11 @@ import React, { useState } from 'react'
 import { FONT, EXPENSE_CATEGORIES, DEDUCTIBILITY, ASSET_CATEGORIES, USEFUL_LIFE, MILEAGE_RATE, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
 import { fmt, fmtK, pctFmt } from '@/lib/format'
 import { calcDepreciation, assetTotals } from '@/lib/calculations'
+import InventoryReport from '@/components/InventoryReport'
 
 export default function ReportsTab(p: any) {
   const { C, sales, expenses, accountsPayable, payroll, mileageLog, cogsInventory, allCogsInventory, assets, bankAccounts, selectedYear, bankStatements, reconTransactions, supabase, fetchData } = p
-  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'>('menu')
+  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'>('menu')
   const [expandedStmt, setExpandedStmt] = useState<Record<string, boolean>>({})
 
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
@@ -68,7 +69,6 @@ export default function ReportsTab(p: any) {
     return { ...s, stmtTxns, reconciledCount, totalCount, reconciledSum, computedEnding, variance, status, isCreditCard, hasBalances }
   })
 
-  // Per-account summary: latest statement only
   const statementsByAccount: Record<string, any[]> = {}
   statementStats.forEach((s: any) => {
     if (!statementsByAccount[s.account_name]) statementsByAccount[s.account_name] = []
@@ -84,38 +84,28 @@ export default function ReportsTab(p: any) {
   })
 
   const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-    reconciled_db:   { label: '✓ Reconciled',       color: '#10B981' },
+    reconciled_db:   { label: '✓ Reconciled',         color: '#10B981' },
     reconciled:      { label: '✓ Ready to Reconcile', color: '#10B981' },
-    in_progress:     { label: '⚠ In Progress',      color: '#FBBF24' },
-    has_variance:    { label: '⚠ Has Variance',     color: '#EF4444' },
-    imported:        { label: 'Imported',           color: '#94A3B8' },
-    no_balances:     { label: '⚠ Missing Balances', color: '#94A3B8' },
+    in_progress:     { label: '⚠ In Progress',         color: '#FBBF24' },
+    has_variance:    { label: '⚠ Has Variance',        color: '#EF4444' },
+    imported:        { label: 'Imported',              color: '#94A3B8' },
+    no_balances:     { label: '⚠ Missing Balances',    color: '#94A3B8' },
   }
 
   const markReconciled = async (stmtId: string) => {
     if (!confirm('Mark this statement as fully reconciled? This locks it from changes.')) return
     try {
-      await supabase
-        .from('bank_statements')
-        .update({ is_reconciled: true, reconciled_at: new Date().toISOString() })
-        .eq('id', stmtId)
+      await supabase.from('bank_statements').update({ is_reconciled: true, reconciled_at: new Date().toISOString() }).eq('id', stmtId)
       fetchData()
-    } catch (err: any) {
-      alert('Error: ' + err.message)
-    }
+    } catch (err: any) { alert('Error: ' + err.message) }
   }
 
   const unmarkReconciled = async (stmtId: string) => {
     if (!confirm('Unmark this statement as reconciled? You can edit transactions again afterward.')) return
     try {
-      await supabase
-        .from('bank_statements')
-        .update({ is_reconciled: false, reconciled_at: null })
-        .eq('id', stmtId)
+      await supabase.from('bank_statements').update({ is_reconciled: false, reconciled_at: null }).eq('id', stmtId)
       fetchData()
-    } catch (err: any) {
-      alert('Error: ' + err.message)
-    }
+    } catch (err: any) { alert('Error: ' + err.message) }
   }
 
   const toggleStmt = (id: string) => setExpandedStmt(prev => ({ ...prev, [id]: !prev[id] }))
@@ -151,6 +141,7 @@ export default function ReportsTab(p: any) {
       ['pl', 'Profit & Loss', 'Income statement — revenue, COGS, expenses, net income'],
       ['balance', 'Balance Sheet', 'Assets, liabilities, owner equity'],
       ['reconciliation', 'Bank Reconciliation', 'Match imported statements to your books'],
+      ['inventory', 'Inventory', 'Lots, on-hand units, value, margins'],
       ['tax', 'Tax Estimates', 'Quarterly federal + CA PTE estimates'],
       ['deductions', 'Deductions', 'Expense deductibility + mileage'],
       ['assets', 'Assets & Depreciation', 'Fixed assets and depreciation schedule'],
@@ -177,6 +168,13 @@ export default function ReportsTab(p: any) {
     <button onClick={() => setView('menu')} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '8px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT, marginBottom: '12px' }}>← Reports</button>
   )
 
+  if (view === 'inventory') return (
+    <div>
+      <BackBtn />
+      <InventoryReport C={C} allCogsInventory={allCogsInventory} supabase={supabase} fetchData={fetchData} />
+    </div>
+  )
+
   if (view === 'reconciliation') return (
     <div>
       <BackBtn />
@@ -192,7 +190,6 @@ export default function ReportsTab(p: any) {
         </div>
       ) : (
         <>
-          {/* Account Summary Cards */}
           <div style={card}>
             <span style={secHdr}>Account Status</span>
             {accountSummaries.map(({ account, latest, allStmts }) => {
@@ -234,7 +231,6 @@ export default function ReportsTab(p: any) {
             })}
           </div>
 
-          {/* Statement History */}
           <div style={card}>
             <span style={secHdr}>Statement History</span>
             {[...statementStats].sort((a: any, b: any) => (b.statement_period_end || '').localeCompare(a.statement_period_end || '')).map((s: any) => {
