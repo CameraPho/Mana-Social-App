@@ -8,7 +8,6 @@ import {
   ActionType, ACTION_LABELS, ACTION_HINTS, getValidActions, suggestActionType,
 } from '@/lib/bankActions'
 
-// Self-contained payload builders to prevent cross-module TS compilation failures
 function buildOwnerContributionPayload(txn: any, memberName: string, entity: string, notes?: string) {
   return {
     targetTable: 'equity_transactions',
@@ -70,84 +69,7 @@ function buildLoanRepaymentPayload(txn: any, loanId: string, principal: number, 
 
 type FilterMode = 'unreconciled' | 'reconciled' | 'all'
 
-/**
- * Robust structural text parser to decode bank text and extract transactions 
- * without relying on external PDF.js core library modules
- */
-const parseBankTextEngine = (rawText: string): any[] => {
-  const transactions: any[] = [];
-  
-  // Clean up structural formatting noise from the upload stream
-  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
-  
-  let isPaymentsSection = false;
-  let isPurchasesSection = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    
-    if (line.includes("PAYMENTS") && line.includes("CREDITS")) {
-      isPaymentsSection = true;
-      isPurchasesSection = false;
-      continue;
-    }
-    if (line.includes("PURCHASE") && !line.includes("SUMMARY")) {
-      isPurchasesSection = true;
-      isPaymentsSection = false;
-      continue;
-    }
-    if (line.includes("2026 Totals Year-to-Date") || line.includes("INTEREST CHARGES")) {
-      break; // End of transaction logs
-    }
-
-    // Match CSV patterned rows: "MM/DD","Description","Amount"
-    if ((isPaymentsSection || isPurchasesSection) && line.includes('","')) {
-      const parts = line.split('","').map(p => p.replace(/"/g, '').trim());
-      if (parts.length >= 3) {
-        const dateStr = parts[0];       // e.g., "04/03"
-        const description = parts[1];   // e.g., "FARMER BOYS-1044-ECOM"
-        let amountNum = parseFloat(parts[2]);
-
-        if (!isNaN(amountNum) && dateStr.match(/^\d{2}\/\d{2}$/)) {
-          // Payments/Credits are reductions (negative sign adjustments)
-          if (isPaymentsSection && amountNum > 0) amountNum = -amountNum;
-          
-          transactions.push({
-            id: `tx-${dateStr.replace('/', '')}-${Math.abs(amountNum)}-${i}`,
-            transaction_date: `2026-${dateStr.replace('/', '-')}`, // Normalized to 2026
-            description,
-            amount: amountNum,
-            is_reconciled: false
-          });
-        }
-      }
-    }
-  }
-  return transactions;
-};
-
 const MEMBERS = ['Cam', 'Kenny']
-
-function detectBank(text: string): 'wells_fargo' | 'chase_checking' | 'costco_citi' | 'citi_diamond' | 'amazon_chase' | 'chase_sapphire' | 'barclays' {
-  const t = text.toLowerCase()
-  if (/wells fargo/.test(t)) return 'wells_fargo'
-  if (/barclays/.test(t)) return 'barclays'
-  if (/costco anywhere visa/.test(t) || /costco.*citi/.test(t)) return 'costco_citi'
-  if (/diamond preferred/.test(t)) return 'citi_diamond'
-  if (/amazon.*chase|chase.*amazon|prime visa/.test(t)) return 'amazon_chase'
-  if (/sapphire/.test(t)) return 'chase_sapphire'
-  return 'chase_checking'
-}
-
-const BANK_LABELS: Record<string, string> = {
-  wells_fargo: 'Wells Fargo',
-  chase_checking: 'Chase Business Checking',
-  costco_citi: 'Costco Citi Visa',
-  citi_diamond: 'Citi Diamond Preferred',
-  amazon_chase: 'Amazon Chase Prime Visa',
-  chase_sapphire: 'Chase Sapphire Preferred',
-  barclays: 'Barclays View Mastercard',
-}
 
 export default function BankTab(p: any) {
   const { C, reconTransactions, bankAccounts, fetchData, expenses, sales, vendorMappings,
@@ -161,6 +83,18 @@ export default function BankTab(p: any) {
   const [uploadPreview, setUploadPreview] = useState<any[]>([])
   const [uploadStatus, setUploadStatus] = useState('')
   const [statementEndBal, setStatementEndBal] = useState('')
+  const [importing, setImporting] = useState(false)
+
+  // Statement metadata (auto-populated from parser, can be manually overridden)
+  const [stmtMeta, setStmtMeta] = useState({
+    detectedAccount: '',
+    startingBalance: '',
+    endingBalance: '',
+    periodStart: '',
+    periodEnd: '',
+    fileName: '',
+    isCreditCard: false,
+  })
 
   const [actionByTxn, setActionByTxn] = useState<Record<string, ActionType>>({})
   const [formByTxn, setFormByTxn] = useState<Record<string, any>>({})
@@ -200,44 +134,94 @@ export default function BankTab(p: any) {
 
   const handlePdf = async (file: File) => {
     setUploadPreview([])
+    setStmtMeta({ detectedAccount: '', startingBalance: '', endingBalance: '', periodStart: '', periodEnd: '', fileName: '', isCreditCard: false })
 
     if (file.type !== 'application/pdf') {
       setUploadStatus('Please upload a PDF')
       return
     }
 
-    setUploadStatus('Detecting bank...')
+    setUploadStatus('Parsing statement...')
 
-        try {
-      // Stream array buffer as raw text snippet to inspect headers safely without triggering modern async/await build targets
-      const buf = await file.arrayBuffer()
-      const decoder = new TextDecoder('utf-8')
-      const textPreviewSnippet = decoder.decode(buf.slice(0, 4000)).replace(/[\0-\x1F\x7F-\x9F]/g, ' ')
-      
-      const bank = detectBank(textPreviewSnippet)
-      setUploadStatus(`Reading ${BANK_LABELS[bank]} statement...`)
-
-      const result = await parsePDF(file, BANK_LABELS[bank])
-      const { records, meta } = result
+    try {
+      const result = await parsePDF(file, 'Chase Business Checking') // initial guess, parser detects actual
+      const { records, meta } = result as any
 
       if (records.length === 0) {
-        setUploadStatus(
-          `No transactions found in ${BANK_LABELS[bank]} statement. Check the file format.`
-        )
+        setUploadStatus(`No transactions found. Check the file format.`)
         return
       }
 
+      setStmtMeta({
+        detectedAccount: meta.detectedAccount || '',
+        startingBalance: meta.startingBalance != null ? String(meta.startingBalance) : '',
+        endingBalance: meta.endingBalance != null ? String(meta.endingBalance) : '',
+        periodStart: meta.periodStart || '',
+        periodEnd: meta.periodEnd || '',
+        fileName: file.name,
+        isCreditCard: !!meta.isCreditCard,
+      })
+
       setUploadPreview(records.map((r: any) => ({ ...r, _selected: true })))
-      setUploadStatus(
-        `Found ${records.length} transactions from ${meta.year}. (${BANK_LABELS[bank]})`
-      )
+      setUploadStatus(`Found ${records.length} transactions. (${meta.detectedAccount || 'Unknown'})`)
     } catch (err: any) {
       setUploadStatus('Parse error: ' + err.message)
     }
   }
 
-  // Persist a vendor mapping / rule when user checks "Save vendor for next time".
-  // Minimal, safe implementation that uses txn.description as vendor_name and stores the provided keyword.
+  const confirmImport = async () => {
+    const selected = uploadPreview.filter(r => r._selected)
+    if (selected.length === 0) return alert('No transactions selected')
+    
+    setImporting(true)
+    try {
+      // 1. Create the bank_statements row (parent record)
+      const { data: stmt, error: stmtErr } = await supabase
+        .from('bank_statements')
+        .insert({
+          account_name: stmtMeta.detectedAccount,
+          statement_period_start: stmtMeta.periodStart || selected[selected.length - 1].transaction_date,
+          statement_period_end: stmtMeta.periodEnd || selected[0].transaction_date,
+          starting_balance: stmtMeta.startingBalance ? parseFloat(stmtMeta.startingBalance) : null,
+          ending_balance: stmtMeta.endingBalance ? parseFloat(stmtMeta.endingBalance) : null,
+          transaction_count: selected.length,
+          source_file_name: stmtMeta.fileName,
+          entity: 'Mana Social LLC',
+        })
+        .select()
+        .single()
+      
+      if (stmtErr) throw stmtErr
+
+      // 2. Insert transactions linked to the statement
+      const txnRecords = selected.map((r: any) => ({
+        account_name: r.account_name,
+        transaction_date: r.transaction_date,
+        description: r.description,
+        amount: r.amount,
+        is_reconciled: false,
+        entity: getEntity(r.transaction_date),
+        statement_id: stmt.id,
+      }))
+      
+      const { error: txnErr } = await supabase
+        .from('bank_statement_transactions')
+        .insert(txnRecords)
+      
+      if (txnErr) throw txnErr
+
+      setUploadPreview([])
+      setUploadStatus('')
+      setStmtMeta({ detectedAccount: '', startingBalance: '', endingBalance: '', periodStart: '', periodEnd: '', fileName: '', isCreditCard: false })
+      fetchData()
+      alert(`Imported ${selected.length} transactions ✓`)
+    } catch (err: any) {
+      alert('Import error: ' + err.message)
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const learnVendor = async (txn: any, keyword: string, isSale: boolean) => {
     try {
       const vendorName = (txn.description || '').trim().slice(0, 200) || keyword || 'Unknown Vendor'
@@ -277,7 +261,6 @@ export default function BankTab(p: any) {
           })
       }
     } catch (err) {
-      // swallow errors silently — learning vendor is a convenience, not critical
       console.warn('learnVendor error', err)
     }
   }
@@ -443,6 +426,16 @@ export default function BankTab(p: any) {
   const variance = (parseFloat(statementEndBal) || 0) - liveCleared
 
   const matchCount = byAccount.filter((t: any) => !t.is_reconciled && findVendorMatch(t.description, Number(t.amount), vendorMappings || [])).length
+
+  // Variance check for preview
+  const previewSum = uploadPreview.filter(r => r._selected).reduce((sum: number, r: any) => sum + Number(r.amount), 0)
+  const previewStart = parseFloat(stmtMeta.startingBalance) || 0
+  const previewEnd = parseFloat(stmtMeta.endingBalance) || 0
+  const expectedDelta = stmtMeta.isCreditCard 
+    ? previewStart - previewEnd 
+    : previewEnd - previewStart
+  const previewVariance = Math.abs(previewSum - expectedDelta)
+  const hasBalances = !!(stmtMeta.startingBalance && stmtMeta.endingBalance)
 
   const tabBtn = (mode: FilterMode): React.CSSProperties => ({
     flex: 1, padding: '8px 10px', borderRadius: '8px', border: `1px solid ${filterMode === mode ? C.teal : C.border}`,
@@ -644,6 +637,49 @@ export default function BankTab(p: any) {
       {uploadPreview.length > 0 && (
         <div style={{ ...card, border: `1px solid ${C.teal}` }}>
           <div style={{ fontSize: '12px', fontWeight: 'bold', color: C.teal, marginBottom: '8px', textTransform: 'uppercase' }}>Import Preview — {uploadPreview.filter(r => r._selected).length} selected</div>
+          
+          {/* Statement metadata — auto-populated, can be overridden */}
+          <div style={{ background: C.inputBg, padding: '12px', borderRadius: '10px', marginBottom: '10px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', marginBottom: '8px' }}>Statement Details</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+              <div>
+                <span style={lbl}>Account</span>
+                <input value={stmtMeta.detectedAccount} onChange={e => setStmtMeta({ ...stmtMeta, detectedAccount: e.target.value })} placeholder="Account name" style={inp} />
+              </div>
+              <div>
+                <span style={lbl}>Period</span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <input type="date" value={stmtMeta.periodStart} onChange={e => setStmtMeta({ ...stmtMeta, periodStart: e.target.value })} style={{ ...inp, fontSize: '12px' }} />
+                  <input type="date" value={stmtMeta.periodEnd} onChange={e => setStmtMeta({ ...stmtMeta, periodEnd: e.target.value })} style={{ ...inp, fontSize: '12px' }} />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div>
+                <span style={lbl}>{stmtMeta.isCreditCard ? 'Previous Balance' : 'Starting Balance'}</span>
+                <input type="number" step="0.01" value={stmtMeta.startingBalance} onChange={e => setStmtMeta({ ...stmtMeta, startingBalance: e.target.value })} placeholder="0.00" style={inp} />
+              </div>
+              <div>
+                <span style={lbl}>{stmtMeta.isCreditCard ? 'New Balance' : 'Ending Balance'}</span>
+                <input type="number" step="0.01" value={stmtMeta.endingBalance} onChange={e => setStmtMeta({ ...stmtMeta, endingBalance: e.target.value })} placeholder="0.00" style={inp} />
+              </div>
+            </div>
+            
+            {hasBalances && (
+              <div style={{ marginTop: '8px', padding: '8px 10px', borderRadius: '6px', background: previewVariance < 0.01 ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${previewVariance < 0.01 ? C.green : '#ef4444'}40` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                  <span style={{ color: C.muted }}>Reconciliation Check:</span>
+                  <span style={{ fontWeight: 'bold', color: previewVariance < 0.01 ? C.green : '#ef4444' }}>
+                    {previewVariance < 0.01 ? '✓ Balanced' : `${fmt(previewVariance)} variance`}
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>
+                  Sum: {fmt(previewSum)} · Expected: {fmt(expectedDelta)}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
             <button onClick={() => setUploadPreview(uploadPreview.map(r => ({ ...r, _selected: true })))} style={editBtn}>Select All</button>
             <button onClick={() => setUploadPreview(uploadPreview.map(r => ({ ...r, _selected: false })))} style={editBtn}>Deselect All</button>
@@ -661,8 +697,10 @@ export default function BankTab(p: any) {
             ))}
           </div>
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-            <button onClick={(p as any).confirmImport} style={{ padding: '10px 18px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Import Selected</button>
-            <button onClick={() => { setUploadPreview([]); setUploadStatus('') }} style={{ padding: '10px 14px', background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', color: C.muted, cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Cancel</button>
+            <button onClick={confirmImport} disabled={importing} style={{ padding: '10px 18px', background: importing ? C.muted : `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: importing ? 'wait' : 'pointer', fontSize: '14px', fontFamily: FONT }}>
+              {importing ? 'Importing...' : 'Import Selected'}
+            </button>
+            <button onClick={() => { setUploadPreview([]); setUploadStatus(''); setStmtMeta({ detectedAccount: '', startingBalance: '', endingBalance: '', periodStart: '', periodEnd: '', fileName: '', isCreditCard: false }) }} style={{ padding: '10px 14px', background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', color: C.muted, cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Cancel</button>
           </div>
         </div>
       )}
@@ -792,21 +830,7 @@ export default function BankTab(p: any) {
 
                 {renderActionForm(txn, currentAction)}
 
-                <button
-                  onClick={() => executeAction(txn)}
-                  style={{
-                    marginTop: '12px',
-                    padding: '10px',
-                    background: C.green,
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    fontFamily: FONT,
-                    width: '100%'
-                  }}
-                >
+                <button onClick={() => executeAction(txn)} style={{ marginTop: '12px', padding: '10px', background: C.green, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT, width: '100%' }}>
                   Confirm & Clear Line
                 </button>
               </div>
@@ -818,21 +842,7 @@ export default function BankTab(p: any) {
                   <div style={{ fontSize: '11px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                     Matched to {totalMatched} ledger entr{totalMatched === 1 ? 'y' : 'ies'}
                   </div>
-                  <button
-                    onClick={() => unreconcileTxn(txn)}
-                    style={{
-                      background: 'none',
-                      border: `1px solid ${C.border}`,
-                      borderRadius: '6px',
-                      padding: '4px 10px',
-                      fontSize: '11px',
-                      color: C.muted,
-                      cursor: 'pointer',
-                      fontFamily: FONT
-                    }}
-                  >
-                    ↩ Unreconcile
-                  </button>
+                  <button onClick={() => unreconcileTxn(txn)} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '4px 10px', fontSize: '11px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>↩ Unreconcile</button>
                 </div>
 
                 {totalMatched === 0 && (txn.action_type === 'platform_payout' || txn.action_type === 'card_payment' || txn.action_type === 'transfer') ? (
@@ -843,107 +853,7 @@ export default function BankTab(p: any) {
                   <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>
                     ⚠️ Marked reconciled but no ledger entry found.
                   </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-
-                    {matchedAp.map((x: any) => (
-                      <div key={`ap-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
-                            AP Payment · {x.vendor_name}
-                          </span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>
-                            {fmt(-Math.abs(Number(x.amount)))}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>
-                          Paid {fmt(x.amount_paid)} of {fmt(x.total_amount)}
-                        </div>
-                      </div>
-                    ))}
-
-                    {matchedCol.map((x: any) => (
-                      <div key={`co-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
-                            Collection Payment · {x.seller_name}
-                          </span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>
-                            {fmt(-Math.abs(Number(x.amount)))}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>
-                          Paid {fmt(x.amount_paid)} of {fmt(x.total_cost)}
-                        </div>
-                      </div>
-                    ))}
-
-                    {matchedDisb.map((x: any) => (
-                      <div key={`d-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
-                            Owner Draw · {x.recipient}
-                          </span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>
-                            {fmt(-Math.abs(Number(x.amount)))}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>
-                          {x.disbursement_date} · {x.notes || '(no notes)'}
-                        </div>
-                      </div>
-                    ))}
-
-                    {matchedEquity.map((x: any) => (
-                      <div key={`eq-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
-                            Owner Contribution · {x.member_name}
-                          </span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>
-                            {fmt(Math.abs(Number(x.amount)))}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>
-                          {x.transaction_date} · {x.notes || '(no notes)'}
-                        </div>
-                      </div>
-                    ))}
-
-                    {matchedLoans.map((x: any) => (
-                      <div key={`ln-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
-                            Loan from {x.member_name}
-                          </span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: C.green }}>
-                            {fmt(Math.abs(Number(x.principal)))}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>
-                          {x.loan_date} · {x.interest_rate ? `${x.interest_rate}% APR · ` : ''}{fmt(x.outstanding_balance)} outstanding
-                        </div>
-                      </div>
-                    ))}
-
-                    {matchedLoanPmts.map((x: any) => (
-                      <div key={`lp-${x.id}`} style={{ padding: '10px', background: C.inputBg, borderRadius: '8px', border: `1px solid ${C.border}` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold', color: C.teal, textTransform: 'uppercase' }}>
-                            Loan Repayment
-                          </span>
-                          <span style={{ fontSize: '14px', fontWeight: 900, color: '#ef4444' }}>
-                            {fmt(-(Number(x.principal_paid) + Number(x.interest_paid)))}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: C.muted }}>
-                          {x.payment_date} · Principal {fmt(x.principal_paid)} · Interest {fmt(x.interest_paid)}
-                        </div>
-                      </div>
-                    ))}
-
-                  </div>
-                )}
+                ) : null}
               </div>
             )}
           </div>
