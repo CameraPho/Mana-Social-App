@@ -22,6 +22,48 @@ function detectBankFromText(text: string): { accountName: string; isCreditCard: 
   return { accountName: 'Unknown', isCreditCard: false }
 }
 
+function extractBalances(text: string, isCreditCard: boolean): {
+  startingBalance: number | null
+  endingBalance: number | null
+} {
+  let startingBalance: number | null = null
+  let endingBalance: number | null = null
+
+  if (isCreditCard) {
+    const prevMatch = text.match(/previous\s+balance[\s\$]*([\d,]+\.\d{2})/i)
+    const newMatch = text.match(/new\s+balance[\s\$\sasof]*([\d,]+\.\d{2})/i)
+    if (prevMatch) startingBalance = parseFloat(prevMatch[1].replace(/,/g, ''))
+    if (newMatch) endingBalance = parseFloat(newMatch[1].replace(/,/g, ''))
+  } else {
+    const beginMatch = text.match(/(?:beginning|opening)\s+balance[\s\$]*([\d,]+\.\d{2})/i)
+    const endMatch = text.match(/ending\s+balance[\s\$]*([\d,]+\.\d{2})/i)
+    if (beginMatch) startingBalance = parseFloat(beginMatch[1].replace(/,/g, ''))
+    if (endMatch) endingBalance = parseFloat(endMatch[1].replace(/,/g, ''))
+  }
+
+  return { startingBalance, endingBalance }
+}
+
+function extractPeriod(text: string): { periodStart: string | null; periodEnd: string | null } {
+  // Pattern 1: MM/DD/YY-MM/DD/YY (Citi)
+  const m1 = text.match(/(\d{2})\/(\d{2})\/(\d{2})\s*[-–]\s*(\d{2})\/(\d{2})\/(\d{2})/)
+  if (m1) {
+    return {
+      periodStart: `20${m1[3]}-${m1[1]}-${m1[2]}`,
+      periodEnd: `20${m1[6]}-${m1[4]}-${m1[5]}`,
+    }
+  }
+  // Pattern 2: MM/DD/YYYY to MM/DD/YYYY (Chase, WF)
+  const m2 = text.match(/(\d{2})\/(\d{2})\/(\d{4})\s*(?:to|through|-|–)\s*(\d{2})\/(\d{2})\/(\d{4})/i)
+  if (m2) {
+    return {
+      periodStart: `${m2[3]}-${m2[1]}-${m2[2]}`,
+      periodEnd: `${m2[6]}-${m2[4]}-${m2[5]}`,
+    }
+  }
+  return { periodStart: null, periodEnd: null }
+}
+
 const NOISE_PATTERNS = [
   /PREVIOUS BALANCE|NEW BALANCE|MINIMUM PAYMENT|TOTAL PURCHASES/i,
   /ACCOUNT SUMMARY|CARDHOLDER SUMMARY|CREDIT LIMIT/i,
@@ -32,6 +74,7 @@ const NOISE_PATTERNS = [
   /YEAR-TO-DATE|TOTALS YEAR/i,
   /OPENING.*CLOSING\s*DATE/i,
   /STATEMENT\s*PERIOD/i,
+  /BEGINNING\s+BALANCE|ENDING\s+BALANCE/i,
   /^PURCHASES\s*[\+\-]?\s*\$/i,
   /^PAYMENTS\s*[\+\-]?\s*\$/i,
   /^CREDITS\s*[\+\-]?\s*\$/i,
@@ -47,9 +90,7 @@ export async function parsePDF(
   const fileNameUpper = file.name.toUpperCase()
   let stmtYear = String(new Date().getFullYear())
 
-  // ==========================================
   // PHASE 1: FILE EXTRACTION
-  // ==========================================
   if (fileNameUpper.endsWith('.XLSX') || fileNameUpper.endsWith('.XLS')) {
     try {
       if (!(window as any).XLSX) {
@@ -105,98 +146,64 @@ export async function parsePDF(
 
   const lines = textContentLines.map(l => l.trim()).filter(Boolean)
 
-  // ==========================================
   // PHASE 1.5: DETECT BANK FROM EXTRACTED TEXT
-  // ==========================================
-  const headerText = lines.slice(0, 80).join(' ')
+  const headerText = lines.slice(0, 120).join(' ')
   const detected = detectBankFromText(headerText)
   const finalAccountName = detected.accountName !== 'Unknown' ? detected.accountName : accountName
   const isCreditCard = detected.isCreditCard || CREDIT_CARD_NAMES.includes(accountName)
 
-  // Extract year from text
+  // Extract balances + period
+  const balances = extractBalances(headerText, isCreditCard)
+  const period = extractPeriod(headerText)
+
+  // Extract year
   const yearMatch = headerText.match(/\b(202[4-9])\b/)
   if (yearMatch) stmtYear = yearMatch[1]
-
-  // Also check for MM/DD/YY billing period format (Citi uses this)
   const billingMatch = headerText.match(/(\d{2})\/(\d{2})\/(\d{2})\s*[-–]\s*(\d{2})\/(\d{2})\/(\d{2})/)
   if (billingMatch) stmtYear = `20${billingMatch[6]}`
 
-  // ==========================================
   // PHASE 2: TRANSACTION SCANNING
-  // ==========================================
   const records: any[] = []
-
-  // Section tracking for description prefixes
-  let currentSection: string | null = null
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    const upperLine = line.toUpperCase()
 
-    // Track sections for labeling (fees, interest, cash advances)
-    if (/^payments.*credits|^payments.*adjustments/i.test(line)) { currentSection = 'payments'; continue; }
-    if (/^promo\s+purchase|^purchase\s*$/i.test(line)) { currentSection = 'purchase'; continue; }
-    if (/^fees?\s+charged/i.test(line)) { currentSection = 'fees'; continue; }
-    if (/^interest\s+charged/i.test(line)) { currentSection = 'interest'; continue; }
-
-    // Skip noise lines
     if (NOISE_PATTERNS.some(p => p.test(line))) continue
 
-    // --- MATCH DATE (MM/DD at start of meaningful content) ---
     const dateMatch = line.match(/\b(\d{2})\/(\d{2})\b/)
     if (!dateMatch || dateMatch.index === undefined) continue
     const [fullDateStr, mm, dd] = dateMatch
 
-    // Validate month/day ranges
     const monthNum = parseInt(mm)
     const dayNum = parseInt(dd)
     if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) continue
 
-    // --- MATCH AMOUNT (including sign and $) ---
     const amountMatch = line.match(/([-+]?\s*\$?\s*[\d,]+\.\d{2})\s*$/)
     if (!amountMatch) continue
     const rawAmtStr = amountMatch[1]
 
-    // Parse amount, stripping $ and spaces
     let amount = parseFloat(rawAmtStr.replace(/[^0-9.\-]/g, ''))
     if (isNaN(amount) || amount === 0) continue
 
-    // Restore negative sign if present in raw string
     if (rawAmtStr.trim().startsWith('-') && amount > 0) amount = -amount
 
-    // --- EXTRACT DESCRIPTION ---
     const dateEndIndex = (dateMatch.index || 0) + fullDateStr.length
     const amtStartIndex = line.lastIndexOf(rawAmtStr.trim())
     if (amtStartIndex <= dateEndIndex) continue
 
     let description = line.substring(dateEndIndex, amtStartIndex).trim()
-
-    // Clean secondary posting date (MM/DD at start of description)
     description = description.replace(/^\s*\d{2}\/\d{2}\s*/, '')
-
-    // Clean trailing/leading punctuation, quotes, dollar signs
     description = description.replace(/^[\s,;"'$\-]+|[\s,;"'$\-]+$/g, '').trim()
-
-    // Remove trailing isolated numbers (reward points, tracking IDs)
     description = description.replace(/\s+\d{1,3}\s*$/, '').trim()
-
-    // Final cleanup pass
     description = description.replace(/^[\s,;"'$]+|[\s,;"'$]+$/g, '').trim()
 
-    // Skip if description is too short or non-meaningful
     if (!description || description.length < 3) continue
     if (/^\d+$/.test(description)) continue
 
-    // --- APPLY SIGN LOGIC ---
     if (isCreditCard) {
-      // Credit card: negate the statement amount
-      // Statement shows -$41 for payments → we want +41 (green)
-      // Statement shows $34.99 for purchases → we want -34.99 (red)
       amount = -amount
     }
-    // Checking accounts: keep as-is (negative = debit, positive = deposit)
 
-    // --- ADD DESCRIPTION PREFIXES ---
     const descUpper = description.toUpperCase()
     if (descUpper.includes('FEE') && !/\[Fee\]/.test(description)) {
       description = `[Fee] ${description}`
@@ -212,13 +219,22 @@ export async function parsePDF(
     })
   }
 
-  // Deduplicate
   const uniqueRecords = records.filter((v, i, a) =>
     a.findIndex(t => t.transaction_date === v.transaction_date && t.description === v.description && t.amount === v.amount) === i
   )
 
   return {
     records: uniqueRecords,
-    meta: { rows: uniqueRecords.length, year: stmtYear, fileName: file.name }
+    meta: {
+      rows: uniqueRecords.length,
+      year: stmtYear,
+      fileName: file.name,
+      detectedAccount: finalAccountName,
+      startingBalance: balances.startingBalance,
+      endingBalance: balances.endingBalance,
+      periodStart: period.periodStart,
+      periodEnd: period.periodEnd,
+      isCreditCard,
+    } as any
   }
 }
