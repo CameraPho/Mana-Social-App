@@ -68,6 +68,7 @@ export default function Dashboard() {
   const [salesTaxRemittances, setSalesTaxRemittances] = useState<any[]>([])
   const [vendors, setVendors] = useState<any[]>([])
   const [billPayments, setBillPayments] = useState<any[]>([])
+  const [bankStatements, setBankStatements] = useState<any[]>([])
 
   useEffect(() => {
     const link = document.createElement('link')
@@ -82,7 +83,8 @@ export default function Dashboard() {
       const d = new Date(i[key])
       return d.getFullYear() === selectedYear && (selectedMonth === 0 || (d.getMonth() + 1) === selectedMonth)
     })
-    const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst, vm, col, eq, mln, mlp, str, ven, bpay] = await Promise.all([
+  const [s, e, ap, p, d, ml, ci, allCI, ast, ba, sc, bst, vm, col, eq, mln, mlp, str, ven, bpay, bstmt] = await Promise.all([
+
       supabase.from('sales').select('*'),
       supabase.from('expenses').select('*'),
       supabase.from('accounts_payable').select('*').order('invoice_date', { ascending: false }),
@@ -103,6 +105,7 @@ export default function Dashboard() {
       supabase.from('sales_tax_remittances').select('*').order('quarter_year', { ascending: false }),
       supabase.from('vendors').select('*').order('vendor_name', { ascending: true }),
       supabase.from('bill_payments').select('*').order('payment_date', { ascending: false }),
+      supabase.from('bank_statements').select('*').order('statement_period_end', { ascending: false }),
     ])
     setSales(fd(s.data || [], 'sale_date'))
     setExpenses(fd(e.data || [], 'purchase_date'))
@@ -124,6 +127,7 @@ export default function Dashboard() {
     setSalesTaxRemittances(str.data || [])
     setVendors(ven.data || [])
     setBillPayments(bpay.data || [])
+    setBankStatements(bstmt.data || [])
   }, [selectedYear, selectedMonth, supabase])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -262,7 +266,7 @@ export default function Dashboard() {
     sales, expenses, accountsPayable, payroll, disbursements, mileageLog,
     cogsInventory, allCogsInventory, assets, bankAccounts, supplyCosts, reconTransactions,
     vendorMappings, collections, equityTransactions, memberLoans, memberLoanPayments,
-    salesTaxRemittances, vendors, billPayments, setEditingItem, supabase }
+        salesTaxRemittances, vendors, billPayments, bankStatements, setEditingItem, supabase }
 
   return (
     <div style={{ fontFamily: FONT, background: C.bg, minHeight: '100vh', paddingBottom: '140px', color: C.text }}>
