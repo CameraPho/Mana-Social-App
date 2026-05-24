@@ -4,10 +4,12 @@ import { FONT, EXPENSE_CATEGORIES, DEDUCTIBILITY, ASSET_CATEGORIES, USEFUL_LIFE,
 import { fmt, fmtK, pctFmt } from '@/lib/format'
 import { calcDepreciation, assetTotals } from '@/lib/calculations'
 import InventoryReport from '@/components/InventoryReport'
+import ChartOfAccountsView from '@/components/ChartOfAccountsView'
+import JournalEntriesView from '@/components/JournalEntriesView'
 
 export default function ReportsTab(p: any) {
   const { C, sales, expenses, accountsPayable, payroll, mileageLog, cogsInventory, allCogsInventory, assets, bankAccounts, selectedYear, bankStatements, reconTransactions, supabase, fetchData } = p
-  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'>('menu')
+  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'|'coa'|'journal'>('menu')
   const [expandedStmt, setExpandedStmt] = useState<Record<string, boolean>>({})
 
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
@@ -44,7 +46,6 @@ export default function ReportsTab(p: any) {
   const totalAssets = totalCash + endingInventory + totalAPOwed + totalBookValue
   const ownerEquity = totalAssets - totalLiabilities
 
-  // ===== RECONCILIATION CALCULATIONS =====
   const statementStats = (bankStatements || []).map((s: any) => {
     const stmtTxns = (reconTransactions || []).filter((t: any) => t.statement_id === s.id)
     const reconciledTxns = stmtTxns.filter((t: any) => t.is_reconciled)
@@ -142,6 +143,8 @@ export default function ReportsTab(p: any) {
       ['balance', 'Balance Sheet', 'Assets, liabilities, owner equity'],
       ['reconciliation', 'Bank Reconciliation', 'Match imported statements to your books'],
       ['inventory', 'Inventory', 'Lots, on-hand units, value, margins'],
+      ['coa', 'Chart of Accounts', 'View the GL account structure'],
+      ['journal', 'Journal Entries', 'Double-entry GL transactions'],
       ['tax', 'Tax Estimates', 'Quarterly federal + CA PTE estimates'],
       ['deductions', 'Deductions', 'Expense deductibility + mileage'],
       ['assets', 'Assets & Depreciation', 'Fixed assets and depreciation schedule'],
@@ -166,6 +169,20 @@ export default function ReportsTab(p: any) {
 
   const BackBtn = () => (
     <button onClick={() => setView('menu')} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '8px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT, marginBottom: '12px' }}>← Reports</button>
+  )
+
+  if (view === 'coa') return (
+    <div>
+      <BackBtn />
+      <ChartOfAccountsView C={C} supabase={supabase} />
+    </div>
+  )
+
+  if (view === 'journal') return (
+    <div>
+      <BackBtn />
+      <JournalEntriesView C={C} supabase={supabase} />
+    </div>
   )
 
   if (view === 'inventory') return (
