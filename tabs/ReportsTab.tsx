@@ -6,10 +6,12 @@ import { calcDepreciation, assetTotals } from '@/lib/calculations'
 import InventoryReport from '@/components/InventoryReport'
 import ChartOfAccountsView from '@/components/ChartOfAccountsView'
 import JournalEntriesView from '@/components/JournalEntriesView'
+import JournalEntryBackfill from '@/components/JournalEntryBackfill'
 
 export default function ReportsTab(p: any) {
-  const { C, sales, expenses, accountsPayable, payroll, mileageLog, cogsInventory, allCogsInventory, assets, bankAccounts, selectedYear, bankStatements, reconTransactions, supabase, fetchData } = p
-  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'|'coa'|'journal'>('menu')
+  const { C, sales, expenses, accountsPayable, payroll, mileageLog, cogsInventory, allCogsInventory, assets, bankAccounts, selectedYear, bankStatements, reconTransactions, supabase, fetchData,
+    equityTransactions, memberLoans, memberLoanPayments, salesTaxRemittances, disbursements, billPayments } = p
+  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'|'coa'|'journal'|'backfill'>('menu')
   const [expandedStmt, setExpandedStmt] = useState<Record<string, boolean>>({})
 
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
@@ -58,7 +60,6 @@ export default function ReportsTab(p: any) {
     const computedEnding = isCreditCard ? startBal - reconciledSum : startBal + reconciledSum
     const variance = endBal - computedEnding
     const hasBalances = s.starting_balance != null && s.ending_balance != null
-    
     let status: 'reconciled_db' | 'reconciled' | 'in_progress' | 'has_variance' | 'imported' | 'no_balances'
     if (s.is_reconciled) status = 'reconciled_db'
     else if (!hasBalances) status = 'no_balances'
@@ -66,7 +67,6 @@ export default function ReportsTab(p: any) {
     else if (reconciledCount === totalCount && Math.abs(variance) < 0.01) status = 'reconciled'
     else if (reconciledCount === totalCount && Math.abs(variance) >= 0.01) status = 'has_variance'
     else status = 'in_progress'
-    
     return { ...s, stmtTxns, reconciledCount, totalCount, reconciledSum, computedEnding, variance, status, isCreditCard, hasBalances }
   })
 
@@ -77,38 +77,29 @@ export default function ReportsTab(p: any) {
   })
   const accountSummaries = Object.entries(statementsByAccount).map(([account, stmts]) => {
     const sorted = [...stmts].sort((a, b) => (b.statement_period_end || '').localeCompare(a.statement_period_end || ''))
-    const latest = sorted[0]
-    return { account, latest, allStmts: sorted }
+    return { account, latest: sorted[0], allStmts: sorted }
   }).sort((a, b) => {
-    const statusOrder = { has_variance: 0, in_progress: 1, no_balances: 2, imported: 3, reconciled: 4, reconciled_db: 5 }
-    return (statusOrder[a.latest.status as keyof typeof statusOrder] ?? 99) - (statusOrder[b.latest.status as keyof typeof statusOrder] ?? 99)
+    const order = { has_variance: 0, in_progress: 1, no_balances: 2, imported: 3, reconciled: 4, reconciled_db: 5 }
+    return (order[a.latest.status as keyof typeof order] ?? 99) - (order[b.latest.status as keyof typeof order] ?? 99)
   })
 
   const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-    reconciled_db:   { label: '✓ Reconciled',         color: '#10B981' },
-    reconciled:      { label: '✓ Ready to Reconcile', color: '#10B981' },
-    in_progress:     { label: '⚠ In Progress',         color: '#FBBF24' },
-    has_variance:    { label: '⚠ Has Variance',        color: '#EF4444' },
-    imported:        { label: 'Imported',              color: '#94A3B8' },
-    no_balances:     { label: '⚠ Missing Balances',    color: '#94A3B8' },
+    reconciled_db: { label: '✓ Reconciled', color: '#10B981' },
+    reconciled: { label: '✓ Ready to Reconcile', color: '#10B981' },
+    in_progress: { label: '⚠ In Progress', color: '#FBBF24' },
+    has_variance: { label: '⚠ Has Variance', color: '#EF4444' },
+    imported: { label: 'Imported', color: '#94A3B8' },
+    no_balances: { label: '⚠ Missing Balances', color: '#94A3B8' },
   }
 
   const markReconciled = async (stmtId: string) => {
     if (!confirm('Mark this statement as fully reconciled? This locks it from changes.')) return
-    try {
-      await supabase.from('bank_statements').update({ is_reconciled: true, reconciled_at: new Date().toISOString() }).eq('id', stmtId)
-      fetchData()
-    } catch (err: any) { alert('Error: ' + err.message) }
+    try { await supabase.from('bank_statements').update({ is_reconciled: true, reconciled_at: new Date().toISOString() }).eq('id', stmtId); fetchData() } catch (err: any) { alert('Error: ' + err.message) }
   }
-
   const unmarkReconciled = async (stmtId: string) => {
     if (!confirm('Unmark this statement as reconciled? You can edit transactions again afterward.')) return
-    try {
-      await supabase.from('bank_statements').update({ is_reconciled: false, reconciled_at: null }).eq('id', stmtId)
-      fetchData()
-    } catch (err: any) { alert('Error: ' + err.message) }
+    try { await supabase.from('bank_statements').update({ is_reconciled: false, reconciled_at: null }).eq('id', stmtId); fetchData() } catch (err: any) { alert('Error: ' + err.message) }
   }
-
   const toggleStmt = (id: string) => setExpandedStmt(prev => ({ ...prev, [id]: !prev[id] }))
 
   const quarters = [
@@ -145,6 +136,7 @@ export default function ReportsTab(p: any) {
       ['inventory', 'Inventory', 'Lots, on-hand units, value, margins'],
       ['coa', 'Chart of Accounts', 'View the GL account structure'],
       ['journal', 'Journal Entries', 'Double-entry GL transactions'],
+      ['backfill', 'Generate Journal Entries', 'Auto-create JEs from existing source records'],
       ['tax', 'Tax Estimates', 'Quarterly federal + CA PTE estimates'],
       ['deductions', 'Deductions', 'Expense deductibility + mileage'],
       ['assets', 'Assets & Depreciation', 'Fixed assets and depreciation schedule'],
@@ -171,26 +163,28 @@ export default function ReportsTab(p: any) {
     <button onClick={() => setView('menu')} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '8px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT, marginBottom: '12px' }}>← Reports</button>
   )
 
-  if (view === 'coa') return (
+  if (view === 'backfill') return (
     <div>
       <BackBtn />
-      <ChartOfAccountsView C={C} supabase={supabase} />
+      <JournalEntryBackfill
+        C={C}
+        supabase={supabase}
+        sales={sales}
+        expenses={expenses}
+        equityTransactions={equityTransactions}
+        memberLoans={memberLoans}
+        memberLoanPayments={memberLoanPayments}
+        salesTaxRemittances={salesTaxRemittances}
+        disbursements={disbursements}
+        billPayments={billPayments}
+        accountsPayable={accountsPayable}
+      />
     </div>
   )
 
-  if (view === 'journal') return (
-    <div>
-      <BackBtn />
-      <JournalEntriesView C={C} supabase={supabase} />
-    </div>
-  )
-
-  if (view === 'inventory') return (
-    <div>
-      <BackBtn />
-      <InventoryReport C={C} allCogsInventory={allCogsInventory} supabase={supabase} fetchData={fetchData} />
-    </div>
-  )
+  if (view === 'coa') return (<div><BackBtn /><ChartOfAccountsView C={C} supabase={supabase} /></div>)
+  if (view === 'journal') return (<div><BackBtn /><JournalEntriesView C={C} supabase={supabase} /></div>)
+  if (view === 'inventory') return (<div><BackBtn /><InventoryReport C={C} allCogsInventory={allCogsInventory} supabase={supabase} fetchData={fetchData} /></div>)
 
   if (view === 'reconciliation') return (
     <div>
@@ -199,7 +193,6 @@ export default function ReportsTab(p: any) {
         <div style={{ fontSize: '13px', color: '#1A7A75', fontWeight: 'bold', marginBottom: '4px' }}>Bank Reconciliation</div>
         <div style={{ fontSize: '11px', color: C.muted }}>Each statement gets fully reconciled when all transactions are categorized AND the math balances. Lock a statement to prevent future changes.</div>
       </div>
-
       {(bankStatements || []).length === 0 ? (
         <div style={{ ...card, padding: '40px', textAlign: 'center' }}>
           <div style={{ fontSize: '14px', color: C.muted }}>No bank statements imported yet.</div>
@@ -216,38 +209,22 @@ export default function ReportsTab(p: any) {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: '14px', color: C.text }}>{account}</div>
-                      <div style={{ fontSize: '11px', color: C.muted }}>
-                        Latest: {latest.statement_period_start} → {latest.statement_period_end} · {allStmts.length} statement{allStmts.length !== 1 ? 's' : ''}
-                      </div>
+                      <div style={{ fontSize: '11px', color: C.muted }}>Latest: {latest.statement_period_start} → {latest.statement_period_end} · {allStmts.length} statement{allStmts.length !== 1 ? 's' : ''}</div>
                     </div>
                     <span style={{ padding: '3px 8px', borderRadius: '6px', background: `${status.color}20`, color: status.color, fontSize: '10px', fontWeight: 'bold' }}>{status.label}</span>
                   </div>
                   {latest.hasBalances && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', fontSize: '11px', marginTop: '8px' }}>
-                      <div>
-                        <div style={{ color: C.muted }}>{latest.isCreditCard ? 'Previous' : 'Starting'}</div>
-                        <div style={{ fontWeight: 700, color: C.text }}>{fmt(Number(latest.starting_balance))}</div>
-                      </div>
-                      <div>
-                        <div style={{ color: C.muted }}>{latest.isCreditCard ? 'New' : 'Ending'}</div>
-                        <div style={{ fontWeight: 700, color: C.text }}>{fmt(Number(latest.ending_balance))}</div>
-                      </div>
-                      <div>
-                        <div style={{ color: C.muted }}>Variance</div>
-                        <div style={{ fontWeight: 700, color: Math.abs(latest.variance) < 0.01 ? '#10B981' : '#ef4444' }}>
-                          {Math.abs(latest.variance) < 0.01 ? '$0.00 ✓' : fmt(latest.variance)}
-                        </div>
-                      </div>
+                      <div><div style={{ color: C.muted }}>{latest.isCreditCard ? 'Previous' : 'Starting'}</div><div style={{ fontWeight: 700, color: C.text }}>{fmt(Number(latest.starting_balance))}</div></div>
+                      <div><div style={{ color: C.muted }}>{latest.isCreditCard ? 'New' : 'Ending'}</div><div style={{ fontWeight: 700, color: C.text }}>{fmt(Number(latest.ending_balance))}</div></div>
+                      <div><div style={{ color: C.muted }}>Variance</div><div style={{ fontWeight: 700, color: Math.abs(latest.variance) < 0.01 ? '#10B981' : '#ef4444' }}>{Math.abs(latest.variance) < 0.01 ? '$0.00 ✓' : fmt(latest.variance)}</div></div>
                     </div>
                   )}
-                  <div style={{ fontSize: '11px', color: C.muted, marginTop: '6px' }}>
-                    {latest.reconciledCount} of {latest.totalCount} transactions categorized
-                  </div>
+                  <div style={{ fontSize: '11px', color: C.muted, marginTop: '6px' }}>{latest.reconciledCount} of {latest.totalCount} transactions categorized</div>
                 </div>
               )
             })}
           </div>
-
           <div style={card}>
             <span style={secHdr}>Statement History</span>
             {[...statementStats].sort((a: any, b: any) => (b.statement_period_end || '').localeCompare(a.statement_period_end || '')).map((s: any) => {
@@ -273,41 +250,33 @@ export default function ReportsTab(p: any) {
                       </div>
                     )}
                   </div>
-
                   {isExpanded && (
                     <div style={{ background: C.cardBg, padding: '12px' }}>
                       {s.is_reconciled ? (
                         <div style={{ padding: '10px', background: 'rgba(16,185,129,0.1)', borderRadius: '8px', marginBottom: '10px' }}>
-                          <div style={{ fontSize: '12px', color: '#10B981', fontWeight: 'bold' }}>
-                            ✓ Reconciled on {s.reconciled_at ? new Date(s.reconciled_at).toLocaleDateString() : 'unknown'}
-                          </div>
+                          <div style={{ fontSize: '12px', color: '#10B981', fontWeight: 'bold' }}>✓ Reconciled on {s.reconciled_at ? new Date(s.reconciled_at).toLocaleDateString() : 'unknown'}</div>
                           <button onClick={() => unmarkReconciled(s.id)} style={{ marginTop: '6px', background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '4px 10px', fontSize: '11px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>Unlock</button>
                         </div>
                       ) : s.status === 'reconciled' ? (
                         <div style={{ padding: '10px', background: 'rgba(16,185,129,0.1)', borderRadius: '8px', marginBottom: '10px' }}>
-                          <div style={{ fontSize: '12px', color: '#10B981', fontWeight: 'bold', marginBottom: '6px' }}>
-                            All transactions categorized and balanced ✓
-                          </div>
+                          <div style={{ fontSize: '12px', color: '#10B981', fontWeight: 'bold', marginBottom: '6px' }}>All transactions categorized and balanced ✓</div>
                           <button onClick={() => markReconciled(s.id)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 14px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Mark Statement Reconciled</button>
                         </div>
                       ) : null}
-
                       {s.totalCount === 0 ? (
                         <div style={{ fontSize: '12px', color: C.muted, textAlign: 'center', padding: '8px' }}>No transactions in this statement</div>
-                      ) : (
-                        s.stmtTxns.map((t: any) => (
-                          <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${C.border}`, fontSize: '12px' }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.description}</div>
-                              <div style={{ fontSize: '10px', color: C.muted }}>{t.transaction_date}{t.action_type ? ` · ${t.action_type.replace(/_/g, ' ')}` : ''}</div>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ fontWeight: 700, color: t.amount >= 0 ? C.green : '#ef4444' }}>{fmt(Number(t.amount))}</span>
-                              {t.is_reconciled ? <span style={{ color: C.green, fontSize: '11px' }}>✓</span> : <span style={{ color: '#FBBF24', fontSize: '11px' }}>—</span>}
-                            </div>
+                      ) : (s.stmtTxns.map((t: any) => (
+                        <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${C.border}`, fontSize: '12px' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.description}</div>
+                            <div style={{ fontSize: '10px', color: C.muted }}>{t.transaction_date}{t.action_type ? ` · ${t.action_type.replace(/_/g, ' ')}` : ''}</div>
                           </div>
-                        ))
-                      )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 700, color: t.amount >= 0 ? C.green : '#ef4444' }}>{fmt(Number(t.amount))}</span>
+                            {t.is_reconciled ? <span style={{ color: C.green, fontSize: '11px' }}>✓</span> : <span style={{ color: '#FBBF24', fontSize: '11px' }}>—</span>}
+                          </div>
+                        </div>
+                      )))}
                     </div>
                   )}
                 </div>
@@ -330,9 +299,7 @@ export default function ReportsTab(p: any) {
         <PLRow label="Net Sales" value={netSalesAmt} bold />
         <PLRow label="Cost of Goods Sold" value={cogsRecognized} neg />
         <PLRow label="Gross Profit" value={grossMargin} bold />
-        {EXPENSE_CATEGORIES.filter((c: string) => expByCategory[c] > 0).map((c: string) => (
-          <PLRow key={c} label={c} value={expByCategory[c]} neg />
-        ))}
+        {EXPENSE_CATEGORIES.filter((c: string) => expByCategory[c] > 0).map((c: string) => (<PLRow key={c} label={c} value={expByCategory[c]} neg />))}
         <PLRow label="Salaries & Wages" value={staffing} neg />
         {totalDepreciation > 0 && <PLRow label="Depreciation" value={totalDepreciation} neg />}
         <PLRow label="Net Income" value={netIncome} bold />
