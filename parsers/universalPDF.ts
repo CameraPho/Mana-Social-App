@@ -22,13 +22,9 @@ function detectBankFromText(text: string): { accountName: string; isCreditCard: 
   return { accountName: 'Unknown', isCreditCard: false }
 }
 
-function extractBalances(text: string, isCreditCard: boolean): {
-  startingBalance: number | null
-  endingBalance: number | null
-} {
+function extractBalances(text: string, isCreditCard: boolean): { startingBalance: number | null; endingBalance: number | null } {
   let startingBalance: number | null = null
   let endingBalance: number | null = null
-
   if (isCreditCard) {
     const prevMatch = text.match(/previous\s+balance[\s\$]*([\d,]+\.\d{2})/i)
     const newMatch = text.match(/new\s+balance[\s\$\sasof]*([\d,]+\.\d{2})/i)
@@ -40,25 +36,14 @@ function extractBalances(text: string, isCreditCard: boolean): {
     if (beginMatch) startingBalance = parseFloat(beginMatch[1].replace(/,/g, ''))
     if (endMatch) endingBalance = parseFloat(endMatch[1].replace(/,/g, ''))
   }
-
   return { startingBalance, endingBalance }
 }
 
 function extractPeriod(text: string): { periodStart: string | null; periodEnd: string | null } {
   const m1 = text.match(/(\d{2})\/(\d{2})\/(\d{2})\s*[-–]\s*(\d{2})\/(\d{2})\/(\d{2})/)
-  if (m1) {
-    return {
-      periodStart: `20${m1[3]}-${m1[1]}-${m1[2]}`,
-      periodEnd: `20${m1[6]}-${m1[4]}-${m1[5]}`,
-    }
-  }
+  if (m1) return { periodStart: `20${m1[3]}-${m1[1]}-${m1[2]}`, periodEnd: `20${m1[6]}-${m1[4]}-${m1[5]}` }
   const m2 = text.match(/(\d{2})\/(\d{2})\/(\d{4})\s*(?:to|through|-|–)\s*(\d{2})\/(\d{2})\/(\d{4})/i)
-  if (m2) {
-    return {
-      periodStart: `${m2[3]}-${m2[1]}-${m2[2]}`,
-      periodEnd: `${m2[6]}-${m2[4]}-${m2[5]}`,
-    }
-  }
+  if (m2) return { periodStart: `${m2[3]}-${m2[1]}-${m2[2]}`, periodEnd: `${m2[6]}-${m2[4]}-${m2[5]}` }
   return { periodStart: null, periodEnd: null }
 }
 
@@ -86,33 +71,32 @@ const NOISE_PATTERNS = [
   /^CREDITS\s*[\+\-]?\s*\$/i,
   /^FEES\s*[\+\-]?\s*\$/i,
   /^INTEREST\s*[\+\-]?\s*\$/i,
+  // NEW: Chase Pay Over Time plan sections (false positives in Sapphire)
+  /CHASE\s+PAY\s+OVER\s+TIME/i,
+  /PLANS\s+SET\s+UP\s+AFTER\s+PURCHASE/i,
+  /PLAN\s+TOTALS?/i,
+  /TOTAL\s+PLANS\s+PAYMENT\s+DUE/i,
+  /INTEREST\s+SAVING\s+BALANCE/i,
+  /FLEXIBLE\s+FINANCING/i,
 ]
 
 // ============================================
 // CHECKING ACCOUNT PARSER (uses balance delta)
 // ============================================
-function parseCheckingByBalanceDelta(
-  lines: string[],
-  stmtYear: string,
-  accountName: string,
-  beginningBalance: number
-): any[] {
+function parseCheckingByBalanceDelta(lines: string[], stmtYear: string, accountName: string, beginningBalance: number): any[] {
   const records: any[] = []
   let runningBalance = beginningBalance
 
-  const cleanDesc = (s: string): string => {
-    return s
-      .replace(/^\s*\d{2}\/\d{2}\s*/, '') // strip leading MM/DD if duplicated
-      .replace(/^[\s,;"'$\-]+|[\s,;"'$\-]+$/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-  }
+  const cleanDesc = (s: string): string => s
+    .replace(/^\s*\d{2}\/\d{2}\s*/, '')
+    .replace(/^[\s,;"'$\-]+|[\s,;"'$\-]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
     if (NOISE_PATTERNS.some(p => p.test(line))) continue
 
-    // Must start with date
     const dateMatch = line.match(/^(\d{2})\/(\d{2})\b/)
     if (!dateMatch) continue
     const [fullDate, mm, dd] = dateMatch
@@ -122,101 +106,69 @@ function parseCheckingByBalanceDelta(
 
     const restOfLine = line.substring(fullDate.length).trim()
 
-    // PATTERN 1: line ends with two decimal numbers (amount + balance)
     const twoNumMatch = restOfLine.match(/^(.+?)\s+(-?[\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/)
     if (twoNumMatch) {
       const desc = cleanDesc(twoNumMatch[1])
       const amount = parseFloat(twoNumMatch[2].replace(/,/g, ''))
       const newBalance = parseFloat(twoNumMatch[3].replace(/,/g, ''))
       if (desc.length >= 3 && amount !== 0) {
-        records.push({
-          transaction_date: `${stmtYear}-${mm}-${dd}`,
-          description: desc.slice(0, 200),
-          amount,
-          account_name: accountName,
-        })
+        records.push({ transaction_date: `${stmtYear}-${mm}-${dd}`, description: desc.slice(0, 200), amount, account_name: accountName })
       }
       runningBalance = newBalance
       continue
     }
 
-    // PATTERN 2: line ends with one decimal number (balance only — credit/deposit)
     const oneNumMatch = restOfLine.match(/^(.+?)\s+([\d,]+\.\d{2})\s*$/)
     if (oneNumMatch) {
       const desc = cleanDesc(oneNumMatch[1])
       const newBalance = parseFloat(oneNumMatch[2].replace(/,/g, ''))
       const amount = parseFloat((newBalance - runningBalance).toFixed(2))
       if (desc.length >= 3 && Math.abs(amount) > 0.001) {
-        records.push({
-          transaction_date: `${stmtYear}-${mm}-${dd}`,
-          description: desc.slice(0, 200),
-          amount,
-          account_name: accountName,
-        })
+        records.push({ transaction_date: `${stmtYear}-${mm}-${dd}`, description: desc.slice(0, 200), amount, account_name: accountName })
       }
       runningBalance = newBalance
       continue
     }
 
-    // PATTERN 3: multi-line transaction — look ahead for amount/balance
     let description = restOfLine
     for (let j = 1; j <= 3 && i + j < lines.length; j++) {
       const nextLine = lines[i + j].trim()
-      
-      // Stop if we hit another transaction
       if (/^\d{2}\/\d{2}\b/.test(nextLine)) break
-      
-      // Check for amount + balance on next line
+
       const lineAmtBal = nextLine.match(/^(-?[\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/)
       if (lineAmtBal) {
         const desc = cleanDesc(description)
         const amount = parseFloat(lineAmtBal[1].replace(/,/g, ''))
         const newBalance = parseFloat(lineAmtBal[2].replace(/,/g, ''))
         if (desc.length >= 3 && amount !== 0) {
-          records.push({
-            transaction_date: `${stmtYear}-${mm}-${dd}`,
-            description: desc.slice(0, 200),
-            amount,
-            account_name: accountName,
-          })
+          records.push({ transaction_date: `${stmtYear}-${mm}-${dd}`, description: desc.slice(0, 200), amount, account_name: accountName })
         }
         runningBalance = newBalance
         i = i + j
         break
       }
-      
-      // Check for balance only on next line
+
       const lineBalOnly = nextLine.match(/^([\d,]+\.\d{2})\s*$/)
       if (lineBalOnly) {
         const desc = cleanDesc(description)
         const newBalance = parseFloat(lineBalOnly[1].replace(/,/g, ''))
         const amount = parseFloat((newBalance - runningBalance).toFixed(2))
         if (desc.length >= 3 && Math.abs(amount) > 0.001) {
-          records.push({
-            transaction_date: `${stmtYear}-${mm}-${dd}`,
-            description: desc.slice(0, 200),
-            amount,
-            account_name: accountName,
-          })
+          records.push({ transaction_date: `${stmtYear}-${mm}-${dd}`, description: desc.slice(0, 200), amount, account_name: accountName })
         }
         runningBalance = newBalance
         i = i + j
         break
       }
-      
-      // Append to description and continue looking
       description += ' ' + nextLine
     }
   }
 
-  // Dedupe
-  return records.filter((v, i, a) =>
-    a.findIndex(t => t.transaction_date === v.transaction_date && t.description === v.description && t.amount === v.amount) === i
-  )
+  return records.filter((v, i, a) => a.findIndex(t => t.transaction_date === v.transaction_date && t.description === v.description && t.amount === v.amount) === i)
 }
 
 // ============================================
-// CREDIT CARD PARSER (original scan-everything)
+// CREDIT CARD PARSER
 // ============================================
 function parseCreditCard(lines: string[], stmtYear: string, accountName: string): any[] {
   const records: any[] = []
@@ -226,7 +178,12 @@ function parseCreditCard(lines: string[], stmtYear: string, accountName: string)
 
     if (NOISE_PATTERNS.some(p => p.test(line))) continue
 
-    const dateMatch = line.match(/\b(\d{2})\/(\d{2})\b/)
+    // Skip lines with 3+ dollar amounts (plan summary, totals, etc. — not real transactions)
+    const dollarCount = (line.match(/[\d,]+\.\d{2}/g) || []).length
+    if (dollarCount >= 3) continue
+
+    // Match MM/DD that is NOT followed by another date component (excludes MM/DD/YYYY plan dates)
+    const dateMatch = line.match(/\b(\d{2})\/(\d{2})(?!\d|\/)/)
     if (!dateMatch || dateMatch.index === undefined) continue
     const [fullDateStr, mm, dd] = dateMatch
 
@@ -256,36 +213,22 @@ function parseCreditCard(lines: string[], stmtYear: string, accountName: string)
     if (!description || description.length < 3) continue
     if (/^\d+$/.test(description)) continue
 
-    // Flip sign for credit cards (so purchases negative, payments positive)
-    amount = -amount
+    amount = -amount  // Flip sign: purchases negative, payments positive
 
     const descUpper = description.toUpperCase()
-    if (descUpper.includes('FEE') && !/\[Fee\]/.test(description)) {
-      description = `[Fee] ${description}`
-    } else if (descUpper.includes('INTEREST CHARGED') && !/\[Interest\]/.test(description)) {
-      description = `[Interest] ${description}`
-    }
+    if (descUpper.includes('FEE') && !/\[Fee\]/.test(description)) description = `[Fee] ${description}`
+    else if (descUpper.includes('INTEREST CHARGED') && !/\[Interest\]/.test(description)) description = `[Interest] ${description}`
 
-    records.push({
-      transaction_date: `${stmtYear}-${mm}-${dd}`,
-      description: description.slice(0, 200),
-      amount,
-      account_name: accountName,
-    })
+    records.push({ transaction_date: `${stmtYear}-${mm}-${dd}`, description: description.slice(0, 200), amount, account_name: accountName })
   }
 
-  return records.filter((v, i, a) =>
-    a.findIndex(t => t.transaction_date === v.transaction_date && t.description === v.description && t.amount === v.amount) === i
-  )
+  return records.filter((v, i, a) => a.findIndex(t => t.transaction_date === v.transaction_date && t.description === v.description && t.amount === v.amount) === i)
 }
 
 // ============================================
 // MAIN PARSER ENTRY POINT
 // ============================================
-export async function parsePDF(
-  file: File,
-  accountName: string
-): Promise<ParseResult> {
+export async function parsePDF(file: File, accountName: string): Promise<ParseResult> {
   let textContentLines: string[] = []
   const fileNameUpper = file.name.toUpperCase()
   let stmtYear = String(new Date().getFullYear())
@@ -359,7 +302,6 @@ export async function parsePDF(
   const billingMatch = headerText.match(/(\d{2})\/(\d{2})\/(\d{2})\s*[-–]\s*(\d{2})\/(\d{2})\/(\d{2})/)
   if (billingMatch) stmtYear = `20${billingMatch[6]}`
 
-  // ROUTE TO CORRECT PARSER
   let uniqueRecords: any[]
   if (isChecking && balances.startingBalance != null) {
     uniqueRecords = parseCheckingByBalanceDelta(lines, stmtYear, finalAccountName, balances.startingBalance)
