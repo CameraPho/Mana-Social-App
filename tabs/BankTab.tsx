@@ -402,10 +402,28 @@ export default function BankTab(p: any) {
 
   const byAccount = reconTransactions.filter((t: any) => account === 'All' || t.account_name === account)
   const search = searchText.trim().toLowerCase()
+  const matchesLinkedLedger = (txnId: string, q: string) => {
+    const hit = (arr: any[] | undefined, fields: string[]) =>
+      (arr || []).some((x: any) =>
+        x.bank_txn_id === txnId &&
+        fields.some(f => (x[f] != null ? String(x[f]) : '').toLowerCase().includes(q))
+      )
+    return (
+      hit(expenses, ['notes', 'category', 'label']) ||
+      hit(sales, ['notes', 'platform']) ||
+      hit(p.disbursements, ['notes', 'recipient']) ||
+      hit(equityTransactions, ['notes', 'member_name', 'type']) ||
+      hit(memberLoans, ['notes', 'member_name']) ||
+      hit(memberLoanPayments, ['notes']) ||
+      hit(accountsPayable, ['notes', 'vendor_name', 'description']) ||
+      hit(collections, ['notes', 'seller_name'])
+    )
+  }
   const bySearch = !search ? byAccount : byAccount.filter((t: any) => {
     return (t.description || '').toLowerCase().includes(search)
       || (t.account_name || '').toLowerCase().includes(search)
       || String(t.amount).includes(search)
+      || matchesLinkedLedger(t.id, search)
   })
   const visible = bySearch.filter((t: any) => {
     if (filterMode === 'unreconciled') return !t.is_reconciled
