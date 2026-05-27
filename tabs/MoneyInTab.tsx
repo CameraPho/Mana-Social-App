@@ -1,7 +1,6 @@
 'use client'
 import React, { useState, useRef } from 'react'
-import { createClient } from '@/lib/supabase-client'
-const supabase = createClient()
+import { supabase } from '@/lib/supabase'
 import { FONT } from '@/lib/constants'
 import { fmt, getEntity } from '@/lib/format'
 import { parsePDF } from '@/parsers/universalPDF'
@@ -18,73 +17,68 @@ export default function MoneyInTab(p: any) {
   const editBtn: React.CSSProperties = { background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '3px 8px', fontSize: '12px', color: C.muted, cursor: 'pointer', fontFamily: FONT }
   const delBtn: React.CSSProperties = { background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: '18px', fontFamily: FONT }
 
-  const gross = sales.reduce((s: number, r: any) => s + Number(r.amount), 0)
-  const totalFees = sales.reduce((s: number, r: any) => s + Number(r.fees || 0) + Number(r.shipping || 0), 0)
+  // Correct math: shipping is income from customer, NOT a fee
+  const grossItemRevenue = sales.reduce((s: number, r: any) => s + Number(r.amount || 0), 0)
+  const totalShippingIncome = sales.reduce((s: number, r: any) => s + Number(r.shipping || 0), 0)
+  const totalFees = sales.reduce((s: number, r: any) => s + Number(r.fees || 0), 0)
+  const totalCATax = sales.reduce((s: number, r: any) => s + Number(r.ca_sales_tax || 0), 0)
+  const totalOtherTax = sales.reduce((s: number, r: any) => s + Number(r.other_domestic_sales_tax || 0), 0)
+  const totalIntlTax = sales.reduce((s: number, r: any) => s + Number(r.international_sales_tax || 0), 0)
+  const totalTax = totalCATax + totalOtherTax + totalIntlTax
+  // Net payout = what hits your bank from marketplace = item + shipping - fees (platform remits tax)
+  const netPayout = grossItemRevenue + totalShippingIncome - totalFees
 
   const handleUpload = async (file: File) => {
-    setUploadPreview([]);
-    const name = file.name.toLowerCase();
-
+    setUploadPreview([])
+    const name = file.name.toLowerCase()
     try {
-      // TCGplayer XLSX
       if ((name.endsWith('.xlsx') || name.endsWith('.xls')) && !name.includes('ebay')) {
-        setUploadStatus('Parsing TCGplayer report...');
-        const { records, meta } = await parsePDF(file, 'TCGplayer');
-        setUploadPreview(records.map((r: any) => ({
-          ...r,
-          platform: 'TCGplayer',
-          _label: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}`
-        })));
-        setUploadStatus(`TCGplayer: ${meta.numOrders} orders · Gross ${fmt(meta.grossSales)}`);
-        return;
+        setUploadStatus('Parsing TCGplayer report...')
+        const { records, meta } = await parsePDF(file, 'TCGplayer')
+        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'TCGplayer', _label: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}` })))
+        setUploadStatus(`TCGplayer: ${meta.numOrders} orders · Gross ${fmt(meta.grossSales)}`)
+        return
       }
-
-      // ManaPool CSV
       if (name.endsWith('.csv') && (name.includes('manapool') || name.includes('mana_pool') || name.includes('mana pool'))) {
-        setUploadStatus('Parsing ManaPool report...');
-        const { records, meta } = await parsePDF(file, 'ManaPool');
-        setUploadPreview(records.map((r: any) => ({
-          ...r,
-          platform: 'ManaPool',
-          _label: `ManaPool · ${meta.totalOrders} orders`
-        })));
-        setUploadStatus(`ManaPool: Gross ${fmt(meta.totalGross)}`);
-        return;
+        setUploadStatus('Parsing ManaPool report...')
+        const { records, meta } = await parsePDF(file, 'ManaPool')
+        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'ManaPool', _label: `ManaPool · ${meta.totalOrders} orders` })))
+        setUploadStatus(`ManaPool: Gross ${fmt(meta.totalGross)}`)
+        return
       }
-
-      // eBay CSV
       if (name.endsWith('.csv')) {
-        setUploadStatus('Parsing eBay report...');
-        const { records, meta } = await parsePDF(file, 'eBay');
-        setUploadPreview(records.map((r: any) => ({
-          ...r,
-          platform: 'eBay',
-          _label: `eBay · ${meta.rows} listings`
-        })));
-        setUploadStatus(`eBay: Gross ${fmt(meta.totalGross)}`);
-        return;
+        setUploadStatus('Parsing eBay report...')
+        const { records, meta } = await parsePDF(file, 'eBay')
+        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'eBay', _label: `eBay · ${meta.rows} listings` })))
+        setUploadStatus(`eBay: Gross ${fmt(meta.totalGross)}`)
+        return
       }
-
-      setUploadStatus('Unrecognized file — use TCGplayer .xlsx, eBay .csv, or ManaPool .csv');
+      setUploadStatus('Unrecognized file — use TCGplayer .xlsx, eBay .csv, or ManaPool .csv')
     } catch (err: any) {
-      setUploadStatus('Error: ' + err.message);
+      setUploadStatus('Error: ' + err.message)
     }
-  };
+  }
 
   const confirmUpload = async () => {
     setUploadStatus('Saving...')
-    const inserts = uploadPreview.map((r: any) => ({ 
-      platform: r.platform || 'other', 
-      amount: parseFloat(r.amount) || 0, 
-      fees: parseFloat(r.fees) || 0, 
-      shipping: parseFloat(r.shipping) || 0, 
-      sale_date: r.sale_date, 
-      period_start: r.period_start || r.sale_date, 
-      period_end: r.period_end || r.sale_date, 
-      entity: r.entity || getEntity(r.sale_date), 
-      net_sales: parseFloat(r.net_sales) || 0, 
-      num_orders: parseInt(r.num_orders) || 1 
-    }))
+    const inserts = uploadPreview.map((r: any) => {
+      const amount = parseFloat(r.amount) || 0
+      const shipping = parseFloat(r.shipping) || 0
+      const fees = parseFloat(r.fees) || 0
+      return {
+        platform: r.platform || 'other',
+        amount, fees, shipping,
+        ca_sales_tax: parseFloat(r.ca_sales_tax) || 0,
+        other_domestic_sales_tax: parseFloat(r.other_domestic_sales_tax) || 0,
+        international_sales_tax: parseFloat(r.international_sales_tax) || 0,
+        sale_date: r.sale_date,
+        period_start: r.period_start || r.sale_date,
+        period_end: r.period_end || r.sale_date,
+        entity: r.entity || getEntity(r.sale_date),
+        net_sales: amount + shipping - fees,  // Bank-deposit-matchable
+        num_orders: parseInt(r.num_orders) || 1
+      }
+    })
     const { error } = await supabase.from('sales').insert(inserts)
     if (error) { setUploadStatus('Error: ' + error.message); return }
     setUploadPreview([]); setUploadStatus('Saved!'); fetchData()
@@ -95,10 +89,18 @@ export default function MoneyInTab(p: any) {
 
   return (
     <div>
+      {/* Net Payout summary card */}
       <div style={{ ...card, background: C.navyDark, color: '#fff', padding: '16px 20px' }}>
-        <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>NET SALES</div>
-        <div style={{ fontSize: '30px', fontWeight: 900, color: '#4ade80' }}>{fmt(gross - totalFees)}</div>
-        <div style={{ fontSize: '13px', opacity: 0.5, marginTop: '2px' }}>Gross {fmt(gross)} · Fees {fmt(-totalFees)}</div>
+        <div style={{ fontSize: '11px', opacity: 0.6, fontWeight: 'bold', letterSpacing: '1px' }}>NET PAYOUT (BANK DEPOSIT)</div>
+        <div style={{ fontSize: '30px', fontWeight: 900, color: '#4ade80' }}>{fmt(netPayout)}</div>
+        <div style={{ fontSize: '12px', opacity: 0.6, marginTop: '6px' }}>
+          Gross {fmt(grossItemRevenue)} + Shipping {fmt(totalShippingIncome)} − Fees {fmt(totalFees)}
+        </div>
+        {totalTax > 0 && (
+          <div style={{ fontSize: '11px', opacity: 0.5, marginTop: '4px' }}>
+            Tax collected (platform remits): CA {fmt(totalCATax)} · Other {fmt(totalOtherTax)} · Intl {fmt(totalIntlTax)}
+          </div>
+        )}
       </div>
 
       <div style={{ ...card, padding: '14px' }}>
@@ -112,12 +114,23 @@ export default function MoneyInTab(p: any) {
       {uploadPreview.length > 0 && (
         <div style={{ ...card, border: `1px solid ${C.teal}` }}>
           <div style={{ fontSize: '12px', fontWeight: 'bold', color: C.teal, marginBottom: '8px', textTransform: 'uppercase' }}>Import Preview</div>
-          {uploadPreview.map((r, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${C.border}`, fontSize: '13px' }}>
-              <span style={{ fontWeight: 700 }}>{r._label}</span>
-              <span style={{ fontWeight: 700, color: C.green }}>{fmt(r.amount || 0)}</span>
-            </div>
-          ))}
+          {uploadPreview.map((r, i) => {
+            const amt = Number(r.amount || 0)
+            const ship = Number(r.shipping || 0)
+            const fee = Number(r.fees || 0)
+            const net = amt + ship - fee
+            return (
+              <div key={i} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 700 }}>
+                  <span>{r._label}</span>
+                  <span style={{ color: C.green }}>{fmt(net)}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>
+                  Item {fmt(amt)} + Ship {fmt(ship)} − Fees {fmt(fee)}
+                </div>
+              </div>
+            )
+          })}
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
             <button onClick={confirmUpload} style={{ padding: '10px 18px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Save all</button>
             <button onClick={() => { setUploadPreview([]); setUploadStatus('') }} style={{ padding: '10px 14px', background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', color: C.muted, cursor: 'pointer', fontSize: '14px', fontFamily: FONT }}>Cancel</button>
@@ -129,35 +142,44 @@ export default function MoneyInTab(p: any) {
         <div style={{ textAlign: 'center', padding: '40px', color: C.muted }}>No sales this period — upload a report or tap + to add one</div>
       ) : platforms.map((platform: any) => {
         const ps = sales.filter((s: any) => s.platform === platform)
-        const pt = ps.reduce((a: number, s: any) => a + Number(s.amount), 0)
+        const ptItem = ps.reduce((a: number, s: any) => a + Number(s.amount || 0), 0)
+        const ptShip = ps.reduce((a: number, s: any) => a + Number(s.shipping || 0), 0)
+        const ptFees = ps.reduce((a: number, s: any) => a + Number(s.fees || 0), 0)
+        const ptNet = ptItem + ptShip - ptFees
         const isOpen = expandedTiles[platform]
         return (
           <div key={platform} style={{ ...card, padding: 0, overflow: 'hidden' }}>
             <div onClick={() => setExpandedTiles(prev => ({ ...prev, [platform]: !prev[platform] }))} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer' }}>
               <div>
                 <div style={{ fontWeight: 900, fontSize: '15px', textTransform: 'capitalize', color: C.navy }}>{platform}</div>
-                <div style={{ fontSize: '12px', color: C.muted }}>{ps.length} record{ps.length !== 1 ? 's' : ''}</div>
+                <div style={{ fontSize: '12px', color: C.muted }}>{ps.length} record{ps.length !== 1 ? 's' : ''} · Item {fmt(ptItem)} + Ship {fmt(ptShip)} − Fees {fmt(ptFees)}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontWeight: 900, color: C.green, fontSize: '18px' }}>{fmt(pt)}</span>
+                <span style={{ fontWeight: 900, color: C.green, fontSize: '18px' }}>{fmt(ptNet)}</span>
                 <span style={{ color: C.muted }}>{isOpen ? '▲' : '▼'}</span>
               </div>
             </div>
             {isOpen && (
               <div style={{ borderTop: `1px solid ${C.border}` }}>
-                {ps.map((s: any) => (
-                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
-                    <div>
-                      <div style={{ fontSize: '13px', fontWeight: 600 }}>{s.period_start && s.period_start !== s.sale_date ? `${s.period_start} – ${s.period_end}` : s.sale_date}</div>
-                      <div style={{ fontSize: '12px', color: C.muted }}>Fees {fmt(Number(s.fees||0)+Number(s.shipping||0))} · {s.num_orders||1} orders</div>
+                {ps.map((s: any) => {
+                  const sAmt = Number(s.amount || 0)
+                  const sShip = Number(s.shipping || 0)
+                  const sFee = Number(s.fees || 0)
+                  const sNet = sAmt + sShip - sFee
+                  return (
+                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600 }}>{s.period_start && s.period_start !== s.sale_date ? `${s.period_start} – ${s.period_end}` : s.sale_date}</div>
+                        <div style={{ fontSize: '11px', color: C.muted }}>Item {fmt(sAmt)} + Ship {fmt(sShip)} − Fees {fmt(sFee)} · {s.num_orders || 1} orders</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: 700, color: C.green, fontSize: '15px' }}>{fmt(sNet)}</span>
+                        <button onClick={() => startEdit('sales', s)} style={editBtn}>Edit</button>
+                        <button onClick={() => handleDelete('sales', s.id)} style={delBtn}>×</button>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontWeight: 700, color: C.green, fontSize: '15px' }}>{fmt(Number(s.amount))}</span>
-                      <button onClick={() => startEdit('sales', s)} style={editBtn}>Edit</button>
-                      <button onClick={() => handleDelete('sales', s.id)} style={delBtn}>×</button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
