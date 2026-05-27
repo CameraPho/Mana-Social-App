@@ -18,41 +18,18 @@ const ASSET_CATEGORIES = ['Equipment', 'Furniture & Fixtures', 'Vehicle']
 
 export async function POST(req: NextRequest) {
   try {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      console.error('ANTHROPIC_API_KEY missing')
-      return NextResponse.json({ error: 'Server config error: ANTHROPIC_API_KEY not set in Vercel' }, { status: 500 })
-    }
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      console.error('NEXT_PUBLIC_SUPABASE_URL missing')
-      return NextResponse.json({ error: 'Server config error: SUPABASE_URL not set' }, { status: 500 })
-    }
+    if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json({ error: 'Server config error: ANTHROPIC_API_KEY not set in Vercel' }, { status: 500 })
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return NextResponse.json({ error: 'Server config error: SUPABASE_URL not set' }, { status: 500 })
 
     const body = await req.json()
     const { content, fileName, fileHash, fileSize, uploadedBy } = body
-    console.log('smart-parse called for:', fileName, 'hash:', fileHash?.slice(0, 12))
 
-    console.log('Checking duplicate for hash:', fileHash)
     const { data: existingDoc, error: dupErr } = await supabase
-      .from('canonical_documents')
-      .select('*')
-      .eq('file_hash', fileHash)
-      .maybeSingle()
-
-    if (dupErr) {
-      console.error('Duplicate check error:', dupErr)
-      return NextResponse.json({ error: 'DB error checking duplicates: ' + dupErr.message }, { status: 500 })
-    }
-
+      .from('canonical_documents').select('*').eq('file_hash', fileHash).maybeSingle()
+    if (dupErr) return NextResponse.json({ error: 'DB error checking duplicates: ' + dupErr.message }, { status: 500 })
     if (existingDoc && !body.override) {
-      console.log('Duplicate found:', existingDoc.id)
-      return NextResponse.json({
-        duplicate: true,
-        existingDoc,
-        message: 'This file was previously uploaded on ' + new Date(existingDoc.created_at).toLocaleDateString()
-      })
+      return NextResponse.json({ duplicate: true, existingDoc, message: 'This file was previously uploaded on ' + new Date(existingDoc.created_at).toLocaleDateString() })
     }
-
-    console.log('No duplicate, proceeding with AI parse')
 
     const { data: vendors } = await supabase.from('vendor_mappings').select('*')
     const vendorContext = (vendors || []).map((v: any) =>
@@ -93,7 +70,9 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown):
       "amount": 0.00,
       "fees": 0.00,
       "shipping": 0.00,
-      "tax": 0.00,
+      "ca_sales_tax": 0.00,
+      "other_domestic_sales_tax": 0.00,
+      "international_sales_tax": 0.00,
       "quantity": 1,
       "date": "YYYY-MM-DD",
       "platform": "platform name if applicable",
@@ -106,6 +85,28 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown):
     }
   ]
 }
+
+FIELD DEFINITIONS FOR SALES:
+- amount = item revenue ONLY (the price of products sold, excluding shipping and tax)
+- shipping = shipping CHARGED to the customer (income to Mana Social — NOT what Mana Social paid for postage)
+- fees = platform commission/selling fees deducted from payout
+- ca_sales_tax = sales tax collected on California buyers
+- other_domestic_sales_tax = sales tax collected on US buyers outside California
+- international_sales_tax = VAT/GST/tax collected on non-US buyers
+
+SALES TAX BUCKETING RULES:
+- If the report lists tax by buyer state/country, split accordingly:
+  - California buyer → ca_sales_tax
+  - Other US state → other_domestic_sales_tax
+  - Non-US country → international_sales_tax
+- If the report shows only a single tax total with no breakdown, default the entire amount to other_domestic_sales_tax (TCGplayer/eBay/ManaPool are marketplace facilitators and most of their collected tax is for out-of-state buyers under economic nexus rules)
+- These tax amounts are tracked for reporting — marketplace platforms typically remit directly to states, so they do not affect Mana Social's cash deposit
+- Do NOT estimate tax from amount × percentage. Only extract values explicitly shown on the report.
+
+SHIPPING RULES:
+- shipping is ALWAYS what the customer paid (income side)
+- Do NOT estimate or infer shipping costs from quantities, line items, or shipping cost tables
+- The user enters all shipping COSTS (postage paid) manually as expenses — never auto-populate them
 
 CONFIDENCE SCORING:
 - 0.95+: Clear vendor match, all fields confidently extracted
@@ -136,12 +137,8 @@ VALIDATION:
     })
 
     const data = await response.json()
-    if (data.error) {
-      console.error('Anthropic error:', JSON.stringify(data.error))
-      return NextResponse.json({ error: data.error.message || JSON.stringify(data.error) }, { status: 500 })
-    }
+    if (data.error) return NextResponse.json({ error: data.error.message || JSON.stringify(data.error) }, { status: 500 })
     if (!data.content || !Array.isArray(data.content) || data.content.length === 0) {
-      console.error('Bad Anthropic response:', JSON.stringify(data))
       return NextResponse.json({ error: 'No content from AI: ' + JSON.stringify(data).slice(0, 300) }, { status: 500 })
     }
 
@@ -152,20 +149,12 @@ VALIDATION:
     catch { return NextResponse.json({ error: 'Failed to parse AI response', raw: clean }, { status: 500 }) }
 
     const { data: doc, error: docErr } = await supabase
-      .from('canonical_documents')
-      .insert({
-        file_name: fileName,
-        file_hash: fileHash,
-        file_size: fileSize || 0,
-        document_type: parsed.documentType || 'unknown',
-        platform: parsed.platform,
-        period_start: parsed.periodStart,
-        period_end: parsed.periodEnd,
-        uploaded_by: uploadedBy || 'Cam',
-        override: body.override || false
-      })
-      .select()
-      .single()
+      .from('canonical_documents').insert({
+        file_name: fileName, file_hash: fileHash, file_size: fileSize || 0,
+        document_type: parsed.documentType || 'unknown', platform: parsed.platform,
+        period_start: parsed.periodStart, period_end: parsed.periodEnd,
+        uploaded_by: uploadedBy || 'Cam', override: body.override || false
+      }).select().single()
 
     if (docErr && !docErr.message?.includes('duplicate key')) {
       return NextResponse.json({ error: docErr.message, parsed }, { status: 500 })
@@ -186,9 +175,7 @@ VALIDATION:
       target_table: item.targetTable
     }))
 
-    if (queueRows.length > 0) {
-      await supabase.from('import_queue').insert(queueRows)
-    }
+    if (queueRows.length > 0) await supabase.from('import_queue').insert(queueRows)
 
     return NextResponse.json({
       success: true,
@@ -212,25 +199,14 @@ function validateItem(item: any) {
   const today = new Date().toISOString().split('T')[0]
   const LLC_START = '2026-03-18'
 
-  if (!item.date || isNaN(new Date(item.date).getTime())) {
-    errors.push('Invalid or missing date')
-  } else if (item.date > today) {
-    errors.push('Date is in the future')
-  }
-
-  if (item.amount == null || isNaN(Number(item.amount)) || Number(item.amount) < 0) {
-    errors.push('Invalid or missing amount')
-  }
-
-  if (item.type === 'sale' && Number(item.fees || 0) > Number(item.amount || 0)) {
-    errors.push('Fees exceed gross sales')
-  }
+  if (!item.date || isNaN(new Date(item.date).getTime())) errors.push('Invalid or missing date')
+  else if (item.date > today) errors.push('Date is in the future')
+  if (item.amount == null || isNaN(Number(item.amount)) || Number(item.amount) < 0) errors.push('Invalid or missing amount')
+  if (item.type === 'sale' && Number(item.fees || 0) > Number(item.amount || 0)) errors.push('Fees exceed gross sales')
 
   if (item.date) {
     const correctEntity = item.date < LLC_START ? 'sole_prop' : 'llc'
-    if (item.entity !== correctEntity) {
-      item.entity = correctEntity
-    }
+    if (item.entity !== correctEntity) item.entity = correctEntity
   }
 
   let confidenceTier = 'manual'
@@ -244,31 +220,30 @@ function validateItem(item: any) {
   else if (item.type === 'mileage') targetTable = 'mileage_log'
 
   const canonical = buildCanonical(item, targetTable)
-
-  return {
-    ...item,
-    confidenceTier,
-    validationErrors: errors,
-    validationPassed: errors.length === 0,
-    targetTable,
-    canonical
-  }
+  return { ...item, confidenceTier, validationErrors: errors, validationPassed: errors.length === 0, targetTable, canonical }
 }
 
 function buildCanonical(item: any, targetTable: string): any {
   const entity = item.date < '2026-03-18' ? 'sole_prop' : 'llc'
 
   if (targetTable === 'sales') {
+    const amount = Number(item.amount || 0)
+    const shipping = Number(item.shipping || 0)
+    const fees = Number(item.fees || 0)
     return {
       platform: item.platform || 'other',
-      amount: Number(item.amount || 0),
-      fees: Number(item.fees || 0),
-      shipping: Number(item.shipping || 0),
+      amount,
+      fees,
+      shipping,
+      ca_sales_tax: Number(item.ca_sales_tax || 0),
+      other_domestic_sales_tax: Number(item.other_domestic_sales_tax || 0),
+      international_sales_tax: Number(item.international_sales_tax || 0),
       sale_date: item.date,
       period_start: item.date,
       period_end: item.date,
       entity,
-      net_sales: Number(item.amount || 0) - Number(item.fees || 0),
+      // Net to seller (matches bank deposit): item revenue + shipping income - fees
+      net_sales: amount + shipping - fees,
       num_orders: Number(item.quantity || 1),
       confidence: item.confidence
     }
@@ -278,58 +253,36 @@ function buildCanonical(item: any, targetTable: string): any {
     const qty = Number(item.quantity || 1)
     const totalCost = Number(item.amount || 0)
     return {
-      date: item.date,
-      inventory_type: 'sealed',
-      description: item.description?.slice(0, 100),
-      set_name: null,
-      purchase_price: totalCost / qty,
-      quantity: qty,
-      card_count: 0,
-      cards_per_box: 0,
-      total_cost: totalCost,
-      cost_per_unit: totalCost / qty,
-      total_units: qty,
-      sold_units: 0,
-      est_sell_value: 0,
-      entity
+      date: item.date, inventory_type: 'sealed',
+      description: item.description?.slice(0, 100), set_name: null,
+      purchase_price: totalCost / qty, quantity: qty, card_count: 0, cards_per_box: 0,
+      total_cost: totalCost, cost_per_unit: totalCost / qty,
+      total_units: qty, sold_units: 0, est_sell_value: 0, entity
     }
   }
 
   if (targetTable === 'assets') {
     return {
-      purchase_date: item.date,
-      description: item.description,
+      purchase_date: item.date, description: item.description,
       category: item.category === 'Equipment' || item.category === 'Furniture & Fixtures' ? item.category : 'Equipment',
-      cost: Number(item.amount || 0),
-      tax_paid: Number(item.tax || 0),
+      cost: Number(item.amount || 0), tax_paid: 0,
       useful_life_yrs: item.category === 'Furniture & Fixtures' ? 7 : 5,
-      depreciation_method: 'both',
-      entity,
-      user_name: item.userName || 'Cam',
-      is_auto_created: true
+      depreciation_method: 'both', entity, user_name: item.userName || 'Cam', is_auto_created: true
     }
   }
 
   if (targetTable === 'mileage_log') {
     return {
-      date: item.date,
-      purpose: item.description || 'Business trip',
-      from_location: 'Home',
-      to_location: item.vendor || 'Destination',
-      miles: Number(item.amount || 0),
-      user_name: item.userName || 'Cam'
+      date: item.date, purpose: item.description || 'Business trip',
+      from_location: 'Home', to_location: item.vendor || 'Destination',
+      miles: Number(item.amount || 0), user_name: item.userName || 'Cam'
     }
   }
 
   return {
-    category: item.category || 'Other',
-    cost: Number(item.amount || 0),
-    purchase_date: item.date,
-    notes: item.description?.slice(0, 200),
-    entity,
-    user_name: item.userName || 'Cam',
-    paid_by_company: true,
-    vendor: item.vendor,
-    confidence: item.confidence
+    category: item.category || 'Other', cost: Number(item.amount || 0),
+    purchase_date: item.date, notes: item.description?.slice(0, 200),
+    entity, user_name: item.userName || 'Cam', paid_by_company: true,
+    vendor: item.vendor, confidence: item.confidence
   }
 }
