@@ -831,7 +831,90 @@ export default function BankTab(p: any) {
                   <div style={{ fontSize: '13px', color: '#ef4444', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px' }}>
                     ⚠️ Marked reconciled but no ledger entry found.
                   </div>
-                ) : null}
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {matchedExpenses.map((x: any) => (
+                      <div key={`exp-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>Expense · {x.category || 'Uncategorized'}</span>
+                          <span>{fmt(Number(x.amount))}</span>
+                        </div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.date}{x.label ? ` · ${x.label}` : ''}</div>
+                        {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
+                      </div>
+                    ))}
+                    {matchedSales.map((x: any) => (
+                      <div key={`sale-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>Sale · {x.platform || 'other'}</span>
+                          <span>{fmt(Number(x.amount))}</span>
+                        </div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.date}</div>
+                        {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
+                      </div>
+                    ))}
+                    {matchedDisb.map((x: any) => (
+                      <div key={`disb-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>Disbursement · {x.recipient || 'Unknown'}</span>
+                          <span>{fmt(Number(x.amount))}</span>
+                        </div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.disbursement_date || x.date}</div>
+                        {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
+                      </div>
+                    ))}
+                    {matchedEquity.map((x: any) => (
+                      <div key={`eq-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>Equity · {x.type} · {x.member_name}</span>
+                          <span>{fmt(Number(x.amount))}</span>
+                        </div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.transaction_date}</div>
+                        {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
+                      </div>
+                    ))}
+                    {matchedLoans.map((x: any) => (
+                      <div key={`ln-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>Member Loan · {x.member_name}</span>
+                          <span>{fmt(Number(x.principal))}</span>
+                        </div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.loan_date} · {x.interest_rate}% interest</div>
+                        {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
+                      </div>
+                    ))}
+                    {matchedLoanPmts.map((x: any) => (
+                      <div key={`lp-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>Loan Repayment</span>
+                          <span>{fmt(Number(x.principal) + Number(x.interest || 0))}</span>
+                        </div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.payment_date} · Principal {fmt(Number(x.principal))} + Interest {fmt(Number(x.interest || 0))}</div>
+                        {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
+                      </div>
+                    ))}
+                    {matchedAp.map((x: any) => (
+                      <div key={`ap-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>AP Payment · {x.vendor_name || 'Unknown vendor'}</span>
+                          <span>{fmt(Number(x.amount_paid || x.total_amount))}</span>
+                        </div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.invoice_date}{x.due_date ? ` · due ${x.due_date}` : ''}</div>
+                        {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
+                      </div>
+                    ))}
+                    {matchedCol.map((x: any) => (
+                      <div key={`col-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>Collection · {x.seller_name || 'Unknown'}</span>
+                          <span>{fmt(Number(x.amount))}</span>
+                        </div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.collection_date || x.date}</div>
+                        {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
