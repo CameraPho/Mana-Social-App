@@ -365,6 +365,62 @@ export default function BankTab(p: any) {
     fetchData()
   }
 
+  const bulkUnreconcile = async (txns: any[]) => {
+    if (txns.length === 0) return
+    if (!confirm(`Unreconcile ${txns.length} transaction${txns.length === 1 ? '' : 's'}?\n\nThis will reverse ALL linked ledger entries (expenses, sales, disbursements, equity, loans, AP payments, collections) and mark all selected bank lines as unreconciled.\n\nThis cannot be undone.`)) return
+    try {
+      const txnIds = txns.map(t => t.id)
+      const linkedE = (expenses || []).filter((x: any) => txnIds.includes(x.bank_txn_id))
+      const linkedS = (sales || []).filter((x: any) => txnIds.includes(x.bank_txn_id))
+      const linkedD = (p.disbursements || []).filter((x: any) => txnIds.includes(x.bank_txn_id))
+      const linkedEq = (equityTransactions || []).filter((x: any) => txnIds.includes(x.bank_txn_id))
+      const linkedLoans = (memberLoans || []).filter((x: any) => txnIds.includes(x.bank_txn_id))
+      const linkedLoanPmts = (memberLoanPayments || []).filter((x: any) => txnIds.includes(x.bank_txn_id))
+      const linkedAp = (accountsPayable || []).filter((x: any) => txnIds.includes(x.bank_txn_id))
+      const linkedCol = (collections || []).filter((x: any) => txnIds.includes(x.bank_txn_id))
+
+      if (linkedE.length > 0) await supabase.from('expenses').delete().in('id', linkedE.map((x: any) => x.id))
+      if (linkedS.length > 0) await supabase.from('sales').delete().in('id', linkedS.map((x: any) => x.id))
+      if (linkedD.length > 0) await supabase.from('disbursements').delete().in('id', linkedD.map((x: any) => x.id))
+      if (linkedEq.length > 0) await supabase.from('equity_transactions').delete().in('id', linkedEq.map((x: any) => x.id))
+      for (const pmt of linkedLoanPmts) {
+        const loan = (memberLoans || []).find((l: any) => l.id === pmt.loan_id)
+        if (loan) await supabase.from('member_loans').update({ outstanding_balance: Number(loan.outstanding_balance) + Number(pmt.principal_paid), is_active: true }).eq('id', loan.id)
+      }
+      if (linkedLoanPmts.length > 0) await supabase.from('member_loan_payments').delete().in('id', linkedLoanPmts.map((x: any) => x.id))
+      if (linkedLoans.length > 0) await supabase.from('member_loans').delete().in('id', linkedLoans.map((x: any) => x.id))
+      for (const ap of linkedAp) {
+        const txn = txns.find(t => t.id === ap.bank_txn_id)
+        if (!txn) continue
+        const newPaid = Math.max(0, Number(ap.amount_paid || 0) - Math.abs(Number(txn.amount)))
+        await supabase.from('accounts_payable').update({ amount_paid: newPaid, payment_date: null, bank_txn_id: null }).eq('id', ap.id)
+      }
+      for (const col of linkedCol) {
+        const txn = txns.find(t => t.id === col.bank_txn_id)
+        if (!txn) continue
+        const newPaid = Math.max(0, Number(col.amount_paid || 0) - Math.abs(Number(txn.amount)))
+        await supabase.from('collections').update({ amount_paid: newPaid, bank_txn_id: null }).eq('id', col.id)
+      }
+      await supabase.from('bank_statement_transactions').update({ is_reconciled: false, action_type: null }).in('id', txnIds)
+      fetchData()
+      alert(`Unreconciled ${txns.length} transaction${txns.length === 1 ? '' : 's'}.`)
+    } catch (err: any) { alert('Bulk unreconcile error: ' + err.message) }
+  }
+
+  const bulkDelete = async (txns: any[]) => {
+    if (txns.length === 0) return
+    const hasReconciled = txns.some(t => t.is_reconciled)
+    if (hasReconciled) {
+      alert('Cannot delete reconciled transactions. Unreconcile them first.')
+      return
+    }
+    if (!confirm(`Delete ${txns.length} unreconciled transaction${txns.length === 1 ? '' : 's'}?\n\nThis permanently removes the bank lines. This cannot be undone.`)) return
+    const { error } = await supabase.from('bank_statement_transactions').delete().in('id', txns.map(t => t.id))
+    if (error) { alert('Bulk delete failed: ' + error.message); return }
+    fetchData()
+    alert(`Deleted ${txns.length} transaction${txns.length === 1 ? '' : 's'}.`)
+  }
+
   const unreconcileTxn = async (txn: any) => {
     const linkedE = (expenses || []).filter((x: any) => x.bank_txn_id === txn.id)
     const linkedS = (sales || []).filter((x: any) => x.bank_txn_id === txn.id)
@@ -733,7 +789,19 @@ export default function BankTab(p: any) {
         <button onClick={() => setFilterMode('all')} style={tabBtn('all')}>All ({allCount})</button>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {filterMode === 'reconciled' && visible.length > 0 && (
+            <button onClick={() => bulkUnreconcile(visible)} style={{ background: 'rgba(239,68,68,0.08)', color: '#dc2626', border: `1px solid #dc2626`, borderRadius: '8px', padding: '8px 14px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
+              ↩ Unreconcile All ({visible.length})
+            </button>
+          )}
+          {filterMode === 'unreconciled' && visible.length > 0 && (
+            <button onClick={() => bulkDelete(visible)} style={{ background: 'rgba(239,68,68,0.08)', color: '#dc2626', border: `1px solid #dc2626`, borderRadius: '8px', padding: '8px 14px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
+              🗑️ Delete All ({visible.length})
+            </button>
+          )}
+        </div>
         <button onClick={() => setShowAddForm(!showAddForm)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
           {showAddForm ? 'Cancel' : '+ Add Transaction'}
         </button>
