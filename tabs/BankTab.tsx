@@ -837,9 +837,9 @@ export default function BankTab(p: any) {
                       <div key={`exp-${x.id}`} style={{ padding: '8px 10px', background: 'rgba(45,191,184,0.06)', borderLeft: `3px solid ${C.teal}`, borderRadius: '4px', fontSize: '12px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
                           <span>Expense · {x.category || 'Uncategorized'}</span>
-                          <span>{fmt(Number(x.amount))}</span>
+                          <span>{fmt(Number(x.cost))}</span>
                         </div>
-                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.date}{x.label ? ` · ${x.label}` : ''}</div>
+                        <div style={{ color: C.muted, marginTop: '2px' }}>{x.purchase_date}{x.label ? ` · ${x.label}` : ''}</div>
                         {x.notes && <div style={{ color: C.text, marginTop: '4px', fontStyle: 'italic' }}>📝 {x.notes}</div>}
                       </div>
                     ))}
