@@ -1,7 +1,8 @@
 'use client'
 import React, { useState, useRef } from 'react'
-import { supabase } from '@/lib/supabase-client'
+import { createClient } from '@/lib/supabase-client'
 import { FONT } from '@/lib/constants'
+const supabase = createClient()
 import { fmt, getEntity } from '@/lib/format'
 import { parsePDF } from '@/parsers/universalPDF'
 
