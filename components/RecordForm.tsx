@@ -11,9 +11,10 @@ interface Props {
   onSave: () => void
   onClose: () => void
   C: Palette
+  vendors?: { id: string; name: string }[]
 }
 
-export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, C }: Props) {
+export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, C, vendors = [] }: Props) {
   const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: C.inputBg, boxSizing: 'border-box', fontFamily: FONT, color: C.text }
   const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: FONT }
   const set = (patch: any) => setFormData({ ...formData, ...patch })
