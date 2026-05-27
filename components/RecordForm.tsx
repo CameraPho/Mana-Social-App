@@ -1,369 +1,230 @@
 'use client'
+import React from 'react'
+import { FONT, type Palette, EXPENSE_CATEGORIES, ASSET_CATEGORIES, USEFUL_LIFE, MILEAGE_RATE } from '@/lib/constants'
+import { fmt, getEntity } from '@/lib/format'
 
-// ============================================================
-// ACCOUNT OWNERSHIP — only WF Business Checking + WF Signify are LLC.
-// Everything else (sole prop, personal) routes to Due to Owner.
-// ============================================================
-
-type AccountOwner =
-  | { type: 'llc_bank' | 'llc_card'; gl: string }
-  | { type: 'personal_cam' | 'personal_kenny' }
-
-const ACCOUNT_OWNERSHIP: Record<string, AccountOwner> = {
-  'Wells Fargo Business Checking': { type: 'llc_bank', gl: '1020' },
-  'Wells Fargo': { type: 'llc_bank', gl: '1020' },
-  'Wells Fargo Signify Mastercard': { type: 'llc_card', gl: '2160' },
-  'WF Signify': { type: 'llc_card', gl: '2160' },
-  'Chase Business Checking': { type: 'personal_cam' },
-  'Chase Checking': { type: 'personal_cam' },
-  'Chase Ink': { type: 'personal_cam' },
-  'Costco Citi Visa': { type: 'personal_cam' },
-  'Citi Diamond Preferred': { type: 'personal_cam' },
-  'Amazon Chase Prime Visa': { type: 'personal_cam' },
-  'Chase Sapphire Preferred': { type: 'personal_cam' },
-  'Barclays View Mastercard': { type: 'personal_cam' },
-  'Wells Fargo Preferred Checking': { type: 'personal_cam' },
-  'Wells Fargo Preferred': { type: 'personal_cam' },
+interface Props {
+  table: string
+  isEditing: boolean
+  formData: any
+  setFormData: (d: any) => void
+  onSave: () => void
+  onClose: () => void
+  C: Palette
 }
 
-const DEFAULT_LLC_BANK_GL = '1020'
-const DUE_TO_CAM_GL = '2610'
-const DUE_TO_KENNY_GL = '2620'
+export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, C }: Props) {
+  const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: C.inputBg, boxSizing: 'border-box', fontFamily: FONT, color: C.text }
+  const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: FONT }
+  const set = (patch: any) => setFormData({ ...formData, ...patch })
 
-const MARKETPLACE_PLATFORMS = ['tcgplayer', 'ebay', 'manapool']
-
-const PLATFORM_TO_REVENUE_GL: Record<string, string> = {
-  'tcgplayer': '4010', 'ebay': '4020', 'manapool': '4030',
-  'in-person': '4040', 'inperson': '4040', 'in_person': '4040',
-}
-
-const PLATFORM_TO_AR_GL: Record<string, string> = {
-  'tcgplayer': '1110', 'ebay': '1120', 'manapool': '1130',
-}
-
-const PLATFORM_TO_FEES_GL: Record<string, string> = {
-  'tcgplayer': '7210', 'ebay': '7220', 'manapool': '7230',
-}
-
-const EXPENSE_CATEGORY_TO_GL: Record<string, string> = {
-  'Supplies & Packaging': '6010', 'Supplies': '6010',
-  'Office Supplies': '6020',
-  'Marketing': '6030', 'Marketing & Advertising': '6030', 'Advertising': '6030',
-  'Software': '6040', 'Software & Subscriptions': '6040', 'Subscriptions': '6040',
-  'Travel': '6050', 'Meals': '6060', 'Meals & Entertainment': '6060',
-  'Vehicle': '6070', 'Mileage': '6070',
-  'Insurance': '6080',
-  'Professional Services': '6090', 'Legal': '6090', 'Accounting': '6090',
-  'Rent': '6100', 'Utilities': '6110', 'Bank Fees': '6120',
-  'Shipping': '7300', 'Postage': '7300', 'Shipping & Postage': '7300',
-  'Interest': '7400', 'Other': '6130',
-}
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-export function getAccountIdByNumber(accounts: any[], accountNumber: string): string | null {
-  const acc = accounts.find(a => a.account_number === accountNumber)
-  return acc?.id || null
-}
-
-function resolveBankOrCardId(accounts: any[], paymentMethod: string | null | undefined): string | null {
-  if (!paymentMethod) return getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  const owner = ACCOUNT_OWNERSHIP[paymentMethod.trim()]
-  if (!owner) return getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (owner.type === 'llc_bank' || owner.type === 'llc_card') return getAccountIdByNumber(accounts, owner.gl)
-  if (owner.type === 'personal_cam') return getAccountIdByNumber(accounts, DUE_TO_CAM_GL)
-  if (owner.type === 'personal_kenny') return getAccountIdByNumber(accounts, DUE_TO_KENNY_GL)
-  return getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-}
-
-function describePaymentSide(paymentMethod: string | null | undefined): string {
-  if (!paymentMethod) return 'Paid from LLC bank'
-  const owner = ACCOUNT_OWNERSHIP[paymentMethod.trim()]
-  if (!owner) return `Paid via ${paymentMethod} (default LLC bank)`
-  if (owner.type === 'llc_bank') return `Paid via ${paymentMethod} (LLC bank)`
-  if (owner.type === 'llc_card') return `Paid via ${paymentMethod} (LLC card)`
-  if (owner.type === 'personal_cam') return `Paid via ${paymentMethod} — owed to Cam`
-  if (owner.type === 'personal_kenny') return `Paid via ${paymentMethod} — owed to Kenny`
-  return `Paid via ${paymentMethod}`
-}
-
-function memberAccountId(accounts: any[], memberName: string, type: 'contribution' | 'draw' | 'loan'): string | null {
-  const map: Record<string, Record<string, string>> = {
-    'cam':   { contribution: '3010', draw: '3030', loan: '2510' },
-    'kenny': { contribution: '3020', draw: '3040', loan: '2520' },
-  }
-  const key = (memberName || '').toLowerCase().trim()
-  const number = map[key]?.[type]
-  return number ? getAccountIdByNumber(accounts, number) : null
-}
-
-function buildJE(headerProps: any, lines: any[]): any | null {
-  const round = (n: number) => Math.round(n * 100) / 100
-  const totalDebit = round(lines.reduce((s, l) => s + Number(l.debit || 0), 0))
-  const totalCredit = round(lines.reduce((s, l) => s + Number(l.credit || 0), 0))
-  if (Math.abs(totalDebit - totalCredit) > 0.01) return null
-  if (totalDebit === 0) return null
-  return {
-    header: { ...headerProps, total_debit: totalDebit, total_credit: totalCredit, is_posted: true, posted_by: 'auto-generated', entity: 'Mana Social LLC' },
-    lines: lines.map((l, idx) => ({ ...l, line_order: idx, debit: round(Number(l.debit) || 0), credit: round(Number(l.credit) || 0) })),
-  }
-}
-
-// ============================================================
-// GENERATORS
-// ============================================================
-
-export function generateSaleJE(sale: any, accounts: any[]): any | null {
-  const platform = (sale.platform || '').toLowerCase().trim()
-  const isMarketplace = MARKETPLACE_PLATFORMS.includes(platform)
-
-  const revenueId = getAccountIdByNumber(accounts, PLATFORM_TO_REVENUE_GL[platform] || '4050')
-  if (!revenueId) return null
-
-  const arAccountNum = PLATFORM_TO_AR_GL[platform]
-  const cashOrArId = arAccountNum
-    ? getAccountIdByNumber(accounts, arAccountNum)
-    : getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!cashOrArId) return null
-
-  const feesId = PLATFORM_TO_FEES_GL[platform] ? getAccountIdByNumber(accounts, PLATFORM_TO_FEES_GL[platform]) : null
-  const shippingIncomeId = getAccountIdByNumber(accounts, '4200')
-  const caTaxId = getAccountIdByNumber(accounts, '2210')
-  const otherTaxId = getAccountIdByNumber(accounts, '2220')
-  const intlTaxId = getAccountIdByNumber(accounts, '2230')
-
-  const itemRevenue = Number(sale.amount) || 0
-  const shippingIncome = Number(sale.shipping) || 0
-  const fees = Number(sale.fees) || 0
-  const caTax = Number(sale.ca_sales_tax) || 0
-  const otherTax = Number(sale.other_domestic_sales_tax) || 0
-  const intlTax = Number(sale.international_sales_tax) || 0
-
-  if (itemRevenue <= 0) return null
-
-  const lines: any[] = []
-
-  if (isMarketplace) {
-    // Marketplace platform remits tax directly — Cam never touches it.
-    // Net to seller (= bank deposit) = item + shipping - fees
-    const netToSeller = itemRevenue + shippingIncome - fees
-    lines.push({ account_id: cashOrArId, debit: netToSeller, credit: 0, description: `${platform} payout pending` })
-    if (fees > 0 && feesId) lines.push({ account_id: feesId, debit: fees, credit: 0, description: `${platform} commission/fees` })
-    lines.push({ account_id: revenueId, debit: 0, credit: itemRevenue, description: `${platform} item revenue` })
-    if (shippingIncome > 0 && shippingIncomeId) lines.push({ account_id: shippingIncomeId, debit: 0, credit: shippingIncome, description: `${platform} shipping income` })
-  } else {
-    // In-person / non-marketplace — Cam collects and owes the tax
-    const totalTax = caTax + otherTax + intlTax
-    const cashReceived = itemRevenue + shippingIncome + totalTax - fees
-    lines.push({ account_id: cashOrArId, debit: cashReceived, credit: 0, description: arAccountNum ? `${platform} payout pending` : 'Cash received' })
-    if (fees > 0 && feesId) lines.push({ account_id: feesId, debit: fees, credit: 0, description: 'Sale fees' })
-    lines.push({ account_id: revenueId, debit: 0, credit: itemRevenue, description: `${platform || 'sale'} item revenue` })
-    if (shippingIncome > 0 && shippingIncomeId) lines.push({ account_id: shippingIncomeId, debit: 0, credit: shippingIncome, description: 'Shipping income' })
-    if (caTax > 0 && caTaxId) lines.push({ account_id: caTaxId, debit: 0, credit: caTax, description: 'CA sales tax collected' })
-    if (otherTax > 0 && otherTaxId) lines.push({ account_id: otherTaxId, debit: 0, credit: otherTax, description: 'Other domestic sales tax collected' })
-    if (intlTax > 0 && intlTaxId) lines.push({ account_id: intlTaxId, debit: 0, credit: intlTax, description: 'International sales tax collected' })
+  const cogsPreview = () => {
+    const cost = parseFloat(formData.cogsCost) || 0, qty = parseInt(formData.cogsQty) || 1, total = cost * qty
+    const units = formData.cogsType === 'collection' ? parseInt(formData.cogsCards) || 0 : ['booster_box','precon'].includes(formData.cogsType) ? (parseInt(formData.cogsCardsPerBox) || 0) * qty : qty
+    return { total, units, cpu: units > 0 ? total / units : 0 }
   }
 
-  return buildJE({
-    entry_date: sale.sale_date,
-    description: `Sale via ${platform || 'other'}: $${(itemRevenue + shippingIncome).toFixed(2)}`,
-    source_type: 'sale',
-    source_id: sale.id,
-    notes: sale.notes || null,
-  }, lines)
-}
+  return (
+    <div style={{ background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.teal}`, marginBottom: '12px', fontFamily: FONT }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h2 style={{ fontWeight: 900, color: C.navy, fontSize: '16px', fontFamily: FONT }}>{isEditing ? 'EDIT' : 'ADD'} {t.replace(/_/g,' ').toUpperCase()}</h2>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.muted, fontSize: '24px', cursor: 'pointer' }}>×</button>
+      </div>
+      <div style={{ display: 'grid', gap: '10px' }}>
+        {t !== 'bank_accounts' && <div><span style={lbl}>Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>}
 
-export function generateExpenseJE(expense: any, accounts: any[]): any | null {
-  const category = expense.category || 'Other'
-  const expenseId = getAccountIdByNumber(accounts, EXPENSE_CATEGORY_TO_GL[category] || '6130')
-  if (!expenseId) return null
+        {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable','supply_costs'].includes(t) && (
+          <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', fontFamily: FONT, background: getEntity(formData.date) === 'sole_prop' ? 'rgba(240,192,64,0.12)' : 'rgba(45,191,184,0.1)', color: getEntity(formData.date) === 'sole_prop' ? '#7A5A00' : '#1A7A75' }}>
+            {getEntity(formData.date) === 'sole_prop' ? 'Camera Pho (Sole Prop)' : 'Mana Social LLC'}
+          </div>
+        )}
 
-  const cost = Number(expense.cost) || 0
-  if (cost <= 0) return null
+        {t === 'supply_costs' && <>
+          <div><span style={lbl}>Supply Item Name</span><input value={formData.supplyItem} onChange={e => set({ supplyItem: e.target.value })} placeholder="e.g. Penny Sleeve, Forever Stamp" style={inp} /></div>
+          <div><span style={lbl}>Unit Description</span><input value={formData.supplyUnit} onChange={e => set({ supplyUnit: e.target.value })} placeholder="e.g. per sleeve, per stamp" style={inp} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Total Cost ($)</span><input type="number" step="0.01" value={formData.supplyTotalCost || ''} onChange={e => { const tc = e.target.value; const qty = parseFloat(formData.supplyQty || '1') || 1; set({ supplyTotalCost: tc, supplyCost: tc ? (parseFloat(tc)/qty).toFixed(4) : '' }) }} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Quantity</span><input type="number" step="1" value={formData.supplyQty || ''} onChange={e => { const qty = e.target.value; const tc = parseFloat(formData.supplyTotalCost || '0'); set({ supplyQty: qty, supplyCost: tc && qty ? (tc/parseFloat(qty)).toFixed(4) : '' }) }} placeholder="1" style={inp} /></div>
+          </div>
+          <div><span style={lbl}>Cost Per Unit ($)</span><input type="number" step="0.0001" value={formData.supplyCost} onChange={e => set({ supplyCost: e.target.value })} placeholder="0.0100" style={inp} /></div>
+          <div><span style={lbl}>Vendor / Source</span><input value={formData.supplyVendor || ''} onChange={e => set({ supplyVendor: e.target.value })} placeholder="e.g. BCW, Amazon, Costco" style={inp} /></div>
+          <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Order #, etc." style={inp} /></div>
+        </>}
 
-  const paymentMethod = expense.payment_method || expense.account_paid || null
-  const creditAccountId = resolveBankOrCardId(accounts, paymentMethod)
-  if (!creditAccountId) return null
+        {t === 'assets' && <>
+          <div><span style={lbl}>Category</span>
+            <select value={formData.assetCategory} onChange={e => set({ assetCategory: e.target.value, assetLife: String(USEFUL_LIFE[e.target.value] || 5) })} style={inp}>
+              {ASSET_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Epson DS-530 II Scanner" style={inp} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Cost ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Tax Paid ($)</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Useful Life (yrs)</span><input type="number" value={formData.assetLife} onChange={e => set({ assetLife: e.target.value })} style={inp} /></div>
+            <div><span style={lbl}>Purchased By</span>
+              <select value={formData.userName} onChange={e => set({ userName: e.target.value })} style={inp}>
+                <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
+              </select>
+            </div>
+          </div>
+          {formData.amount && (() => { const cost = parseFloat(formData.amount)||0, life = parseInt(formData.assetLife)||5; return (<div style={{ padding:'10px', borderRadius:'8px', background:'rgba(45,191,184,0.08)', fontSize:'13px', color:'#1A7A75', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}><span>Sec 179: <strong>{fmt(cost)}</strong></span><span>SL/yr: <strong>{fmt(cost/life)}</strong></span></div>) })()}
+          <div><span style={lbl}>Notes / PO#</span><input value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Order number or notes" style={inp} /></div>
+        </>}
 
-  return buildJE({
-    entry_date: expense.purchase_date,
-    description: `${category}: $${cost.toFixed(2)}`,
-    source_type: 'expense',
-    source_id: expense.id,
-    notes: expense.notes || null,
-  }, [
-    { account_id: expenseId, debit: cost, credit: 0, description: expense.notes || category },
-    { account_id: creditAccountId, debit: 0, credit: cost, description: describePaymentSide(paymentMethod) },
-  ])
-}
+        {t === 'bank_accounts' && <>
+          <div><span style={lbl}>Bank</span>
+            <select value={formData.bankName} onChange={e => set({ bankName: e.target.value })} style={inp}>
+              <option value="Chase">Chase</option><option value="Wells Fargo">Wells Fargo</option>
+            </select>
+          </div>
+          <div><span style={lbl}>Account Type</span>
+            <select value={formData.accountType} onChange={e => set({ accountType: e.target.value })} style={inp}>
+              <option value="Checking">Checking</option><option value="Savings">Savings</option><option value="Credit">Credit Card</option>
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Last 4</span><input value={formData.accountLast4} onChange={e => set({ accountLast4: e.target.value })} placeholder="2035" style={inp} /></div>
+            <div><span style={lbl}>As of Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
+          </div>
+          <div><span style={lbl}>Current Balance ($)</span><input type="number" step="0.01" value={formData.bankBalance} onChange={e => set({ bankBalance: e.target.value })} placeholder="0.00" style={inp} /></div>
+          <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="e.g. Chase Ink Business" style={inp} /></div>
+        </>}
 
-export function generateEquityJE(eq: any, accounts: any[]): any | null {
-  const amount = Number(eq.amount) || 0
-  if (amount <= 0) return null
+        {t === 'accounts_payable' && <>
+          <div><span style={lbl}>Vendor / Seller Name</span><input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} /></div>
+          <div><span style={lbl}>Transaction Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
+            <div><span style={lbl}>Due Date</span><input type="date" value={formData.apDue} onChange={e => set({ apDue: e.target.value })} style={inp} /></div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => set({ apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => set({ amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
+          </div>
+          <div><span style={lbl}>Card Count (optional)</span>
+            <input type="number" value={formData.apCardCount || ''} onChange={e => set({ apCardCount: e.target.value })} placeholder="e.g. 5000" style={inp} />
+            {formData.apCardCount && formData.apTotal && (
+              <div style={{ marginTop: '4px', fontSize: '13px', color: C.teal, fontWeight: 700 }}>Cost per card: ${(parseFloat(formData.apTotal) / parseInt(formData.apCardCount)).toFixed(4)}</div>
+            )}
+          </div>
+          <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Payment terms, card types, condition, context" style={{ ...inp, height: '60px', resize: 'vertical' }} /></div>
+        </>}
 
-  const type = (eq.type || 'contribution').toLowerCase()
-  const memberName = eq.member_name || 'Cam'
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!bankId) return null
+        {t === 'mileage_log' && <>
+          <div><span style={lbl}>Business Purpose</span><input value={formData.milePurpose} onChange={e => set({ milePurpose: e.target.value })} placeholder="e.g. USPS drop-off" style={inp} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>From</span><input value={formData.mileFrom} onChange={e => set({ mileFrom: e.target.value })} placeholder="Home" style={inp} /></div>
+            <div><span style={lbl}>To</span><input value={formData.mileTo} onChange={e => set({ mileTo: e.target.value })} placeholder="USPS Moreno Valley" style={inp} /></div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Miles</span><input type="number" step="0.1" value={formData.miles} onChange={e => set({ miles: e.target.value })} placeholder="0.0" style={inp} /></div>
+            <div><span style={lbl}>Logged By</span>
+              <select value={formData.userName} onChange={e => set({ userName: e.target.value })} style={inp}>
+                <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
+              </select>
+            </div>
+          </div>
+          {formData.miles && <div style={{ padding: '10px', borderRadius: '8px', background: 'rgba(45,191,184,0.08)', fontSize: '14px', color: '#1A7A75' }}>Deduction: <strong>{fmt(parseFloat(formData.miles) * MILEAGE_RATE)}</strong></div>}
+        </>}
 
-  if (type === 'contribution') {
-    const equityId = memberAccountId(accounts, memberName, 'contribution')
-    if (!equityId) return null
-    return buildJE({
-      entry_date: eq.transaction_date,
-      description: `Capital contribution from ${memberName}: $${amount.toFixed(2)}`,
-      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
-    }, [
-      { account_id: bankId, debit: amount, credit: 0, description: 'Cash received' },
-      { account_id: equityId, debit: 0, credit: amount, description: `${memberName} capital contribution` },
-    ])
-  }
+        {t === 'cogs_inventory' && <>
+          <div><span style={lbl}>Inventory Type</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+              {[['collection','Collection'],['booster_box','Box'],['precon','Precon'],['sealed','Sealed'],['singles','Singles']].map(([id,l]) => (
+                <button key={id} onClick={() => set({ cogsType: id })} style={{ padding: '8px', borderRadius: '8px', border: `1px solid ${formData.cogsType===id?C.teal:C.border}`, background: formData.cogsType===id?'rgba(45,191,184,0.1)':C.inputBg, fontSize: '12px', fontWeight: formData.cogsType===id?'bold':'normal', cursor: 'pointer', color: formData.cogsType===id?'#1A7A75':C.text, fontFamily: FONT }}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Renly's collection" style={inp} /></div>
+          <div><span style={lbl}>Set / Product</span><input value={formData.cogsSet} onChange={e => set({ cogsSet: e.target.value })} placeholder="e.g. Edge of Eternities" style={inp} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Purchase Price ($)</span><input type="number" step="0.01" value={formData.cogsCost} onChange={e => set({ cogsCost: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Quantity</span><input type="number" value={formData.cogsQty} onChange={e => set({ cogsQty: e.target.value })} placeholder="1" style={inp} /></div>
+          </div>
+          {formData.cogsType==='collection' && <div><span style={lbl}>Total Card Count</span><input type="number" value={formData.cogsCards} onChange={e => set({ cogsCards: e.target.value })} placeholder="e.g. 200" style={inp} /></div>}
+          {['booster_box','precon'].includes(formData.cogsType) && (
+            <div><span style={lbl}>Cards Per Unit</span>
+              <select value={formData.cogsCardsPerBox} onChange={e => set({ cogsCardsPerBox: e.target.value })} style={inp}>
+                <option value="">Select...</option>
+                <option value="540">MTG Draft Box (540)</option><option value="360">MTG Set/Play Box (360)</option>
+                <option value="150">MTG Collector Box (150)</option><option value="100">MTG Commander Precon (100)</option>
+                <option value="60">Pokemon Starter (60)</option><option value="240">YGO Box (240)</option>
+              </select>
+            </div>
+          )}
+          <div><span style={lbl}>Est. Sell Value ($)</span><input type="number" step="0.01" value={formData.cogsEstValue} onChange={e => set({ cogsEstValue: e.target.value })} placeholder="0.00" style={inp} /></div>
+          {formData.cogsCost && (() => { const p = cogsPreview(); return (<div style={{ padding:'10px', borderRadius:'8px', background:'rgba(45,191,184,0.08)', fontSize:'14px', color:'#1A7A75', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}><span>Total: <strong>{fmt(p.total)}</strong></span><span>Units: <strong>{p.units.toLocaleString()}</strong></span><span>Per unit: <strong>${p.cpu.toFixed(3)}</strong></span>{formData.cogsEstValue&&<span>Margin: <strong>{p.total>0?(((parseFloat(formData.cogsEstValue)-p.total)/p.total)*100).toFixed(1)+'%':'—'}</strong></span>}</div>) })()}
+        </>}
 
-  if (type === 'draw' || type === 'distribution') {
-    const drawId = memberAccountId(accounts, memberName, 'draw')
-    if (!drawId) return null
-    return buildJE({
-      entry_date: eq.transaction_date,
-      description: `Owner draw to ${memberName}: $${amount.toFixed(2)}`,
-      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
-    }, [
-      { account_id: drawId, debit: amount, credit: 0, description: `${memberName} draw` },
-      { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid out' },
-    ])
-  }
-  return null
-}
+        {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable','supply_costs'].includes(t) && <>
+          {t==='expenses' ? <>
+            <div><span style={lbl}>Category</span>
+              <select value={formData.category} onChange={e => set({ category: e.target.value })} style={inp}>
+                {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="Vendor / item purchased" style={inp} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div><span style={lbl}>Paid By</span>
+                <select value={formData.userName} onChange={e => set({ userName: e.target.value })} style={inp}>
+                  <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
+                </select>
+              </div>
+              <div><span style={lbl}>Reimbursed by LLC</span>
+                <select value={String(formData.paidByCompany)} onChange={e => set({ paidByCompany: e.target.value === 'true' })} style={inp}>
+                  <option value="true">Yes — Company paid</option><option value="false">No — Personal funds</option>
+                </select>
+              </div>
+            </div>
+          </> : <div><span style={lbl}>{t==='sales'?'Platform':t==='payroll'?'Employee':'Recipient'}</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="..." style={inp} /></div>}
+          <div><span style={lbl}>{t==='sales' ? 'Item Revenue ($)' : 'Amount ($)'}</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+          {t==='sales' && <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div><span style={lbl}>Fees ($)</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
+              <div><span style={lbl}>Shipping Income ($)</span><input type="number" step="0.01" value={formData.shipping} onChange={e => set({ shipping: e.target.value })} placeholder="0.00" style={inp} /></div>
+            </div>
+            <div style={{ padding: '12px', borderRadius: '10px', background: C.inputBg, border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: '11px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '6px', fontFamily: FONT }}>Sales Tax Collected</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+                <div>
+                  <span style={{ ...lbl, fontSize: '10px', textTransform: 'none' }}>California</span>
+                  <input type="number" step="0.01" value={formData.caSalesTax || ''} onChange={e => set({ caSalesTax: e.target.value })} placeholder="0.00" style={{ ...inp, fontSize: '13px', padding: '10px 12px' }} />
+                </div>
+                <div>
+                  <span style={{ ...lbl, fontSize: '10px', textTransform: 'none' }}>Other US</span>
+                  <input type="number" step="0.01" value={formData.otherDomesticSalesTax || ''} onChange={e => set({ otherDomesticSalesTax: e.target.value })} placeholder="0.00" style={{ ...inp, fontSize: '13px', padding: '10px 12px' }} />
+                </div>
+                <div>
+                  <span style={{ ...lbl, fontSize: '10px', textTransform: 'none' }}>International</span>
+                  <input type="number" step="0.01" value={formData.internationalSalesTax || ''} onChange={e => set({ internationalSalesTax: e.target.value })} placeholder="0.00" style={{ ...inp, fontSize: '13px', padding: '10px 12px' }} />
+                </div>
+              </div>
+              <div style={{ fontSize: '10px', color: C.muted, marginTop: '6px', fontStyle: 'italic', lineHeight: '1.4' }}>
+                Shipping is what the customer paid you (income). Marketplace platforms (TCGplayer/eBay/ManaPool) remit tax directly — these fields are for tracking only.
+              </div>
+            </div>
+          </>}
+          {t==='payroll' && <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div><span style={lbl}>Hours Worked</span><input type="number" step="0.5" value={formData.hoursWorked} onChange={e => set({ hoursWorked: e.target.value })} placeholder="10" style={inp} /></div>
+              <div><span style={lbl}>Hourly Rate ($)</span><input type="number" step="0.01" value={formData.hourlyRate} onChange={e => set({ hourlyRate: e.target.value })} placeholder="16.00" style={inp} /></div>
+            </div>
+            <div><span style={lbl}>Pay Period End Date</span><input type="date" value={formData.payPeriod} onChange={e => set({ payPeriod: e.target.value })} style={inp} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div><span style={lbl}>Roth IRA Eligible ($)</span><input type="number" step="0.01" value={formData.rothEligible} onChange={e => set({ rothEligible: e.target.value })} placeholder="0.00" style={inp} /></div>
+              <div><span style={lbl}>Roth IRA Contributed ($)</span><input type="number" step="0.01" value={formData.rothContributed} onChange={e => set({ rothContributed: e.target.value })} placeholder="0.00" style={inp} /></div>
+            </div>
+          </>}
+          {t==='disbursements' && <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>}
+        </>}
 
-export function generateDisbursementJE(disb: any, accounts: any[]): any | null {
-  const amount = Number(disb.amount) || 0
-  if (amount <= 0) return null
-
-  const recipient = disb.recipient || 'Cam'
-  const drawId = memberAccountId(accounts, recipient, 'draw')
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!drawId || !bankId) return null
-
-  return buildJE({
-    entry_date: disb.disbursement_date,
-    description: `Disbursement to ${recipient}: $${amount.toFixed(2)}`,
-    source_type: 'disbursement', source_id: disb.id, notes: disb.notes || null,
-  }, [
-    { account_id: drawId, debit: amount, credit: 0, description: `Draw to ${recipient}` },
-    { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid out' },
-  ])
-}
-
-export function generateMemberLoanJE(loan: any, accounts: any[]): any | null {
-  const principal = Number(loan.principal) || 0
-  if (principal <= 0) return null
-  const memberName = loan.member_name || 'Cam'
-  const loanLiabilityId = memberAccountId(accounts, memberName, 'loan')
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!loanLiabilityId || !bankId) return null
-
-  return buildJE({
-    entry_date: loan.loan_date,
-    description: `Loan from ${memberName}: $${principal.toFixed(2)}`,
-    source_type: 'member_loan', source_id: loan.id, notes: loan.notes || null,
-  }, [
-    { account_id: bankId, debit: principal, credit: 0, description: 'Loan proceeds received' },
-    { account_id: loanLiabilityId, debit: 0, credit: principal, description: `Loan from ${memberName}` },
-  ])
-}
-
-export function generateLoanPaymentJE(payment: any, accounts: any[], memberLoans: any[]): any | null {
-  const principalPaid = Number(payment.principal_paid) || 0
-  const interestPaid = Number(payment.interest_paid) || 0
-  const totalPaid = principalPaid + interestPaid
-  if (totalPaid <= 0) return null
-  const loan = memberLoans.find(l => l.id === payment.loan_id)
-  if (!loan) return null
-  const memberName = loan.member_name || 'Cam'
-  const loanLiabilityId = memberAccountId(accounts, memberName, 'loan')
-  const interestExpenseId = getAccountIdByNumber(accounts, '7400')
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!loanLiabilityId || !bankId) return null
-  if (interestPaid > 0 && !interestExpenseId) return null
-
-  const lines: any[] = []
-  if (principalPaid > 0) lines.push({ account_id: loanLiabilityId, debit: principalPaid, credit: 0, description: `Loan principal payment to ${memberName}` })
-  if (interestPaid > 0 && interestExpenseId) lines.push({ account_id: interestExpenseId, debit: interestPaid, credit: 0, description: `Loan interest paid to ${memberName}` })
-  lines.push({ account_id: bankId, debit: 0, credit: totalPaid, description: 'Payment from bank' })
-
-  return buildJE({
-    entry_date: payment.payment_date,
-    description: `Loan repayment to ${memberName}: $${totalPaid.toFixed(2)}`,
-    source_type: 'member_loan_payment', source_id: payment.id, notes: payment.notes || null,
-  }, lines)
-}
-
-export function generateSalesTaxRemittanceJE(remit: any, accounts: any[]): any | null {
-  const amount = Number(remit.amount) || 0
-  if (amount <= 0) return null
-  // Default to CA Sales Tax Payable (2210) since Mana Social only files CA returns
-  const salesTaxId = getAccountIdByNumber(accounts, '2210') || getAccountIdByNumber(accounts, '2200')
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!salesTaxId || !bankId) return null
-
-  return buildJE({
-    entry_date: remit.remittance_date || remit.payment_date,
-    description: `Sales tax remittance to CDTFA: $${amount.toFixed(2)}`,
-    source_type: 'sales_tax_remittance', source_id: remit.id, notes: remit.notes || null,
-  }, [
-    { account_id: salesTaxId, debit: amount, credit: 0, description: 'CDTFA payment' },
-    { account_id: bankId, debit: 0, credit: amount, description: 'Paid from bank' },
-  ])
-}
-
-export function generateBillPaymentJE(payment: any, accounts: any[], accountsPayable: any[]): any | null {
-  const amount = Number(payment.amount_paid) || 0
-  if (amount <= 0) return null
-  const bill = accountsPayable.find(ap => ap.id === payment.bill_id)
-  if (!bill) return null
-  const apId = getAccountIdByNumber(accounts, '2010')
-  if (!apId) return null
-  const paymentMethod = payment.payment_method || 'Wells Fargo Business Checking'
-  const sourceId = resolveBankOrCardId(accounts, paymentMethod)
-  if (!sourceId) return null
-
-  return buildJE({
-    entry_date: payment.payment_date,
-    description: `Bill payment to ${bill.vendor_name}: $${amount.toFixed(2)}`,
-    source_type: 'bill_payment', source_id: payment.id, notes: payment.notes || null,
-  }, [
-    { account_id: apId, debit: amount, credit: 0, description: `Payment on AP - ${bill.vendor_name}` },
-    { account_id: sourceId, debit: 0, credit: amount, description: describePaymentSide(paymentMethod) },
-  ])
-}
-
-// ============================================================
-// INSERTION HELPERS
-// ============================================================
-
-export async function insertJE(payload: any, supabase: any): Promise<{ success: boolean; error?: string; entryId?: string }> {
-  try {
-    const { data: je, error: jeErr } = await supabase.from('journal_entries').insert(payload.header).select().single()
-    if (jeErr) return { success: false, error: jeErr.message }
-    const linesPayload = payload.lines.map((l: any) => ({ ...l, entry_id: je.id }))
-    const { error: linesErr } = await supabase.from('journal_entry_lines').insert(linesPayload)
-    if (linesErr) {
-      await supabase.from('journal_entries').delete().eq('id', je.id)
-      return { success: false, error: linesErr.message }
-    }
-    return { success: true, entryId: je.id }
-  } catch (err: any) {
-    return { success: false, error: err.message || String(err) }
-  }
-}
-
-export async function deleteJEsBySource(supabase: any, sourceType: string): Promise<{ deleted: number; error?: string }> {
-  try {
-    const { data, error } = await supabase.from('journal_entries').delete().eq('source_type', sourceType).select()
-    if (error) return { deleted: 0, error: error.message }
-    return { deleted: data?.length || 0 }
-  } catch (err: any) {
-    return { deleted: 0, error: err.message || String(err) }
-  }
+        <button onClick={onSave} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '16px', borderRadius: '12px', fontWeight: 900, border: 'none', fontSize: '16px', cursor: 'pointer', marginTop: '4px', fontFamily: FONT }}>
+          {isEditing ? 'UPDATE RECORD' : 'SAVE RECORD'}
+        </button>
+      </div>
+    </div>
+  )
 }
