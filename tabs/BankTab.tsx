@@ -151,7 +151,14 @@ export default function BankTab(p: any) {
   const secHdr: React.CSSProperties = { fontSize: '11px', color: C.muted, fontWeight: 'bold', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '12px', fontFamily: FONT, display: 'block' }
   const editBtn: React.CSSProperties = { background: 'none', border: `1px solid ${C.border}`, borderRadius: '6px', padding: '3px 8px', fontSize: '12px', color: C.muted, cursor: 'pointer', fontFamily: FONT }
 
-  const getForm = (txnId: string) => formByTxn[txnId] || {}
+  const getForm = (txnId: string) => {
+    const existing = formByTxn[txnId]
+    if (existing) return existing
+    // Pre-fill notes from preserved_notes if this bank line was previously unreconciled
+    const txn = reconTransactions.find((t: any) => t.id === txnId)
+    if (txn?.preserved_notes) return { notes: txn.preserved_notes }
+    return {}
+  }
   const setForm = (txnId: string, patch: any) =>
     setFormByTxn(prev => ({ ...prev, [txnId]: { ...(prev[txnId] || {}), ...patch } }))
   const getAction = (txn: any): ActionType => {
