@@ -177,12 +177,27 @@ export function generateExpenseJE(expense: any, accounts: any[]): any | null {
   if (!expenseId) return null
 
   const cost = Number(expense.cost) || 0
-  if (cost <= 0) return null
+  if (cost === 0) return null
 
   const paymentMethod = expense.payment_method || expense.account_paid || null
-  const creditAccountId = resolveBankOrCardId(accounts, paymentMethod)
-  if (!creditAccountId) return null
+  const sourceAccountId = resolveBankOrCardId(accounts, paymentMethod)
+  if (!sourceAccountId) return null
 
+  // REFUND (negative cost): reverse the original purchase.
+  // DR the card/source (refund money came back to it) · CR the expense/asset category.
+  if (cost < 0 || expense.is_refund) {
+    const refundAmt = Math.abs(cost)
+    return buildJE({
+      entry_date: expense.purchase_date,
+      description: `Refund — ${category}: $${refundAmt.toFixed(2)}`,
+      source_type: 'expense', source_id: expense.id, notes: expense.notes || null,
+    }, [
+      { account_id: sourceAccountId, debit: refundAmt, credit: 0, description: describePaymentSide(paymentMethod) + ' (refund received)' },
+      { account_id: expenseId, debit: 0, credit: refundAmt, description: `Reverse ${category}` },
+    ])
+  }
+
+  const creditAccountId = sourceAccountId
   return buildJE({
     entry_date: expense.purchase_date,
     description: `${category}: $${cost.toFixed(2)}`,
