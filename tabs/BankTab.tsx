@@ -32,8 +32,8 @@ function buildOwnerPayablePayload(txn: any, memberName: string, entity: string, 
       amount: Math.abs(Number(txn.amount)),
       transaction_date: txn.transaction_date,
       transaction_type: 'owner_payable',
-      paid_from: paidFrom, // 'llc_bank' or 'personal'
-      notes: notes || `Owner Payable reimbursement (${paidFrom === 'llc_bank' ? 'from LLC checking' : 'absorbed as contribution'}) via bank sync: ${txn.description}`,
+      paid_from: paidFrom, // actual account name; LLC checking => JE, personal => reconcile-only
+      notes: notes || `Owner Payable reimbursement (paid from ${paidFrom}) via bank sync: ${txn.description}`,
       entity,
       bank_txn_id: txn.id,
     },
@@ -310,9 +310,14 @@ export default function BankTab(p: any) {
         if (built) await supabase.from(built.targetTable).insert(built.payload)
       } else if (action === 'owner_payable') {
         const memberName = f.memberName || 'Cam'
-        const paidFrom = f.paidFrom || 'llc_bank'
-        const built = buildOwnerPayablePayload(txn, memberName, entity, paidFrom, f.notes)
-        if (built) await supabase.from(built.targetTable).insert(built.payload)
+        const paidFrom = f.paidFrom || 'Mana Social | WF Business Checking'
+        const isLLCReimbursement = paidFrom === 'Mana Social | WF Business Checking'
+        // Only create a ledger entry when the LLC actually pays you back from LLC checking.
+        // If a personal account pays a personal card, it's your own money movement — reconcile-only, no JE.
+        if (isLLCReimbursement) {
+          const built = buildOwnerPayablePayload(txn, memberName, entity, paidFrom, f.notes)
+          if (built) await supabase.from(built.targetTable).insert(built.payload)
+        }
       } else if (action === 'owner_loan') {
         const memberName = f.memberName || 'Cam'
         const rate = f.interestRate ? parseFloat(f.interestRate) : undefined
@@ -622,15 +627,19 @@ export default function BankTab(p: any) {
             </select>
           </div>
           <div><span style={lbl}>Paid From</span>
-            <select value={f.paidFrom || 'llc_bank'} onChange={e => setForm(txn.id, { paidFrom: e.target.value })} style={inp}>
-              <option value="llc_bank">LLC Wells Fargo Checking (cash reimbursement)</option>
-              <option value="personal">Personal funds (absorbed as contribution)</option>
+            <select value={f.paidFrom || 'Mana Social | WF Business Checking'} onChange={e => setForm(txn.id, { paidFrom: e.target.value })} style={inp}>
+              <optgroup label="Checking">
+                {CHECKING_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+              </optgroup>
+              <optgroup label="Credit Cards">
+                {CREDIT_CARD_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+              </optgroup>
             </select>
           </div>
           <div style={{ fontSize: '11px', color: C.muted, padding: '0 2px' }}>
-            {(f.paidFrom || 'llc_bank') === 'llc_bank'
-              ? 'JE: DR 2610 Due to Member · CR 1020 WF Checking'
-              : 'JE: DR 2610 Due to Member · CR 3010/3020 Member Capital'}
+            {(f.paidFrom || 'Mana Social | WF Business Checking') === 'Mana Social | WF Business Checking'
+              ? 'JE: DR 2610 Due to Member · CR 1020 WF Checking (LLC reimburses you)'
+              : 'Reconcile-only — no JE. The LLC liability (Due to Member) was already recorded when the expense was booked. Paying a personal card from a personal account is your own money movement.'}
           </div>
           <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. Paid Costco Citi for business supplies" style={inp} /></div>
         </div>
