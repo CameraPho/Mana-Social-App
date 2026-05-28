@@ -7,6 +7,7 @@ export type ActionType =
   | 'platform_payout'
   | 'card_payment'
   | 'owner_contribution'
+  | 'owner_payable'
   | 'owner_loan'
   | 'loan_repayment'
   | 'owner_draw'
@@ -21,6 +22,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   platform_payout:    'Platform Payout',
   card_payment:       'Card Payment',
   owner_contribution: 'Owner Contribution',
+  owner_payable:      'Owner Payable (Reimbursement)',
   owner_loan:         'Owner Loan',
   loan_repayment:     'Loan Repayment',
   owner_draw:         'Owner Draw',
