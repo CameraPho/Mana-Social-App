@@ -216,6 +216,32 @@ export function generateEquityJE(eq: any, accounts: any[]): any | null {
   const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
   if (!bankId) return null
 
+  // Sole-prop era (before 2026-03-18): no inter-entity Due-to/from tracking.
+  // The owner and the business were the same tax entity, so member-clearing
+  // entries don't apply. Skip generating a JE for member-clearing types.
+  const txnDate = eq.transaction_date ? new Date(eq.transaction_date) : null
+  const LLC_START = new Date('2026-03-18')
+  const isSoleProp = txnDate ? txnDate < LLC_START : false
+  const memberClearingTypes = ['owner_payable', 'non_business']
+  if (isSoleProp && memberClearingTypes.includes(type)) return null
+
+  // Non-business charge on a business account: member owes the LLC back.
+  // DR Due to/from Member · CR the business account that wrongly paid.
+  if (type === 'non_business') {
+    const dueToId = getAccountIdByNumber(accounts, memberName.toLowerCase().trim() === 'kenny' ? DUE_TO_KENNY_GL : DUE_TO_CAM_GL)
+    if (!dueToId) return null
+    const businessAcctId = resolveBankOrCardId(accounts, eq.paid_from)
+    if (!businessAcctId) return null
+    return buildJE({
+      entry_date: eq.transaction_date,
+      description: `Non-business charge — ${memberName} owes LLC: $${amount.toFixed(2)}`,
+      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
+    }, [
+      { account_id: dueToId, debit: amount, credit: 0, description: `${memberName} owes LLC (non-business charge)` },
+      { account_id: businessAcctId, debit: 0, credit: amount, description: describePaymentSide(eq.paid_from) },
+    ])
+  }
+
   if (type === 'contribution') {
     const equityId = memberAccountId(accounts, memberName, 'contribution')
     if (!equityId) return null
