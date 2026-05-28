@@ -23,6 +23,22 @@ function buildOwnerContributionPayload(txn: any, memberName: string, entity: str
   }
 }
 
+function buildOwnerPayablePayload(txn: any, memberName: string, entity: string, paidFrom: string, notes?: string) {
+  return {
+    targetTable: 'equity_transactions',
+    payload: {
+      member_name: memberName,
+      amount: Math.abs(Number(txn.amount)),
+      transaction_date: txn.transaction_date,
+      type: 'owner_payable',
+      paid_from: paidFrom, // 'llc_bank' or 'personal'
+      notes: notes || `Owner Payable reimbursement (${paidFrom === 'llc_bank' ? 'from LLC checking' : 'absorbed as contribution'}) via bank sync: ${txn.description}`,
+      entity,
+      bank_txn_id: txn.id,
+    },
+  }
+}
+
 function buildOwnerLoanPayload(txn: any, memberName: string, entity: string, rate?: number, notes?: string) {
   return {
     targetTable: 'member_loans',
@@ -290,6 +306,11 @@ export default function BankTab(p: any) {
       } else if (action === 'owner_contribution') {
         const memberName = f.memberName || 'Cam'
         const built = buildOwnerContributionPayload(txn, memberName, entity, f.notes)
+        if (built) await supabase.from(built.targetTable).insert(built.payload)
+      } else if (action === 'owner_payable') {
+        const memberName = f.memberName || 'Cam'
+        const paidFrom = f.paidFrom || 'llc_bank'
+        const built = buildOwnerPayablePayload(txn, memberName, entity, paidFrom, f.notes)
         if (built) await supabase.from(built.targetTable).insert(built.payload)
       } else if (action === 'owner_loan') {
         const memberName = f.memberName || 'Cam'
@@ -576,6 +597,33 @@ export default function BankTab(p: any) {
             </select>
           </div>
           <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. Business funding" style={inp} /></div>
+        </div>
+      )
+    }
+
+    if (action === 'owner_payable') {
+      return (
+        <div style={{ display: 'grid', gap: '10px' }}>
+          <div style={{ padding: '10px', background: 'rgba(124,58,237,0.06)', borderRadius: '6px', fontSize: '12px', color: C.muted }}>
+            ℹ️ Reimbursing a member for business charges paid on a personal card. Reduces &quot;Due to Member&quot; (2610/2620).
+          </div>
+          <div><span style={lbl}>Member</span>
+            <select value={f.memberName || 'Cam'} onChange={e => setForm(txn.id, { memberName: e.target.value })} style={inp}>
+              {MEMBERS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div><span style={lbl}>Paid From</span>
+            <select value={f.paidFrom || 'llc_bank'} onChange={e => setForm(txn.id, { paidFrom: e.target.value })} style={inp}>
+              <option value="llc_bank">LLC Wells Fargo Checking (cash reimbursement)</option>
+              <option value="personal">Personal funds (absorbed as contribution)</option>
+            </select>
+          </div>
+          <div style={{ fontSize: '11px', color: C.muted, padding: '0 2px' }}>
+            {(f.paidFrom || 'llc_bank') === 'llc_bank'
+              ? 'JE: DR 2610 Due to Member · CR 1020 WF Checking'
+              : 'JE: DR 2610 Due to Member · CR 3010/3020 Member Capital'}
+          </div>
+          <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. Paid Costco Citi for business supplies" style={inp} /></div>
         </div>
       )
     }
