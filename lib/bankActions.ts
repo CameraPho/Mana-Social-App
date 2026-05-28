@@ -16,6 +16,8 @@ export type ActionType =
   | 'transfer'
   | 'sales_tax_remittance'
   | 'refund'
+  | 'non_business'
+  | 'refund'
 
 export const ACTION_LABELS: Record<ActionType, string> = {
   categorize:         'Categorize',
@@ -32,6 +34,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   transfer:           'Transfer',
   sales_tax_remittance: 'Sales Tax Remittance (CDTFA)',
   refund:             'Refund / Return',
+  non_business:       'Non-Business — Reimburse LLC',
 }
 
 export const ACTION_HINTS: Record<ActionType, string> = {
@@ -49,6 +52,7 @@ export const ACTION_HINTS: Record<ActionType, string> = {
   transfer:           'Moving money between your own accounts',
   sales_tax_remittance: 'Quarterly sales tax payment to California CDTFA',
   refund:             'Money back for a returned business purchase (reverses the original expense/asset)',
+  non_business:       'Personal charge that landed on a business account — member owes the LLC back',
 }
 
 export const ACTION_ALLOWS_OUTFLOW: Record<ActionType, boolean> = {
@@ -66,6 +70,7 @@ export const ACTION_ALLOWS_OUTFLOW: Record<ActionType, boolean> = {
   transfer:           true,
   sales_tax_remittance: true,
   refund:             false,
+  non_business:       true,
 }
 
 export const ACTION_ALLOWS_INFLOW: Record<ActionType, boolean> = {
@@ -83,6 +88,7 @@ export const ACTION_ALLOWS_INFLOW: Record<ActionType, boolean> = {
   transfer:           true,
   sales_tax_remittance: false,
   refund:             true,
+  non_business:       true,
 }
 
 export function getValidActions(amount: number): ActionType[] {
@@ -91,7 +97,7 @@ export function getValidActions(amount: number): ActionType[] {
     'categorize', 'split', 'platform_payout', 'card_payment',
     'owner_contribution', 'owner_payable', 'owner_loan', 'loan_repayment',
     'owner_draw', 'ap_payment', 'collection_payment', 'transfer',
-    'sales_tax_remittance', 'refund',
+    'sales_tax_remittance', 'refund', 'non_business',
   ]
   return all.filter(a => isOutflow ? ACTION_ALLOWS_OUTFLOW[a] : ACTION_ALLOWS_INFLOW[a])
 }
