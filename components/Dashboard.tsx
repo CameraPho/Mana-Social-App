@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { FONT, LIGHT_COLORS, DARK_COLORS, USEFUL_LIFE } from '@/lib/constants'
 import { today } from '@/lib/format'
+import { stageJEForRecord } from '@/lib/journalEntryEngine'
 import Nav from '@/components/Nav'
 import QuickAddModal from '@/components/QuickAddModal'
 import RecordForm from '@/components/RecordForm'
@@ -245,6 +246,17 @@ export default function Dashboard() {
         const life = payload.category === 'Furniture & Fixtures' ? 7 : 5
         await supabase.from('assets').insert({ purchase_date: payload.purchase_date, description: payload.notes || 'Auto-created from expense', category: payload.category, cost: Number(payload.cost), tax_paid: 0, useful_life_yrs: life, depreciation_method: 'both', entity: payload.entity, user_name: payload.user_name || 'Cam', source_expense_id: inserted.id, is_auto_created: true })
         await supabase.from('expenses').update({ asset_created: true }).eq('id', inserted.id)
+      }
+      // Stage a pending JE for supported source types
+      const STAGE_MAP: Record<string, string> = {
+        sales: 'sale', expenses: 'expense', disbursements: 'disbursement',
+        equity_transactions: 'equity_transaction', member_loans: 'member_loan',
+        member_loan_payments: 'member_loan_payment', sales_tax_remittances: 'sales_tax_remittance',
+        bill_payments: 'bill_payment',
+      }
+      if (inserted && STAGE_MAP[t]) {
+        const r = await stageJEForRecord(STAGE_MAP[t], inserted, supabase)
+        if (!r.success && !r.skipped) console.warn(`JE staging skipped for ${t}:`, r.error)
       }
     }
     setEditingItem(null); setFormData(emptyForm); fetchData()
