@@ -350,15 +350,35 @@ export function generateBillPaymentJE(payment: any, accounts: any[], accountsPay
 // INSERTION HELPERS
 // ============================================================
 
-// Stage a JE for a single source record (is_posted=false). Idempotent: skips if a JE already exists for this source.
+// Map a source/table name to its generator. Some generators need extra context (loans, AP).
+async function runGenerator(sourceType: string, record: any, accounts: any[], supabase: any): Promise<any | null> {
+  switch (sourceType) {
+    case 'sale': return generateSaleJE(record, accounts)
+    case 'expense': return generateExpenseJE(record, accounts)
+    case 'equity_transaction': return generateEquityJE(record, accounts)
+    case 'disbursement': return generateDisbursementJE(record, accounts)
+    case 'member_loan': return generateMemberLoanJE(record, accounts)
+    case 'sales_tax_remittance': return generateSalesTaxRemittanceJE(record, accounts)
+    case 'member_loan_payment': {
+      const { data: loans } = await supabase.from('member_loans').select('*')
+      return generateLoanPaymentJE(record, accounts, loans || [])
+    }
+    case 'bill_payment': {
+      const { data: ap } = await supabase.from('accounts_payable').select('*')
+      return generateBillPaymentJE(record, accounts, ap || [])
+    }
+    default: return null
+  }
+}
+
+// Stage a JE for a single source record (is_posted=false). Self-fetches accounts. Idempotent.
 export async function stageJEForRecord(
   sourceType: string,
   record: any,
-  accounts: any[],
-  supabase: any,
-  generator: (r: any, accs: any[]) => any | null
+  supabase: any
 ): Promise<{ success: boolean; skipped?: boolean; error?: string }> {
   try {
+    if (!record || !record.id) return { success: false, error: 'No record id' }
     const { data: existing } = await supabase
       .from('journal_entries')
       .select('id')
@@ -366,10 +386,12 @@ export async function stageJEForRecord(
       .eq('source_id', record.id)
       .limit(1)
     if (existing && existing.length > 0) return { success: true, skipped: true }
+    const { data: accounts } = await supabase.from('chart_of_accounts').select('*')
+    if (!accounts || accounts.length === 0) return { success: false, error: 'No chart of accounts' }
     setBuildMode(true)
-    const payload = generator(record, accounts)
+    const payload = await runGenerator(sourceType, record, accounts, supabase)
     setBuildMode(false)
-    if (!payload) return { success: false, error: 'Generator returned null (unbalanced or missing account)' }
+    if (!payload) return { success: false, error: `No JE generated for ${sourceType} (unbalanced or unmapped)` }
     const result = await insertJE(payload, supabase)
     return { success: result.success, error: result.error }
   } catch (err: any) {
