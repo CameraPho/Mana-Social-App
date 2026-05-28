@@ -17,7 +17,6 @@ export type ActionType =
   | 'sales_tax_remittance'
   | 'refund'
   | 'non_business'
-  | 'refund'
 
 export const ACTION_LABELS: Record<ActionType, string> = {
   categorize:         'Categorize',
