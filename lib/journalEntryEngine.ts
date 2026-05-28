@@ -245,18 +245,7 @@ export function generateEquityJE(eq: any, accounts: any[]): any | null {
       { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid from LLC checking' },
     ])
   }
-  return null
-}
-    return buildJE({
-      entry_date: eq.transaction_date,
-      description: `Owner payable reimbursed (LLC cash) — ${memberName}: $${amount.toFixed(2)}`,
-      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
-    }, [
-      { account_id: dueToId, debit: amount, credit: 0, description: `Reduce Due to ${memberName}` },
-      { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid from LLC checking' },
-    ])
-  }
-  return null
+return null
 }
 
 export function generateDisbursementJE(disb: any, accounts: any[]): any | null {
