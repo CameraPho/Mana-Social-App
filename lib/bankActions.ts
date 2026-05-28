@@ -15,6 +15,7 @@ export type ActionType =
   | 'collection_payment'
   | 'transfer'
   | 'sales_tax_remittance'
+  | 'refund'
 
 export const ACTION_LABELS: Record<ActionType, string> = {
   categorize:         'Categorize',
@@ -30,6 +31,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   collection_payment: 'Collection Payment',
   transfer:           'Transfer',
   sales_tax_remittance: 'Sales Tax Remittance (CDTFA)',
+  refund:             'Refund / Return',
 }
 
 export const ACTION_HINTS: Record<ActionType, string> = {
@@ -46,6 +48,7 @@ export const ACTION_HINTS: Record<ActionType, string> = {
   collection_payment: 'Paying for buyout inventory',
   transfer:           'Moving money between your own accounts',
   sales_tax_remittance: 'Quarterly sales tax payment to California CDTFA',
+  refund:             'Money back for a returned business purchase (reverses the original expense/asset)',
 }
 
 export const ACTION_ALLOWS_OUTFLOW: Record<ActionType, boolean> = {
@@ -62,6 +65,7 @@ export const ACTION_ALLOWS_OUTFLOW: Record<ActionType, boolean> = {
   collection_payment: true,
   transfer:           true,
   sales_tax_remittance: true,
+  refund:             false,
 }
 
 export const ACTION_ALLOWS_INFLOW: Record<ActionType, boolean> = {
@@ -78,6 +82,7 @@ export const ACTION_ALLOWS_INFLOW: Record<ActionType, boolean> = {
   collection_payment: false,
   transfer:           true,
   sales_tax_remittance: false,
+  refund:             true,
 }
 
 export function getValidActions(amount: number): ActionType[] {
@@ -86,7 +91,7 @@ export function getValidActions(amount: number): ActionType[] {
     'categorize', 'split', 'platform_payout', 'card_payment',
     'owner_contribution', 'owner_payable', 'owner_loan', 'loan_repayment',
     'owner_draw', 'ap_payment', 'collection_payment', 'transfer',
-    'sales_tax_remittance',
+    'sales_tax_remittance', 'refund',
   ]
   return all.filter(a => isOutflow ? ACTION_ALLOWS_OUTFLOW[a] : ACTION_ALLOWS_INFLOW[a])
 }
@@ -102,6 +107,7 @@ const PATTERN_RULES: { pattern: RegExp; action: ActionType; note?: string }[] = 
   { pattern: /transfer\s+(from|to)/i, action: 'transfer' },
   { pattern: /owner\s+draw|distribution/i, action: 'owner_draw' },
   { pattern: /capital\s+contribution/i, action: 'owner_contribution' },
+  { pattern: /refund|return\s+credit|merchandise\s+credit|amzn.*refund|amazon.*refund/i, action: 'refund', note: 'Refund detected' },
 ]
 
 export function suggestActionType(desc: string, amount: number): { action: ActionType; note?: string } {
