@@ -1,443 +1,149 @@
 'use client'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { createClient } from '@/lib/supabase-client'
+import { FONT } from '@/lib/constants'
+import { approveJEs, rejectJEs } from '@/lib/journalEntryEngine'
 
-// ============================================================
-// ACCOUNT OWNERSHIP MAP
-// Only LLC accounts: Wells Fargo Business Checking (1020) +
-// Wells Fargo Signify Mastercard (2160).
-// Everything else (sole-prop, personal) routes through Due to
-// Cam (2610) or Due to Kenny (2620).
-// ============================================================
+export default function PendingJournalEntries({ C, onBack }: { C: any; onBack: () => void }) {
+  const supabase = useMemo(() => createClient(), [])
+  const [entries, setEntries] = useState<any[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
 
-type AccountOwner =
-  | { type: 'llc_bank' | 'llc_card'; gl: string }
-  | { type: 'personal_cam' | 'personal_kenny' }
-
-const ACCOUNT_OWNERSHIP: Record<string, AccountOwner> = {
-  // LLC accounts
-  'Wells Fargo Business Checking': { type: 'llc_bank', gl: '1020' },
-  'Wells Fargo': { type: 'llc_bank', gl: '1020' },
-  'Wells Fargo Signify Mastercard': { type: 'llc_card', gl: '2160' },
-  'WF Signify': { type: 'llc_card', gl: '2160' },
-
-  // Sole prop (dissolved) — treat as Cam personally
-  'Chase Business Checking': { type: 'personal_cam' },
-  'Chase Checking': { type: 'personal_cam' },
-  'Chase Ink': { type: 'personal_cam' },
-
-  // Personal credit cards (Cam)
-  'Costco Citi Visa': { type: 'personal_cam' },
-  'Citi Diamond Preferred': { type: 'personal_cam' },
-  'Amazon Chase Prime Visa': { type: 'personal_cam' },
-  'Chase Sapphire Preferred': { type: 'personal_cam' },
-  'Barclays View Mastercard': { type: 'personal_cam' },
-
-  // Personal checking (Cam)
-  'Wells Fargo Preferred Checking': { type: 'personal_cam' },
-  'Wells Fargo Preferred': { type: 'personal_cam' },
-}
-
-const DEFAULT_LLC_BANK_GL = '1020'
-const DUE_TO_CAM_GL = '2610'
-const DUE_TO_KENNY_GL = '2620'
-
-const PLATFORM_TO_REVENUE_GL: Record<string, string> = {
-  'tcgplayer': '4010', 'ebay': '4020', 'manapool': '4030',
-  'in-person': '4040', 'inperson': '4040', 'in_person': '4040',
-}
-
-const PLATFORM_TO_AR_GL: Record<string, string> = {
-  'tcgplayer': '1110', 'ebay': '1120', 'manapool': '1130',
-}
-
-const PLATFORM_TO_FEES_GL: Record<string, string> = {
-  'tcgplayer': '7210', 'ebay': '7220', 'manapool': '7230',
-}
-
-const EXPENSE_CATEGORY_TO_GL: Record<string, string> = {
-  'Supplies & Packaging': '6010', 'Supplies': '6010',
-  'Office Supplies': '6020',
-  'Marketing': '6030', 'Marketing & Advertising': '6030', 'Advertising': '6030',
-  'Software': '6040', 'Software & Subscriptions': '6040', 'Subscriptions': '6040',
-  'Travel': '6050',
-  'Meals': '6060', 'Meals & Entertainment': '6060',
-  'Vehicle': '6070', 'Mileage': '6070',
-  'Insurance': '6080',
-  'Professional Services': '6090', 'Legal': '6090', 'Accounting': '6090',
-  'Rent': '6100', 'Utilities': '6110', 'Bank Fees': '6120',
-  'Shipping': '7300', 'Postage': '7300',
-  'Interest': '7400', 'Other': '6130',
-}
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-export function getAccountIdByNumber(accounts: any[], accountNumber: string): string | null {
-  const acc = accounts.find(a => a.account_number === accountNumber)
-  return acc?.id || null
-}
-
-function resolveBankOrCardId(accounts: any[], paymentMethod: string | null | undefined): string | null {
-  if (!paymentMethod) return getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  const owner = ACCOUNT_OWNERSHIP[paymentMethod.trim()]
-  if (!owner) return getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (owner.type === 'llc_bank' || owner.type === 'llc_card') return getAccountIdByNumber(accounts, owner.gl)
-  if (owner.type === 'personal_cam') return getAccountIdByNumber(accounts, DUE_TO_CAM_GL)
-  if (owner.type === 'personal_kenny') return getAccountIdByNumber(accounts, DUE_TO_KENNY_GL)
-  return getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-}
-
-function describePaymentSide(paymentMethod: string | null | undefined): string {
-  if (!paymentMethod) return 'Paid from LLC bank'
-  const owner = ACCOUNT_OWNERSHIP[paymentMethod.trim()]
-  if (!owner) return `Paid via ${paymentMethod} (default LLC bank)`
-  if (owner.type === 'llc_bank') return `Paid via ${paymentMethod} (LLC bank)`
-  if (owner.type === 'llc_card') return `Paid via ${paymentMethod} (LLC card)`
-  if (owner.type === 'personal_cam') return `Paid via ${paymentMethod} — owed to Cam`
-  if (owner.type === 'personal_kenny') return `Paid via ${paymentMethod} — owed to Kenny`
-  return `Paid via ${paymentMethod}`
-}
-
-function memberAccountId(accounts: any[], memberName: string, type: 'contribution' | 'draw' | 'loan'): string | null {
-  const map: Record<string, Record<string, string>> = {
-    'cam':   { contribution: '3010', draw: '3030', loan: '2510' },
-    'kenny': { contribution: '3020', draw: '3040', loan: '2520' },
-  }
-  const key = (memberName || '').toLowerCase().trim()
-  const number = map[key]?.[type]
-  return number ? getAccountIdByNumber(accounts, number) : null
-}
-
-let BUILD_STAGED = false
-export function setBuildMode(staged: boolean) { BUILD_STAGED = staged }
-
-function buildJE(headerProps: any, lines: any[]): any | null {
-  const round = (n: number) => Math.round(n * 100) / 100
-  const totalDebit = round(lines.reduce((s, l) => s + Number(l.debit || 0), 0))
-  const totalCredit = round(lines.reduce((s, l) => s + Number(l.credit || 0), 0))
-  if (Math.abs(totalDebit - totalCredit) > 0.01) return null
-  if (totalDebit === 0) return null
-  return {
-    header: { ...headerProps, total_debit: totalDebit, total_credit: totalCredit, is_posted: !BUILD_STAGED, posted_by: BUILD_STAGED ? 'staged-pending' : 'auto-generated', entity: 'Mana Social LLC' },
-    lines: lines.map((l, idx) => ({ ...l, line_order: idx, debit: round(Number(l.debit) || 0), credit: round(Number(l.credit) || 0) })),
-  }
-}
-
-// ============================================================
-// GENERATORS
-// ============================================================
-
-export function generateSaleJE(sale: any, accounts: any[]): any | null {
-  const platform = (sale.platform || '').toLowerCase().trim()
-  const revenueId = getAccountIdByNumber(accounts, PLATFORM_TO_REVENUE_GL[platform] || '4050')
-  if (!revenueId) return null
-
-  const arAccountNum = PLATFORM_TO_AR_GL[platform]
-  const cashOrArId = arAccountNum
-    ? getAccountIdByNumber(accounts, arAccountNum)
-    : getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!cashOrArId) return null
-
-  const salesTaxId = getAccountIdByNumber(accounts, '2200')
-  const feesId = PLATFORM_TO_FEES_GL[platform] ? getAccountIdByNumber(accounts, PLATFORM_TO_FEES_GL[platform]) : null
-
-  const grossAmount = Number(sale.amount) || 0
-  const tax = Number(sale.sales_tax_collected) || 0
-  const fees = Number(sale.fees) || 0
-  if (grossAmount <= 0) return null
-
-  const netRevenue = grossAmount - tax
-  const cashReceived = grossAmount - fees
-
-  const lines: any[] = []
-  lines.push({ account_id: cashOrArId, debit: cashReceived, credit: 0, description: arAccountNum ? `${platform} payout pending` : `${platform || 'sale'} cash received` })
-  if (fees > 0 && feesId) lines.push({ account_id: feesId, debit: fees, credit: 0, description: `${platform} commission/fees` })
-  lines.push({ account_id: revenueId, debit: 0, credit: netRevenue, description: `${platform || 'sale'} revenue` })
-  if (tax > 0 && salesTaxId) lines.push({ account_id: salesTaxId, debit: 0, credit: tax, description: 'Sales tax collected' })
-
-  return buildJE({
-    entry_date: sale.sale_date,
-    description: `Sale via ${platform || 'other'}: $${grossAmount.toFixed(2)}`,
-    source_type: 'sale', source_id: sale.id, notes: sale.notes || null,
-  }, lines)
-}
-
-export function generateExpenseJE(expense: any, accounts: any[]): any | null {
-  const category = expense.category || 'Other'
-  const expenseId = getAccountIdByNumber(accounts, EXPENSE_CATEGORY_TO_GL[category] || '6130')
-  if (!expenseId) return null
-
-  const cost = Number(expense.cost) || 0
-  if (cost <= 0) return null
-
-  const paymentMethod = expense.payment_method || expense.account_paid || null
-  const creditAccountId = resolveBankOrCardId(accounts, paymentMethod)
-  if (!creditAccountId) return null
-
-  return buildJE({
-    entry_date: expense.purchase_date,
-    description: `${category}: $${cost.toFixed(2)}`,
-    source_type: 'expense', source_id: expense.id, notes: expense.notes || null,
-  }, [
-    { account_id: expenseId, debit: cost, credit: 0, description: expense.notes || category },
-    { account_id: creditAccountId, debit: 0, credit: cost, description: describePaymentSide(paymentMethod) },
-  ])
-}
-
-export function generateEquityJE(eq: any, accounts: any[]): any | null {
-  const amount = Number(eq.amount) || 0
-  if (amount <= 0) return null
-  const type = (eq.type || 'contribution').toLowerCase()
-  const memberName = eq.member_name || 'Cam'
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!bankId) return null
-
-  if (type === 'contribution') {
-    const equityId = memberAccountId(accounts, memberName, 'contribution')
-    if (!equityId) return null
-    return buildJE({
-      entry_date: eq.transaction_date,
-      description: `Capital contribution from ${memberName}: $${amount.toFixed(2)}`,
-      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
-    }, [
-      { account_id: bankId, debit: amount, credit: 0, description: 'Cash received' },
-      { account_id: equityId, debit: 0, credit: amount, description: `${memberName} capital contribution` },
-    ])
-  }
-
-  if (type === 'draw' || type === 'distribution') {
-    const drawId = memberAccountId(accounts, memberName, 'draw')
-    if (!drawId) return null
-    return buildJE({
-      entry_date: eq.transaction_date,
-      description: `Owner draw to ${memberName}: $${amount.toFixed(2)}`,
-      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
-    }, [
-      { account_id: drawId, debit: amount, credit: 0, description: `${memberName} draw` },
-      { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid out' },
-    ])
-  }
-
-  if (type === 'owner_payable') {
-    const dueToId = getAccountIdByNumber(accounts, memberName.toLowerCase().trim() === 'kenny' ? DUE_TO_KENNY_GL : DUE_TO_CAM_GL)
-    if (!dueToId) return null
-    const paidFrom = (eq.paid_from || 'llc_bank').toLowerCase()
-    if (paidFrom === 'personal') {
-      const equityId = memberAccountId(accounts, memberName, 'contribution')
-      if (!equityId) return null
-      return buildJE({
-        entry_date: eq.transaction_date,
-        description: `Owner payable settled (personal funds) — ${memberName}: $${amount.toFixed(2)}`,
-        source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
-      }, [
-        { account_id: dueToId, debit: amount, credit: 0, description: `Reduce Due to ${memberName}` },
-        { account_id: equityId, debit: 0, credit: amount, description: `${memberName} absorbed payable as contribution` },
-      ])
-    }
-    return buildJE({
-      entry_date: eq.transaction_date,
-      description: `Owner payable reimbursed (LLC cash) — ${memberName}: $${amount.toFixed(2)}`,
-      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
-    }, [
-      { account_id: dueToId, debit: amount, credit: 0, description: `Reduce Due to ${memberName}` },
-      { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid from LLC checking' },
-    ])
-  }
-  return null
-}
-
-export function generateDisbursementJE(disb: any, accounts: any[]): any | null {
-  const amount = Number(disb.amount) || 0
-  if (amount <= 0) return null
-  const recipient = disb.recipient || 'Cam'
-  const drawId = memberAccountId(accounts, recipient, 'draw')
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!drawId || !bankId) return null
-
-  return buildJE({
-    entry_date: disb.disbursement_date,
-    description: `Disbursement to ${recipient}: $${amount.toFixed(2)}`,
-    source_type: 'disbursement', source_id: disb.id, notes: disb.notes || null,
-  }, [
-    { account_id: drawId, debit: amount, credit: 0, description: `Draw to ${recipient}` },
-    { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid out' },
-  ])
-}
-
-export function generateMemberLoanJE(loan: any, accounts: any[]): any | null {
-  const principal = Number(loan.principal) || 0
-  if (principal <= 0) return null
-  const memberName = loan.member_name || 'Cam'
-  const loanLiabilityId = memberAccountId(accounts, memberName, 'loan')
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!loanLiabilityId || !bankId) return null
-
-  return buildJE({
-    entry_date: loan.loan_date,
-    description: `Loan from ${memberName}: $${principal.toFixed(2)}`,
-    source_type: 'member_loan', source_id: loan.id, notes: loan.notes || null,
-  }, [
-    { account_id: bankId, debit: principal, credit: 0, description: 'Loan proceeds received' },
-    { account_id: loanLiabilityId, debit: 0, credit: principal, description: `Loan from ${memberName}` },
-  ])
-}
-
-export function generateLoanPaymentJE(payment: any, accounts: any[], memberLoans: any[]): any | null {
-  const principalPaid = Number(payment.principal_paid) || 0
-  const interestPaid = Number(payment.interest_paid) || 0
-  const totalPaid = principalPaid + interestPaid
-  if (totalPaid <= 0) return null
-  const loan = memberLoans.find(l => l.id === payment.loan_id)
-  if (!loan) return null
-  const memberName = loan.member_name || 'Cam'
-  const loanLiabilityId = memberAccountId(accounts, memberName, 'loan')
-  const interestExpenseId = getAccountIdByNumber(accounts, '7400')
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!loanLiabilityId || !bankId) return null
-  if (interestPaid > 0 && !interestExpenseId) return null
-
-  const lines: any[] = []
-  if (principalPaid > 0) lines.push({ account_id: loanLiabilityId, debit: principalPaid, credit: 0, description: `Loan principal payment to ${memberName}` })
-  if (interestPaid > 0 && interestExpenseId) lines.push({ account_id: interestExpenseId, debit: interestPaid, credit: 0, description: `Loan interest paid to ${memberName}` })
-  lines.push({ account_id: bankId, debit: 0, credit: totalPaid, description: 'Payment from bank' })
-
-  return buildJE({
-    entry_date: payment.payment_date,
-    description: `Loan repayment to ${memberName}: $${totalPaid.toFixed(2)}`,
-    source_type: 'member_loan_payment', source_id: payment.id, notes: payment.notes || null,
-  }, lines)
-}
-
-export function generateSalesTaxRemittanceJE(remit: any, accounts: any[]): any | null {
-  const amount = Number(remit.amount) || 0
-  if (amount <= 0) return null
-  const salesTaxId = getAccountIdByNumber(accounts, '2200')
-  const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
-  if (!salesTaxId || !bankId) return null
-
-  return buildJE({
-    entry_date: remit.remittance_date || remit.payment_date,
-    description: `Sales tax remittance to CDTFA: $${amount.toFixed(2)}`,
-    source_type: 'sales_tax_remittance', source_id: remit.id, notes: remit.notes || null,
-  }, [
-    { account_id: salesTaxId, debit: amount, credit: 0, description: 'CDTFA payment' },
-    { account_id: bankId, debit: 0, credit: amount, description: 'Paid from bank' },
-  ])
-}
-
-export function generateBillPaymentJE(payment: any, accounts: any[], accountsPayable: any[]): any | null {
-  const amount = Number(payment.amount_paid) || 0
-  if (amount <= 0) return null
-  const bill = accountsPayable.find(ap => ap.id === payment.bill_id)
-  if (!bill) return null
-  const apId = getAccountIdByNumber(accounts, '2010')
-  if (!apId) return null
-  const paymentMethod = payment.payment_method || 'Wells Fargo Business Checking'
-  const sourceId = resolveBankOrCardId(accounts, paymentMethod)
-  if (!sourceId) return null
-
-  return buildJE({
-    entry_date: payment.payment_date,
-    description: `Bill payment to ${bill.vendor_name}: $${amount.toFixed(2)}`,
-    source_type: 'bill_payment', source_id: payment.id, notes: payment.notes || null,
-  }, [
-    { account_id: apId, debit: amount, credit: 0, description: `Payment on AP - ${bill.vendor_name}` },
-    { account_id: sourceId, debit: 0, credit: amount, description: describePaymentSide(paymentMethod) },
-  ])
-}
-
-// ============================================================
-// INSERTION HELPERS
-// ============================================================
-
-// Map a source/table name to its generator. Some generators need extra context (loans, AP).
-async function runGenerator(sourceType: string, record: any, accounts: any[], supabase: any): Promise<any | null> {
-  switch (sourceType) {
-    case 'sale': return generateSaleJE(record, accounts)
-    case 'expense': return generateExpenseJE(record, accounts)
-    case 'equity_transaction': return generateEquityJE(record, accounts)
-    case 'disbursement': return generateDisbursementJE(record, accounts)
-    case 'member_loan': return generateMemberLoanJE(record, accounts)
-    case 'sales_tax_remittance': return generateSalesTaxRemittanceJE(record, accounts)
-    case 'member_loan_payment': {
-      const { data: loans } = await supabase.from('member_loans').select('*')
-      return generateLoanPaymentJE(record, accounts, loans || [])
-    }
-    case 'bill_payment': {
-      const { data: ap } = await supabase.from('accounts_payable').select('*')
-      return generateBillPaymentJE(record, accounts, ap || [])
-    }
-    default: return null
-  }
-}
-
-// Stage a JE for a single source record (is_posted=false). Self-fetches accounts. Idempotent.
-export async function stageJEForRecord(
-  sourceType: string,
-  record: any,
-  supabase: any
-): Promise<{ success: boolean; skipped?: boolean; error?: string }> {
-  try {
-    if (!record || !record.id) return { success: false, error: 'No record id' }
-    const { data: existing } = await supabase
+  const fetchPending = useCallback(async () => {
+    setLoading(true)
+    const { data } = await supabase
       .from('journal_entries')
-      .select('id')
-      .eq('source_type', sourceType)
-      .eq('source_id', record.id)
-      .limit(1)
-    if (existing && existing.length > 0) return { success: true, skipped: true }
-    const { data: accounts } = await supabase.from('chart_of_accounts').select('*')
-    if (!accounts || accounts.length === 0) return { success: false, error: 'No chart of accounts' }
-    const payload = await runGenerator(sourceType, record, accounts, supabase)
-    if (!payload) return { success: false, error: `No JE generated for ${sourceType} (unbalanced or unmapped)` }
-    // Force staged status directly on the payload (no reliance on module flag)
-    payload.header.is_posted = false
-    payload.header.posted_by = 'staged-pending'
-    const result = await insertJE(payload, supabase)
-    return { success: result.success, error: result.error }
-  } catch (err: any) {
-    return { success: false, error: err.message }
+      .select('*, journal_entry_lines(*, chart_of_accounts(account_number, account_name, normal_balance))')
+      .eq('is_posted', false)
+      .order('entry_date', { ascending: false })
+    setEntries(data || [])
+    setSelected(new Set())
+    setLoading(false)
+  }, [supabase])
+
+  useEffect(() => { fetchPending() }, [fetchPending])
+
+  const fmt = (n: number) => `$${(Number(n) || 0).toFixed(2)}`
+  const acctLabel = (line: any) => {
+    const a = line.chart_of_accounts
+    return a ? `${a.account_number} · ${a.account_name}` : '—'
   }
-}
 
-export async function approveJEs(entryIds: string[], supabase: any): Promise<{ success: boolean; error?: string }> {
-  if (entryIds.length === 0) return { success: true }
-  const { error } = await supabase
-    .from('journal_entries')
-    .update({ is_posted: true, posted_by: 'approved' })
-    .in('id', entryIds)
-  return { success: !error, error: error?.message }
-}
-
-export async function rejectJEs(entryIds: string[], supabase: any): Promise<{ success: boolean; error?: string }> {
-  if (entryIds.length === 0) return { success: true }
-  await supabase.from('journal_entry_lines').delete().in('entry_id', entryIds)
-  const { error } = await supabase.from('journal_entries').delete().in('id', entryIds)
-  return { success: !error, error: error?.message }
-}
-
-export async function insertJE(payload: any, supabase: any): Promise<{ success: boolean; error?: string; entryId?: string }> {
-  try {
-    const { data: je, error: jeErr } = await supabase.from('journal_entries').insert(payload.header).select().single()
-    if (jeErr) return { success: false, error: jeErr.message }
-    const linesPayload = payload.lines.map((l: any) => ({ ...l, entry_id: je.id }))
-    const { error: linesErr } = await supabase.from('journal_entry_lines').insert(linesPayload)
-    if (linesErr) {
-      await supabase.from('journal_entries').delete().eq('id', je.id)
-      return { success: false, error: linesErr.message }
-    }
-    return { success: true, entryId: je.id }
-  } catch (err: any) {
-    return { success: false, error: err.message || String(err) }
+  const toggle = (id: string) => {
+    const next = new Set(selected)
+    next.has(id) ? next.delete(id) : next.add(id)
+    setSelected(next)
   }
-}
-
-export async function deleteJEsBySource(supabase: any, sourceType: string): Promise<{ deleted: number; error?: string }> {
-  try {
-    const { data, error } = await supabase.from('journal_entries').delete().eq('source_type', sourceType).select()
-    if (error) return { deleted: 0, error: error.message }
-    return { deleted: data?.length || 0 }
-  } catch (err: any) {
-    return { deleted: 0, error: err.message || String(err) }
+  const toggleAll = () => {
+    selected.size === entries.length ? setSelected(new Set()) : setSelected(new Set(entries.map(e => e.id)))
   }
+
+  const approve = async (ids: string[]) => {
+    if (ids.length === 0) return
+    if (!confirm(`Approve and post ${ids.length} journal entr${ids.length === 1 ? 'y' : 'ies'}?`)) return
+    setBusy(true)
+    const res = await approveJEs(ids, supabase)
+    setBusy(false)
+    if (!res.success) { alert('Approve failed: ' + res.error); return }
+    fetchPending()
+  }
+  const reject = async (ids: string[]) => {
+    if (ids.length === 0) return
+    if (!confirm(`Reject and permanently delete ${ids.length} pending journal entr${ids.length === 1 ? 'y' : 'ies'}?\n\nThe source record stays; only the staged JE is removed.`)) return
+    setBusy(true)
+    const res = await rejectJEs(ids, supabase)
+    setBusy(false)
+    if (!res.success) { alert('Reject failed: ' + res.error); return }
+    fetchPending()
+  }
+
+  const btn = (bg: string, brd: string, col: string): React.CSSProperties => ({
+    background: bg, border: `1px solid ${brd}`, color: col, borderRadius: '8px',
+    padding: '8px 14px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT,
+  })
+
+  return (
+    <div style={{ fontFamily: FONT }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+        <button onClick={onBack} style={btn('none', C.border, C.muted)}>← Back</button>
+        <div style={{ fontSize: '13px', color: C.muted }}>{entries.length} pending</div>
+      </div>
+
+      <div style={{ fontSize: '20px', fontWeight: 'bold', color: C.text, marginBottom: '4px' }}>Pending Journal Entries</div>
+      <div style={{ fontSize: '13px', color: C.muted, marginBottom: '16px' }}>
+        Review staged entries, then approve to post them to the ledger or reject to discard. Source records are never affected by rejecting.
+      </div>
+
+      {loading ? (
+        <div style={{ color: C.muted, padding: '20px' }}>Loading…</div>
+      ) : entries.length === 0 ? (
+        <div style={{ color: C.muted, padding: '20px', textAlign: 'center', background: C.cardBg, borderRadius: '10px' }}>
+          ✓ No pending entries. Everything is posted.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button onClick={toggleAll} style={btn('none', C.border, C.text)}>
+              {selected.size === entries.length ? 'Deselect all' : 'Select all'}
+            </button>
+            <button onClick={() => approve([...selected])} disabled={busy || selected.size === 0} style={{ ...btn('rgba(45,191,184,0.1)', C.teal, C.teal), opacity: busy || selected.size === 0 ? 0.4 : 1 }}>
+              ✓ Approve Selected ({selected.size})
+            </button>
+            <button onClick={() => reject([...selected])} disabled={busy || selected.size === 0} style={{ ...btn('rgba(239,68,68,0.08)', '#dc2626', '#dc2626'), opacity: busy || selected.size === 0 ? 0.4 : 1 }}>
+              ✕ Reject Selected ({selected.size})
+            </button>
+            <button onClick={() => approve(entries.map(e => e.id))} disabled={busy} style={{ ...btn(`linear-gradient(135deg,${C.teal},#1A7A75)`, C.teal, '#fff'), opacity: busy ? 0.4 : 1 }}>
+              ✓ Approve All
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {entries.map(e => {
+              const el = (e.journal_entry_lines || []).slice().sort((a: any, b: any) => (a.line_order || 0) - (b.line_order || 0))
+              const dr = el.reduce((s: number, l: any) => s + Number(l.debit || 0), 0)
+              const cr = el.reduce((s: number, l: any) => s + Number(l.credit || 0), 0)
+              const balanced = Math.abs(dr - cr) < 0.01
+              const isSel = selected.has(e.id)
+              return (
+                <div key={e.id} style={{ background: C.cardBg, border: `1px solid ${isSel ? C.teal : C.border}`, borderRadius: '10px', padding: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+                    <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer', flex: 1 }}>
+                      <input type="checkbox" checked={isSel} onChange={() => toggle(e.id)} style={{ marginTop: '3px' }} />
+                      <div>
+                        <div style={{ fontWeight: 'bold', color: C.text, fontSize: '14px' }}>{e.description}</div>
+                        <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>
+                          {e.entry_date} · {e.source_type} · {balanced ? <span style={{ color: C.teal }}>✓ Balanced</span> : <span style={{ color: '#dc2626' }}>⚠ Unbalanced</span>}
+                        </div>
+                      </div>
+                    </label>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={() => approve([e.id])} disabled={busy} style={btn('rgba(45,191,184,0.1)', C.teal, C.teal)}>✓</button>
+                      <button onClick={() => reject([e.id])} disabled={busy} style={btn('rgba(239,68,68,0.08)', '#dc2626', '#dc2626')}>✕</button>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '10px', borderTop: `1px solid ${C.border}`, paddingTop: '10px' }}>
+                    {el.map((l: any, i: number) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '3px 0', color: C.text }}>
+                        <span style={{ paddingLeft: Number(l.debit) > 0 ? '0' : '20px', color: Number(l.debit) > 0 ? C.text : C.muted, flex: 1 }}>{acctLabel(l)}</span>
+                        <span style={{ minWidth: '90px', textAlign: 'right', color: Number(l.debit) > 0 ? C.text : 'transparent' }}>{Number(l.debit) > 0 ? fmt(l.debit) : '·'}</span>
+                        <span style={{ minWidth: '90px', textAlign: 'right', color: Number(l.credit) > 0 ? C.text : 'transparent' }}>{Number(l.credit) > 0 ? fmt(l.credit) : '·'}</span>
+                      </div>
+                    ))}
+                    {e.notes && <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px', fontStyle: 'italic' }}>📝 {e.notes}</div>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', borderTop: `1px solid ${C.border}`, marginTop: '4px', paddingTop: '4px', color: C.text }}>
+                      <span style={{ flex: 1 }}>Total</span>
+                      <span style={{ minWidth: '90px', textAlign: 'right' }}>{fmt(dr)}</span>
+                      <span style={{ minWidth: '90px', textAlign: 'right' }}>{fmt(cr)}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
