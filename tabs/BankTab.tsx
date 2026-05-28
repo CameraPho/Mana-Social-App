@@ -24,6 +24,23 @@ function buildOwnerContributionPayload(txn: any, memberName: string, entity: str
   }
 }
 
+function buildRefundPayload(txn: any, category: string, entity: string, notes?: string) {
+  return {
+    targetTable: 'expenses',
+    payload: {
+      // A refund is a negative expense — reverses the original purchase in the same category.
+      category,
+      cost: -Math.abs(Number(txn.amount)),
+      purchase_date: txn.transaction_date,
+      payment_method: txn.account_name,   // the card the refund landed on → drives 2160 vs 2610
+      notes: notes || `Refund: ${txn.description}`,
+      entity,
+      bank_txn_id: txn.id,
+      is_refund: true,
+    },
+  }
+}
+
 function buildOwnerPayablePayload(txn: any, memberName: string, entity: string, paidFrom: string, notes?: string) {
   return {
     targetTable: 'equity_transactions',
@@ -307,6 +324,10 @@ export default function BankTab(p: any) {
       } else if (action === 'owner_contribution') {
         const memberName = f.memberName || 'Cam'
         const built = buildOwnerContributionPayload(txn, memberName, entity, f.notes)
+        if (built) await supabase.from(built.targetTable).insert(built.payload)
+      } else if (action === 'refund') {
+        const category = f.category || 'Inventory Purchase'
+        const built = buildRefundPayload(txn, category, entity, f.notes)
         if (built) await supabase.from(built.targetTable).insert(built.payload)
       } else if (action === 'owner_payable') {
         const memberName = f.memberName || 'Cam'
@@ -611,6 +632,29 @@ export default function BankTab(p: any) {
             </select>
           </div>
           <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. Business funding" style={inp} /></div>
+        </div>
+      )
+    }
+
+    if (action === 'refund') {
+      const acctName = txn.account_name || ''
+      const isLLCCard = acctName.startsWith('Mana Social |')
+      return (
+        <div style={{ display: 'grid', gap: '10px' }}>
+          <div style={{ padding: '10px', background: 'rgba(45,191,184,0.06)', borderRadius: '6px', fontSize: '12px', color: C.muted }}>
+            ↩ Refund for a returned business purchase. This reverses the original cost in the category you pick.
+          </div>
+          <div><span style={lbl}>Category being refunded</span>
+            <select value={f.category || 'Inventory Purchase'} onChange={e => setForm(txn.id, { category: e.target.value })} style={inp}>
+              {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div style={{ fontSize: '11px', color: C.muted, padding: '0 2px' }}>
+            {isLLCCard
+              ? `JE: DR 2160 ${acctName} · CR expense/asset for ${f.category || 'Inventory Purchase'} (refund hit LLC card)`
+              : `JE: DR 2610 Due to Member · CR expense/asset for ${f.category || 'Inventory Purchase'} (refund hit personal card)`}
+          </div>
+          <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. Amazon return — damaged item" style={inp} /></div>
         </div>
       )
     }
