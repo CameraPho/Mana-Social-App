@@ -411,7 +411,7 @@ export async function approveJEs(entryIds: string[], supabase: any): Promise<{ s
 
 export async function rejectJEs(entryIds: string[], supabase: any): Promise<{ success: boolean; error?: string }> {
   if (entryIds.length === 0) return { success: true }
-  await supabase.from('journal_entry_lines').delete().in('journal_entry_id', entryIds)
+  await supabase.from('journal_entry_lines').delete().in('entry_id', entryIds)
   const { error } = await supabase.from('journal_entries').delete().in('id', entryIds)
   return { success: !error, error: error?.message }
 }
