@@ -24,6 +24,22 @@ function buildOwnerContributionPayload(txn: any, memberName: string, entity: str
   }
 }
 
+function buildNonBusinessPayload(txn: any, memberName: string, entity: string, notes?: string) {
+  return {
+    targetTable: 'equity_transactions',
+    payload: {
+      member_name: memberName,
+      amount: Math.abs(Number(txn.amount)),
+      transaction_date: txn.transaction_date,
+      transaction_type: 'non_business',
+      paid_from: txn.account_name, // the business account that wrongly paid → drives the credit GL
+      notes: notes || `Non-business charge on ${txn.account_name} — owed back to LLC by ${memberName}: ${txn.description}`,
+      entity,
+      bank_txn_id: txn.id,
+    },
+  }
+}
+
 function buildRefundPayload(txn: any, category: string, entity: string, notes?: string) {
   return {
     targetTable: 'expenses',
@@ -336,6 +352,10 @@ export default function BankTab(p: any) {
         const category = f.category || 'Inventory Purchase'
         const built = buildRefundPayload(txn, category, entity, f.notes)
         if (built) await supabase.from(built.targetTable).insert(built.payload)
+      } else if (action === 'non_business') {
+        const memberName = f.memberName || 'Cam'
+        const built = buildNonBusinessPayload(txn, memberName, entity, f.notes)
+        if (built) await supabase.from(built.targetTable).insert(built.payload)
       } else if (action === 'owner_payable') {
         const memberName = f.memberName || 'Cam'
         const paidFrom = f.paidFrom || 'Mana Social | WF Business Checking'
@@ -639,6 +659,23 @@ export default function BankTab(p: any) {
             </select>
           </div>
           <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. Business funding" style={inp} /></div>
+        </div>
+      )
+    }
+
+    if (action === 'non_business') {
+      const acctName = txn.account_name || ''
+      return (
+        <div style={{ display: 'grid', gap: '10px' }}>
+          <div style={{ padding: '10px', background: 'rgba(239,68,68,0.06)', borderRadius: '6px', fontSize: '12px', color: C.muted }}>
+            ⚠️ A personal/non-business charge landed on <strong>{acctName}</strong>. This records that {`{member}`} owes the LLC back. JE: DR 2610/2620 Due to/from Member · CR {acctName}.
+          </div>
+          <div><span style={lbl}>Member who owes the LLC</span>
+            <select value={f.memberName || 'Cam'} onChange={e => setForm(txn.id, { memberName: e.target.value })} style={inp}>
+              {MEMBERS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. Accidentally used biz card for groceries" style={inp} /></div>
         </div>
       )
     }
