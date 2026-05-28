@@ -5,6 +5,7 @@ import { FONT } from '@/lib/constants'
 const supabase = createClient()
 import { fmt, getEntity } from '@/lib/format'
 import { parsePDF } from '@/parsers/universalPDF'
+import { stageJEForRecord } from '@/lib/journalEntryEngine'
 
 export default function MoneyInTab(p: any) {
   const { C, sales, fetchData, startEdit, handleDelete } = p
@@ -80,8 +81,14 @@ export default function MoneyInTab(p: any) {
         num_orders: parseInt(r.num_orders) || 1
       }
     })
-    const { error } = await supabase.from('sales').insert(inserts)
+    const { data: insertedSales, error } = await supabase.from('sales').insert(inserts).select()
     if (error) { setUploadStatus('Error: ' + error.message); return }
+    if (insertedSales) {
+      for (const s of insertedSales) {
+        const res = await stageJEForRecord('sale', s, supabase)
+        if (!res.success && !res.skipped) console.warn('JE staging skipped for sale:', res.error)
+      }
+    }
     setUploadPreview([]); setUploadStatus('Saved!'); fetchData()
     setTimeout(() => setUploadStatus(''), 3000)
   }
