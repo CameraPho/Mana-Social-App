@@ -388,14 +388,14 @@ export async function stageJEForRecord(
     if (existing && existing.length > 0) return { success: true, skipped: true }
     const { data: accounts } = await supabase.from('chart_of_accounts').select('*')
     if (!accounts || accounts.length === 0) return { success: false, error: 'No chart of accounts' }
-    setBuildMode(true)
     const payload = await runGenerator(sourceType, record, accounts, supabase)
-    setBuildMode(false)
     if (!payload) return { success: false, error: `No JE generated for ${sourceType} (unbalanced or unmapped)` }
+    // Force staged status directly on the payload (no reliance on module flag)
+    payload.header.is_posted = false
+    payload.header.posted_by = 'staged-pending'
     const result = await insertJE(payload, supabase)
     return { success: result.success, error: result.error }
   } catch (err: any) {
-    setBuildMode(false)
     return { success: false, error: err.message }
   }
 }
