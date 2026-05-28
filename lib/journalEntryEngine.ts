@@ -13,25 +13,34 @@ type AccountOwner =
   | { type: 'personal_cam' | 'personal_kenny' }
 
 const ACCOUNT_OWNERSHIP: Record<string, AccountOwner> = {
+  // ===== NEW uniform names (Owner | Bank Type) =====
   // LLC accounts
+  'Mana Social | WF Business Checking': { type: 'llc_bank', gl: '1020' },
+  'Mana Social | WF Signify Mastercard': { type: 'llc_card', gl: '2160' },
+  // Personal — Cam
+  'Cam | Chase Business Checking': { type: 'personal_cam' },
+  'Cam | WF Personal Checking': { type: 'personal_cam' },
+  'Cam | Costco Citi Visa': { type: 'personal_cam' },
+  'Cam | Citi Diamond Preferred': { type: 'personal_cam' },
+  'Cam | Amazon Chase Prime Visa': { type: 'personal_cam' },
+  'Cam | Chase Sapphire Preferred': { type: 'personal_cam' },
+  'Cam | Barclays View Mastercard': { type: 'personal_cam' },
+  // Personal — Kenny
+  'Kenny | WF Personal Checking': { type: 'personal_kenny' },
+
+  // ===== LEGACY names (pre-rename, kept for backward-compat) =====
   'Wells Fargo Business Checking': { type: 'llc_bank', gl: '1020' },
   'Wells Fargo': { type: 'llc_bank', gl: '1020' },
   'Wells Fargo Signify Mastercard': { type: 'llc_card', gl: '2160' },
   'WF Signify': { type: 'llc_card', gl: '2160' },
-
-  // Sole prop (dissolved) — treat as Cam personally
   'Chase Business Checking': { type: 'personal_cam' },
   'Chase Checking': { type: 'personal_cam' },
   'Chase Ink': { type: 'personal_cam' },
-
-  // Personal credit cards (Cam)
   'Costco Citi Visa': { type: 'personal_cam' },
   'Citi Diamond Preferred': { type: 'personal_cam' },
   'Amazon Chase Prime Visa': { type: 'personal_cam' },
   'Chase Sapphire Preferred': { type: 'personal_cam' },
   'Barclays View Mastercard': { type: 'personal_cam' },
-
-  // Personal checking (Cam)
   'Wells Fargo Preferred Checking': { type: 'personal_cam' },
   'Wells Fargo Preferred': { type: 'personal_cam' },
 }
