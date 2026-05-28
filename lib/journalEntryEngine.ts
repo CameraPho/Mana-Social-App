@@ -214,6 +214,32 @@ export function generateEquityJE(eq: any, accounts: any[]): any | null {
       { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid out' },
     ])
   }
+
+  if (type === 'owner_payable') {
+    const dueToId = getAccountIdByNumber(accounts, memberName.toLowerCase().trim() === 'kenny' ? DUE_TO_KENNY_GL : DUE_TO_CAM_GL)
+    if (!dueToId) return null
+    const paidFrom = (eq.paid_from || 'llc_bank').toLowerCase()
+    if (paidFrom === 'personal') {
+      const equityId = memberAccountId(accounts, memberName, 'contribution')
+      if (!equityId) return null
+      return buildJE({
+        entry_date: eq.transaction_date,
+        description: `Owner payable settled (personal funds) — ${memberName}: $${amount.toFixed(2)}`,
+        source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
+      }, [
+        { account_id: dueToId, debit: amount, credit: 0, description: `Reduce Due to ${memberName}` },
+        { account_id: equityId, debit: 0, credit: amount, description: `${memberName} absorbed payable as contribution` },
+      ])
+    }
+    return buildJE({
+      entry_date: eq.transaction_date,
+      description: `Owner payable reimbursed (LLC cash) — ${memberName}: $${amount.toFixed(2)}`,
+      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
+    }, [
+      { account_id: dueToId, debit: amount, credit: 0, description: `Reduce Due to ${memberName}` },
+      { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid from LLC checking' },
+    ])
+  }
   return null
 }
 
