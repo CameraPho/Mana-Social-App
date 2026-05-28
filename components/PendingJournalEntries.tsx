@@ -1,57 +1,35 @@
 'use client'
-import React, { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { createClient } from '@/lib/supabase-client'
 import { FONT } from '@/lib/constants'
 import { approveJEs, rejectJEs } from '@/lib/journalEntryEngine'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
-
 export default function PendingJournalEntries({ C, onBack }: { C: any; onBack: () => void }) {
+  const supabase = useMemo(() => createClient(), [])
   const [entries, setEntries] = useState<any[]>([])
-  const [lines, setLines] = useState<Record<string, any[]>>({})
-  const [accounts, setAccounts] = useState<any[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const fetchPending = useCallback(async () => {
     setLoading(true)
-    const { data: jes } = await supabase
+    const { data } = await supabase
       .from('journal_entries')
-      .select('*')
+      .select('*, journal_entry_lines(*, chart_of_accounts(account_number, account_name, normal_balance))')
       .eq('is_posted', false)
       .order('entry_date', { ascending: false })
-    const { data: accs } = await supabase.from('chart_of_accounts').select('*')
-    setAccounts(accs || [])
-    const list = jes || []
-    setEntries(list)
-    if (list.length > 0) {
-      const ids = list.map(e => e.id)
-      const { data: ln } = await supabase.from('journal_entry_lines').select('*').in('journal_entry_id', ids)
-      const grouped: Record<string, any[]> = {}
-      ;(ln || []).forEach(l => {
-        if (!grouped[l.journal_entry_id]) grouped[l.journal_entry_id] = []
-        grouped[l.journal_entry_id].push(l)
-      })
-      Object.values(grouped).forEach(arr => arr.sort((a, b) => (a.line_order || 0) - (b.line_order || 0)))
-      setLines(grouped)
-    } else {
-      setLines({})
-    }
+    setEntries(data || [])
     setSelected(new Set())
     setLoading(false)
-  }, [])
+  }, [supabase])
 
   useEffect(() => { fetchPending() }, [fetchPending])
 
-  const acctLabel = (id: string) => {
-    const a = accounts.find(x => x.id === id)
-    return a ? `${a.account_number} ${a.account_name}` : '—'
-  }
   const fmt = (n: number) => `$${(Number(n) || 0).toFixed(2)}`
+  const acctLabel = (line: any) => {
+    const a = line.chart_of_accounts
+    return a ? `${a.account_number} · ${a.account_name}` : '—'
+  }
 
   const toggle = (id: string) => {
     const next = new Set(selected)
@@ -123,9 +101,9 @@ export default function PendingJournalEntries({ C, onBack }: { C: any; onBack: (
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {entries.map(e => {
-              const el = lines[e.id] || []
-              const dr = el.reduce((s, l) => s + Number(l.debit || 0), 0)
-              const cr = el.reduce((s, l) => s + Number(l.credit || 0), 0)
+              const el = (e.journal_entry_lines || []).slice().sort((a: any, b: any) => (a.line_order || 0) - (b.line_order || 0))
+              const dr = el.reduce((s: number, l: any) => s + Number(l.debit || 0), 0)
+              const cr = el.reduce((s: number, l: any) => s + Number(l.credit || 0), 0)
               const balanced = Math.abs(dr - cr) < 0.01
               const isSel = selected.has(e.id)
               return (
@@ -146,15 +124,16 @@ export default function PendingJournalEntries({ C, onBack }: { C: any; onBack: (
                     </div>
                   </div>
                   <div style={{ marginTop: '10px', borderTop: `1px solid ${C.border}`, paddingTop: '10px' }}>
-                    {el.map((l, i) => (
+                    {el.map((l: any, i: number) => (
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '3px 0', color: C.text }}>
-                        <span style={{ paddingLeft: l.debit > 0 ? '0' : '20px', color: l.debit > 0 ? C.text : C.muted }}>{acctLabel(l.account_id)}</span>
-                        <span style={{ minWidth: '90px', textAlign: 'right', color: l.debit > 0 ? C.text : 'transparent' }}>{l.debit > 0 ? fmt(l.debit) : '·'}</span>
-                        <span style={{ minWidth: '90px', textAlign: 'right', color: l.credit > 0 ? C.text : 'transparent' }}>{l.credit > 0 ? fmt(l.credit) : '·'}</span>
+                        <span style={{ paddingLeft: Number(l.debit) > 0 ? '0' : '20px', color: Number(l.debit) > 0 ? C.text : C.muted, flex: 1 }}>{acctLabel(l)}</span>
+                        <span style={{ minWidth: '90px', textAlign: 'right', color: Number(l.debit) > 0 ? C.text : 'transparent' }}>{Number(l.debit) > 0 ? fmt(l.debit) : '·'}</span>
+                        <span style={{ minWidth: '90px', textAlign: 'right', color: Number(l.credit) > 0 ? C.text : 'transparent' }}>{Number(l.credit) > 0 ? fmt(l.credit) : '·'}</span>
                       </div>
                     ))}
+                    {e.notes && <div style={{ fontSize: '12px', color: C.muted, marginTop: '6px', fontStyle: 'italic' }}>📝 {e.notes}</div>}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 'bold', borderTop: `1px solid ${C.border}`, marginTop: '4px', paddingTop: '4px', color: C.text }}>
-                      <span>Total</span>
+                      <span style={{ flex: 1 }}>Total</span>
                       <span style={{ minWidth: '90px', textAlign: 'right' }}>{fmt(dr)}</span>
                       <span style={{ minWidth: '90px', textAlign: 'right' }}>{fmt(cr)}</span>
                     </div>
