@@ -36,6 +36,7 @@ export const ACTION_HINTS: Record<ActionType, string> = {
   platform_payout:    'TCGplayer / eBay / ManaPool deposit (sales already imported)',
   card_payment:       'Paying down a credit card from checking',
   owner_contribution: 'Member putting capital INTO the LLC',
+  owner_payable:      'Reimbursing member for business charges on a personal card (settles Due to Member)',
   owner_loan:         'Member lending money to LLC (must be repaid)',
   loan_repayment:     'LLC repaying a member loan',
   owner_draw:         'Member taking money OUT of LLC',
@@ -51,6 +52,7 @@ export const ACTION_ALLOWS_OUTFLOW: Record<ActionType, boolean> = {
   platform_payout:    false,
   card_payment:       true,
   owner_contribution: false,
+  owner_payable:      true,
   owner_loan:         false,
   loan_repayment:     true,
   owner_draw:         true,
@@ -66,6 +68,7 @@ export const ACTION_ALLOWS_INFLOW: Record<ActionType, boolean> = {
   platform_payout:    true,
   card_payment:       false,
   owner_contribution: true,
+  owner_payable:      true,
   owner_loan:         true,
   loan_repayment:     false,
   owner_draw:         false,
@@ -79,7 +82,7 @@ export function getValidActions(amount: number): ActionType[] {
   const isOutflow = amount < 0
   const all: ActionType[] = [
     'categorize', 'split', 'platform_payout', 'card_payment',
-    'owner_contribution', 'owner_loan', 'loan_repayment',
+    'owner_contribution', 'owner_payable', 'owner_loan', 'loan_repayment',
     'owner_draw', 'ap_payment', 'collection_payment', 'transfer',
     'sales_tax_remittance',
   ]
