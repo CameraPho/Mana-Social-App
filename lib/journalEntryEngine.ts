@@ -108,6 +108,9 @@ function memberAccountId(accounts: any[], memberName: string, type: 'contributio
   return number ? getAccountIdByNumber(accounts, number) : null
 }
 
+let BUILD_STAGED = false
+export function setBuildMode(staged: boolean) { BUILD_STAGED = staged }
+
 function buildJE(headerProps: any, lines: any[]): any | null {
   const round = (n: number) => Math.round(n * 100) / 100
   const totalDebit = round(lines.reduce((s, l) => s + Number(l.debit || 0), 0))
@@ -115,7 +118,7 @@ function buildJE(headerProps: any, lines: any[]): any | null {
   if (Math.abs(totalDebit - totalCredit) > 0.01) return null
   if (totalDebit === 0) return null
   return {
-    header: { ...headerProps, total_debit: totalDebit, total_credit: totalCredit, is_posted: true, posted_by: 'auto-generated', entity: 'Mana Social LLC' },
+    header: { ...headerProps, total_debit: totalDebit, total_credit: totalCredit, is_posted: !BUILD_STAGED, posted_by: BUILD_STAGED ? 'staged-pending' : 'auto-generated', entity: 'Mana Social LLC' },
     lines: lines.map((l, idx) => ({ ...l, line_order: idx, debit: round(Number(l.debit) || 0), credit: round(Number(l.credit) || 0) })),
   }
 }
@@ -346,6 +349,50 @@ export function generateBillPaymentJE(payment: any, accounts: any[], accountsPay
 // ============================================================
 // INSERTION HELPERS
 // ============================================================
+
+// Stage a JE for a single source record (is_posted=false). Idempotent: skips if a JE already exists for this source.
+export async function stageJEForRecord(
+  sourceType: string,
+  record: any,
+  accounts: any[],
+  supabase: any,
+  generator: (r: any, accs: any[]) => any | null
+): Promise<{ success: boolean; skipped?: boolean; error?: string }> {
+  try {
+    const { data: existing } = await supabase
+      .from('journal_entries')
+      .select('id')
+      .eq('source_type', sourceType)
+      .eq('source_id', record.id)
+      .limit(1)
+    if (existing && existing.length > 0) return { success: true, skipped: true }
+    setBuildMode(true)
+    const payload = generator(record, accounts)
+    setBuildMode(false)
+    if (!payload) return { success: false, error: 'Generator returned null (unbalanced or missing account)' }
+    const result = await insertJE(payload, supabase)
+    return { success: result.success, error: result.error }
+  } catch (err: any) {
+    setBuildMode(false)
+    return { success: false, error: err.message }
+  }
+}
+
+export async function approveJEs(entryIds: string[], supabase: any): Promise<{ success: boolean; error?: string }> {
+  if (entryIds.length === 0) return { success: true }
+  const { error } = await supabase
+    .from('journal_entries')
+    .update({ is_posted: true, posted_by: 'approved' })
+    .in('id', entryIds)
+  return { success: !error, error: error?.message }
+}
+
+export async function rejectJEs(entryIds: string[], supabase: any): Promise<{ success: boolean; error?: string }> {
+  if (entryIds.length === 0) return { success: true }
+  await supabase.from('journal_entry_lines').delete().in('journal_entry_id', entryIds)
+  const { error } = await supabase.from('journal_entries').delete().in('id', entryIds)
+  return { success: !error, error: error?.message }
+}
 
 export async function insertJE(payload: any, supabase: any): Promise<{ success: boolean; error?: string; entryId?: string }> {
   try {
