@@ -196,7 +196,7 @@ export function generateExpenseJE(expense: any, accounts: any[]): any | null {
 export function generateEquityJE(eq: any, accounts: any[]): any | null {
   const amount = Number(eq.amount) || 0
   if (amount <= 0) return null
-  const type = (eq.type || 'contribution').toLowerCase()
+  const type = (eq.transaction_type || eq.type || 'contribution').toLowerCase()
   const memberName = eq.member_name || 'Cam'
   const bankId = getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
   if (!bankId) return null
