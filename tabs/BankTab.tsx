@@ -469,13 +469,21 @@ export default function BankTab(p: any) {
         const newPaid = Math.max(0, Number(ap.amount_paid || 0) - Math.abs(Number(txn.amount)))
         await supabase.from('accounts_payable').update({ amount_paid: newPaid, payment_date: null, bank_txn_id: null }).eq('id', ap.id)
       }
-      for (const col of linkedCol) {
+            for (const col of linkedCol) {
         const newPaid = Math.max(0, Number(col.amount_paid || 0) - Math.abs(Number(txn.amount)))
         await supabase.from('collections').update({ amount_paid: newPaid, bank_txn_id: null }).eq('id', col.id)
       }
-      await supabase.from('bank_statement_transactions').update({ is_reconciled: false, action_type: null }).eq('id', txn.id)
+      // Preserve any notes from the linked ledger entries onto the bank line before unreconciling
+      const allLinked = [...linkedE, ...linkedS, ...linkedD, ...linkedEq, ...linkedLoans, ...linkedLoanPmts, ...linkedAp, ...linkedCol]
+      const preservedNotes = allLinked.map((x: any) => x.notes).filter(Boolean).join(' | ')
+      const updatePayload: any = { is_reconciled: false, action_type: null }
+      if (preservedNotes) {
+        updatePayload.preserved_notes = (txn.preserved_notes ? txn.preserved_notes + ' | ' : '') + preservedNotes
+      }
+      await supabase.from('bank_statement_transactions').update(updatePayload).eq('id', txn.id)
       fetchData()
     } catch (err: any) { alert('Unreconcile error: ' + err.message) }
+
   }
 
   const byAccount = reconTransactions.filter((t: any) => account === 'All' || t.account_name === account)
