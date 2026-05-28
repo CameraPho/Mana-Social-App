@@ -7,11 +7,12 @@ import InventoryReport from '@/components/InventoryReport'
 import ChartOfAccountsView from '@/components/ChartOfAccountsView'
 import JournalEntriesView from '@/components/JournalEntriesView'
 import JournalEntryBackfill from '@/components/JournalEntryBackfill'
+import PendingJournalEntries from '@/components/PendingJournalEntries'
 
 export default function ReportsTab(p: any) {
   const { C, sales, expenses, accountsPayable, payroll, mileageLog, cogsInventory, allCogsInventory, assets, bankAccounts, selectedYear, bankStatements, reconTransactions, supabase, fetchData,
     equityTransactions, memberLoans, memberLoanPayments, salesTaxRemittances, disbursements, billPayments } = p
-  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'|'coa'|'journal'|'backfill'>('menu')
+  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'|'coa'|'journal'|'backfill'|'pending'>('menu')
   const [expandedStmt, setExpandedStmt] = useState<Record<string, boolean>>({})
 
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
@@ -137,6 +138,7 @@ export default function ReportsTab(p: any) {
       ['coa', 'Chart of Accounts', 'View the GL account structure'],
       ['journal', 'Journal Entries', 'Double-entry GL transactions'],
       ['backfill', 'Generate Journal Entries', 'Auto-create JEs from existing source records'],
+      ['pending', 'Pending Journal Entries', 'Review and approve staged JEs before posting'],
       ['tax', 'Tax Estimates', 'Quarterly federal + CA PTE estimates'],
       ['deductions', 'Deductions', 'Expense deductibility + mileage'],
       ['assets', 'Assets & Depreciation', 'Fixed assets and depreciation schedule'],
@@ -161,6 +163,10 @@ export default function ReportsTab(p: any) {
 
   const BackBtn = () => (
     <button onClick={() => setView('menu')} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '8px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT, marginBottom: '12px' }}>← Reports</button>
+  )
+
+  if (view === 'pending') return (
+    <PendingJournalEntries C={C} onBack={() => setView('menu')} />
   )
 
   if (view === 'backfill') return (
