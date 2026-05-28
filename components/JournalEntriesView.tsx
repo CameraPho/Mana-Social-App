@@ -82,9 +82,16 @@ export default function JournalEntriesView(p: any) {
   }
 
   const deleteEntry = async (entry: any) => {
-    if (entry.is_reversed) { alert('Cannot delete a reversed entry'); return }
-    if (!confirm(`Delete journal entry #${entry.entry_number}?\n\n${entry.description}\n\nThis cascade-deletes all lines.`)) return
-    try { await supabase.from('journal_entries').delete().eq('id', entry.id); fetchData() } catch (err: any) { alert('Delete error: ' + err.message) }
+    const warn = entry.is_reversed
+      ? `⚠️ This entry was already REVERSED.\n\nDeleting it will leave its reversal entry orphaned. Only do this for cleanup of test data.\n\n`
+      : ''
+    if (!confirm(`Delete journal entry #${entry.entry_number}?\n\n${warn}${entry.description}\nAmount: $${Number(entry.total_debit).toFixed(2)}\n\nThis permanently deletes the entry and all its lines. This cannot be undone.`)) return
+    if (!confirm(`Are you sure? Final confirmation to permanently delete JE #${entry.entry_number}.`)) return
+    try {
+      await supabase.from('journal_entry_lines').delete().eq('entry_id', entry.id)
+      await supabase.from('journal_entries').delete().eq('id', entry.id)
+      fetchData()
+    } catch (err: any) { alert('Delete error: ' + err.message) }
   }
 
   const reverseEntry = async (entry: any) => {
@@ -272,12 +279,10 @@ export default function JournalEntriesView(p: any) {
                     <strong>Notes:</strong> {entry.notes}
                   </div>
                 )}
-                {!entry.is_reversed && (
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
-                    <button onClick={() => reverseEntry(entry)} style={editBtn}>↩ Reverse</button>
-                    {entry.source_type === 'manual' && (<button onClick={() => deleteEntry(entry)} style={{ ...editBtn, color: '#ef4444', borderColor: '#ef444440' }}>🗑 Delete</button>)}
-                  </div>
-                )}
+                <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+                  {!entry.is_reversed && <button onClick={() => reverseEntry(entry)} style={editBtn}>↩ Reverse</button>}
+                  <button onClick={() => deleteEntry(entry)} style={{ ...editBtn, color: '#ef4444', borderColor: '#ef444440' }}>🗑 Delete</button>
+                </div>
               </div>
             )}
           </div>
