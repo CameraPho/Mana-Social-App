@@ -3,6 +3,7 @@ import React, { useState, useRef } from 'react'
 import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS, CHECKING_ACCOUNTS, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
 import { fmt, getEntity, today } from '@/lib/format'
 import { parsePDF } from '@/parsers/universalPDF'
+import { stageJEForRecord } from '@/lib/journalEntryEngine'
 import { findVendorMatch, buildLedgerPayloadFromMatch } from '@/lib/vendorMatch'
 import {
   ActionType, ACTION_LABELS, ACTION_HINTS, getValidActions, suggestActionType,
