@@ -1,6 +1,6 @@
 'use client'
 import React from 'react'
-import { FONT, type Palette, EXPENSE_CATEGORIES, ASSET_CATEGORIES, USEFUL_LIFE, MILEAGE_RATE } from '@/lib/constants'
+import { FONT, type Palette, EXPENSE_CATEGORIES, ASSET_CATEGORIES, USEFUL_LIFE, MILEAGE_RATE, CHECKING_ACCOUNTS, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
 import { fmt, getEntity } from '@/lib/format'
 
 interface Props {
@@ -157,6 +157,16 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
             </div>
           )}
           <div><span style={lbl}>Est. Sell Value ($)</span><input type="number" step="0.01" value={formData.cogsEstValue} onChange={e => set({ cogsEstValue: e.target.value })} placeholder="0.00" style={inp} /></div>
+          <div><span style={lbl}>Paid With</span>
+            <select value={formData.cogsPaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ cogsPaidWith: e.target.value })} style={inp}>
+              <optgroup label="Checking">
+                {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+              </optgroup>
+              <optgroup label="Credit Cards">
+                {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+              </optgroup>
+            </select>
+          </div>
           {formData.cogsCost && (() => { const p = cogsPreview(); return (<div style={{ padding:'10px', borderRadius:'8px', background:'rgba(45,191,184,0.08)', fontSize:'14px', color:'#1A7A75', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}><span>Total: <strong>{fmt(p.total)}</strong></span><span>Units: <strong>{p.units.toLocaleString()}</strong></span><span>Per unit: <strong>${p.cpu.toFixed(3)}</strong></span>{formData.cogsEstValue&&<span>Margin: <strong>{p.total>0?(((parseFloat(formData.cogsEstValue)-p.total)/p.total)*100).toFixed(1)+'%':'—'}</strong></span>}</div>) })()}
         </>}
 
