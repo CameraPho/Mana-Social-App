@@ -19,7 +19,7 @@ export const emptyForm = {
   isTaxable: false, taxRate: '7.75',
   miles: '', mileFrom: '', mileTo: '', milePurpose: '',
   cogsType: 'collection', cogsSet: '', cogsCost: '', cogsQty: '1',
-  cogsCards: '', cogsCardsPerBox: '', cogsEstValue: '', cogsPaidWith: '', amountPaid: '',
+  cogsCards: '', cogsCardsPerBox: '', cogsEstValue: '', amountPaid: '',
   userName: 'Cam', paidByCompany: true, assetCategory: 'Equipment', assetLife: '5',
   payPeriod: '', hoursWorked: '', hourlyRate: '16', rothEligible: '', rothContributed: '',
   bankName: 'Chase', accountType: 'Checking', accountLast4: '', bankBalance: '',
@@ -30,16 +30,16 @@ export const emptyForm = {
 
 export default function Dashboard() {
   const supabase = useMemo(() => createClient(), [])
-  const [themeMode, setThemeMode] = useState<'light'|'dark'|'auto'>(() => {
-    if (typeof window !== 'undefined') return (localStorage.getItem('mana_theme') as any) || 'auto'
-    return 'auto'
+  // Theme locked to a single mode per user choice; no time-of-day auto-switching.
+  // Default is dark; user can toggle to light and the choice persists.
+  const [themeMode, setThemeMode] = useState<'light'|'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('mana_theme')
+      if (stored === 'light' || stored === 'dark') return stored
+    }
+    return 'dark'
   })
-  const isDark = (() => {
-    if (themeMode === 'dark') return true
-    if (themeMode === 'light') return false
-    const h = new Date().getHours()
-    return h >= 19 || h < 7
-  })()
+  const isDark = themeMode === 'dark'
   const C = isDark ? DARK_COLORS : LIGHT_COLORS
 
   const [activeTab, setActiveTab] = useState('home')
@@ -269,10 +269,10 @@ export default function Dashboard() {
   }
 
   const cycleTheme = () => {
-    const next = themeMode === 'light' ? 'dark' : themeMode === 'dark' ? 'auto' : 'light'
+    const next = themeMode === 'light' ? 'dark' : 'light'
     setThemeMode(next); localStorage.setItem('mana_theme', next)
   }
-  const themeIcon = themeMode === 'light' ? '☀️' : themeMode === 'dark' ? '🌙' : '🌓'
+  const themeIcon = themeMode === 'light' ? '☀️' : '🌙'
 
   const shared = { C, isDark, fetchData, startEdit, handleDelete, selectedYear, selectedMonth,
     sales, expenses, accountsPayable, payroll, disbursements, mileageLog,
