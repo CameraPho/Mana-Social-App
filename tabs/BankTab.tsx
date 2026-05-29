@@ -24,6 +24,30 @@ function buildOwnerContributionPayload(txn: any, memberName: string, entity: str
   }
 }
 
+function detectPlatformFromDescription(desc: string): string {
+  const d = (desc || '').toLowerCase()
+  if (d.includes('tcgplayer') || d.includes('tcg player')) return 'tcgplayer'
+  if (d.includes('ebay')) return 'ebay'
+  if (d.includes('manapool') || d.includes('mana pool')) return 'manapool'
+  return ''
+}
+
+function buildPayoutToPersonalPayload(txn: any, memberName: string, platform: string, entity: string, notes?: string) {
+  return {
+    targetTable: 'equity_transactions',
+    payload: {
+      member_name: memberName,
+      amount: Math.abs(Number(txn.amount)),
+      transaction_date: txn.transaction_date,
+      transaction_type: 'platform_payout_to_personal',
+      paid_from: platform, // re-using paid_from to carry which platform's AR clears
+      notes: notes || `${platform.toUpperCase()} payout deposited to ${memberName}'s personal account — clears platform AR: ${txn.description}`,
+      entity,
+      bank_txn_id: txn.id,
+    },
+  }
+}
+
 function buildNonBusinessPayload(txn: any, memberName: string, entity: string, notes?: string) {
   return {
     targetTable: 'equity_transactions',
@@ -342,7 +366,19 @@ export default function BankTab(p: any) {
         const total = lines.reduce((a, l) => a + (parseFloat(l.amount) || 0), 0)
         if (Math.abs(total - absAmt) > 0.01) { alert(`Split total ${fmt(total)} must equal ${fmt(absAmt)}`); return }
         await supabase.from('expenses').insert(lines.map(l => ({ category: l.category, cost: parseFloat(l.amount) || 0, purchase_date: txn.transaction_date, notes: l.notes || `Split from: ${txn.description}`, entity, user_name: 'Cam', paid_by_company: true, bank_txn_id: txn.id })))
-      } else if (action === 'platform_payout' || action === 'card_payment' || action === 'transfer') {
+      } else if (action === 'platform_payout') {
+        // If deposited to LLC bank: reconcile-only (sales were already booked at import).
+        // If deposited to a member's personal account: post DR 2610 / CR AR-Platform.
+        const acctName = txn.account_name || ''
+        const isLLCBank = acctName.startsWith('Mana Social |')
+        if (!isLLCBank) {
+          const memberName = acctName.includes('Kenny') ? 'Kenny' : 'Cam'
+          const platform = f.platform || detectPlatformFromDescription(txn.description) || 'tcgplayer'
+          const built = buildPayoutToPersonalPayload(txn, memberName, platform, entity, f.notes)
+          if (built) await supabase.from(built.targetTable).insert(built.payload)
+        }
+        // LLC-deposited payouts remain reconcile-only.
+      } else if (action === 'card_payment' || action === 'transfer') {
         // reconcile-only
       } else if (action === 'owner_contribution') {
         const memberName = f.memberName || 'Cam'
@@ -646,7 +682,34 @@ export default function BankTab(p: any) {
       )
     }
 
-    if (action === 'platform_payout') return <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>ℹ️ This will mark the deposit as reconciled. The actual sale revenue should already be in your books from the CSV import for this platform&apos;s sales period.</div>
+    if (action === 'platform_payout') {
+      const acctName = txn.account_name || ''
+      const isLLCBank = acctName.startsWith('Mana Social |')
+      const detectedPlatform = detectPlatformFromDescription(txn.description)
+      if (isLLCBank) {
+        return (
+          <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>
+            ℹ️ Payout deposited to LLC checking. Reconcile-only — the sale revenue was already booked at CSV import. No new JE.
+          </div>
+        )
+      }
+      const memberName = acctName.includes('Kenny') ? 'Kenny' : 'Cam'
+      return (
+        <div style={{ display: 'grid', gap: '10px' }}>
+          <div style={{ padding: '10px', background: 'rgba(124,58,237,0.06)', borderRadius: '6px', fontSize: '12px', color: C.muted }}>
+            ℹ️ Platform payout deposited to <strong>{memberName}&apos;s personal account</strong>. The member collected LLC cash → reduces &quot;Due to Member&quot; (2610/2620). JE: DR 2610/2620 · CR 1110/1120/1130 AR-Platform.
+          </div>
+          <div><span style={lbl}>Platform</span>
+            <select value={f.platform || detectedPlatform || 'tcgplayer'} onChange={e => setForm(txn.id, { platform: e.target.value })} style={inp}>
+              <option value="tcgplayer">TCGplayer (AR 1110)</option>
+              <option value="ebay">eBay (AR 1120)</option>
+              <option value="manapool">ManaPool (AR 1130)</option>
+            </select>
+          </div>
+          <div><span style={lbl}>Notes</span><input value={f.notes || ''} onChange={e => setForm(txn.id, { notes: e.target.value })} placeholder="e.g. April TCGplayer weekly payout" style={inp} /></div>
+        </div>
+      )
+    }
     if (action === 'card_payment') return <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>ℹ️ This is a transfer from bank to credit card. It reduces your card liability — not an expense.</div>
     if (action === 'transfer') return <div style={{ padding: '10px', background: C.inputBg, borderRadius: '6px', fontSize: '13px', color: C.muted }}>ℹ️ Moving money between your own accounts. No ledger entry will be created.</div>
 
