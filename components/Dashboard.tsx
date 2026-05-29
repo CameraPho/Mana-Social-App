@@ -150,9 +150,9 @@ export default function Dashboard() {
       pre.planPaymentAmount = String(row.plan_payment_amount || '');
       pre.planStartDate = row.plan_start_date || '';
     }
-    else if (table === 'expenses') { pre.label = row.notes || ''; pre.amount = String(row.cost); pre.category = row.category || 'Other'; pre.userName = row.user_name || 'Cam'; pre.paidByCompany = row.paid_by_company ?? true }
+    else if (table === 'expenses') { pre.label = row.notes || ''; pre.amount = String(row.cost); pre.category = row.category || 'Other'; pre.userName = row.user_name || 'Cam'; pre.paidByCompany = row.paid_by_company ?? true; pre.expensePaidWith = row.payment_method || 'Mana Social | WF Business Checking' }
     else if (table === 'payroll') { pre.label = row.employee_name; pre.amount = String(row.amount); pre.hoursWorked = String(row.hours_worked || ''); pre.hourlyRate = String(row.hourly_rate || 16); pre.payPeriod = row.pay_period || '' }
-    else if (table === 'disbursements') { pre.label = row.recipient; pre.amount = String(row.amount); pre.notes = row.notes || '' }
+    else if (table === 'disbursements') { pre.label = row.recipient; pre.amount = String(row.amount); pre.notes = row.notes || ''; pre.disbursementPaidWith = row.payment_method || 'Mana Social | WF Business Checking' }
     else if (table === 'mileage_log') { pre.milePurpose = row.purpose; pre.mileFrom = row.from_location; pre.mileTo = row.to_location; pre.miles = String(row.miles); pre.userName = row.user_name || 'Cam' }
     else if (table === 'cogs_inventory') { pre.label = row.description; pre.cogsType = row.inventory_type; pre.cogsSet = row.set_name || ''; pre.cogsCost = String(row.purchase_price); pre.cogsQty = String(row.quantity || 1); pre.cogsCards = String(row.card_count || ''); pre.cogsCardsPerBox = String(row.cards_per_box || ''); pre.cogsEstValue = String(row.est_sell_value || ''); pre.cogsPaidWith = row.payment_method || 'Mana Social | WF Business Checking' }
     else if (table === 'assets') { pre.label = row.description; pre.amount = String(row.cost); pre.assetCategory = row.category || 'Equipment'; pre.assetLife = String(row.useful_life_yrs || 5); pre.notes = row.notes || ''; pre.userName = row.user_name || 'Cam' }
@@ -209,13 +209,13 @@ export default function Dashboard() {
       }
     } else if (t === 'expenses') {
       if (!formData.amount) return alert('Missing amount')
-      payload = { category: formData.category, cost: Number(formData.amount), purchase_date: formData.date, notes: formData.label, entity: getEntity(formData.date), user_name: formData.userName || 'Cam', paid_by_company: formData.paidByCompany }
+      payload = { category: formData.category, cost: Number(formData.amount), purchase_date: formData.date, notes: formData.label, entity: getEntity(formData.date), user_name: formData.userName || 'Cam', paid_by_company: formData.paidByCompany, payment_method: formData.expensePaidWith || 'Mana Social | WF Business Checking' }
     } else if (t === 'payroll') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
       payload = { employee_name: formData.label, amount: Number(formData.amount), pay_date: formData.date, hours_worked: Number(formData.hoursWorked || 0), hourly_rate: Number(formData.hourlyRate || 0), pay_period: formData.payPeriod || formData.date, roth_ira_eligible: Number(formData.rothEligible || 0), roth_ira_contributed: Number(formData.rothContributed || 0) }
     } else if (t === 'disbursements') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
-      payload = { recipient: formData.label, amount: Number(formData.amount), notes: formData.notes, disbursement_date: formData.date }
+      payload = { recipient: formData.label, amount: Number(formData.amount), notes: formData.notes, disbursement_date: formData.date, payment_method: formData.disbursementPaidWith || 'Mana Social | WF Business Checking' }
     } else if (t === 'mileage_log') {
       if (!formData.miles || !formData.milePurpose) return alert('Missing fields')
       payload = { date: formData.date, purpose: formData.milePurpose, from_location: formData.mileFrom, to_location: formData.mileTo, miles: parseFloat(formData.miles) || 0, user_name: formData.userName || 'Cam' }
