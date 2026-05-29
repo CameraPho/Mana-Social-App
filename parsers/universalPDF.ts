@@ -18,7 +18,7 @@ function detectBankFromText(text: string): { accountName: string; isCreditCard: 
   if (/diamond\s*preferred/.test(t)) return { accountName: 'Citi Diamond Preferred', isCreditCard: true }
   if (/amazon.*chase|chase.*amazon|prime\s*visa/.test(t)) return { accountName: 'Amazon Chase Prime Visa', isCreditCard: true }
   if (/sapphire/.test(t)) return { accountName: 'Chase Sapphire Preferred', isCreditCard: true }
-  if (/chase/.test(t)) return { accountName: 'Chase Business Checking', isCreditCard: false }
+  if (/chase/.test(t)) return { accountName: 'Cam | Chase Personal Checking', isCreditCard: false }
   return { accountName: 'Unknown', isCreditCard: false }
 }
 
