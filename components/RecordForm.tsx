@@ -184,9 +184,14 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
                   <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
                 </select>
               </div>
-              <div><span style={lbl}>Reimbursed by LLC</span>
-                <select value={String(formData.paidByCompany)} onChange={e => set({ paidByCompany: e.target.value === 'true' })} style={inp}>
-                  <option value="true">Yes — Company paid</option><option value="false">No — Personal funds</option>
+              <div><span style={lbl}>Paid From</span>
+                <select value={formData.expensePaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ expensePaidWith: e.target.value })} style={inp}>
+                  <optgroup label="Checking">
+                    {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+                  </optgroup>
+                  <optgroup label="Credit Cards">
+                    {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+                  </optgroup>
                 </select>
               </div>
             </div>
@@ -229,7 +234,19 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
               <div><span style={lbl}>Roth IRA Contributed ($)</span><input type="number" step="0.01" value={formData.rothContributed} onChange={e => set({ rothContributed: e.target.value })} placeholder="0.00" style={inp} /></div>
             </div>
           </>}
-          {t==='disbursements' && <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>}
+          {t==='disbursements' && <>
+            <div><span style={lbl}>Paid From</span>
+              <select value={formData.disbursementPaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ disbursementPaidWith: e.target.value })} style={inp}>
+                <optgroup label="Checking">
+                  {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+                </optgroup>
+                <optgroup label="Credit Cards">
+                  {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+                </optgroup>
+              </select>
+            </div>
+            <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>
+          </>}
         </>}
 
         <button onClick={onSave} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '16px', borderRadius: '12px', fontWeight: 900, border: 'none', fontSize: '16px', cursor: 'pointer', marginTop: '4px', fontFamily: FONT }}>
