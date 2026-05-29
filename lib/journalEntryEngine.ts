@@ -18,7 +18,7 @@ const ACCOUNT_OWNERSHIP: Record<string, AccountOwner> = {
   'Mana Social | WF Business Checking': { type: 'llc_bank', gl: '1020' },
   'Mana Social | WF Signify Mastercard': { type: 'llc_card', gl: '2160' },
   // Personal — Cam
-  'Cam | Chase Business Checking': { type: 'personal_cam' },
+  'Cam | Chase Personal Checking': { type: 'personal_cam' },
   'Cam | WF Personal Checking': { type: 'personal_cam' },
   'Cam | Costco Citi Visa': { type: 'personal_cam' },
   'Cam | Citi Diamond Preferred': { type: 'personal_cam' },
@@ -222,8 +222,29 @@ export function generateEquityJE(eq: any, accounts: any[]): any | null {
   const txnDate = eq.transaction_date ? new Date(eq.transaction_date) : null
   const LLC_START = new Date('2026-03-18')
   const isSoleProp = txnDate ? txnDate < LLC_START : false
-  const memberClearingTypes = ['owner_payable', 'non_business']
+  const memberClearingTypes = ['owner_payable', 'non_business', 'platform_payout_to_personal']
   if (isSoleProp && memberClearingTypes.includes(type)) return null
+
+  // Platform payout deposited to a member's personal account.
+  // The member collected LLC cash → reduce "Due to Member" against platform AR.
+  // DR Due to/from Member · CR AR-Platform (1110/1120/1130)
+  if (type === 'platform_payout_to_personal') {
+    const dueToId = getAccountIdByNumber(accounts, memberName.toLowerCase().trim() === 'kenny' ? DUE_TO_KENNY_GL : DUE_TO_CAM_GL)
+    if (!dueToId) return null
+    const platform = (eq.paid_from || '').toLowerCase()
+    const arGL = PLATFORM_TO_AR_GL[platform]
+    if (!arGL) return null
+    const arId = getAccountIdByNumber(accounts, arGL)
+    if (!arId) return null
+    return buildJE({
+      entry_date: eq.transaction_date,
+      description: `${platform.toUpperCase()} payout to ${memberName} (personal): $${amount.toFixed(2)}`,
+      source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
+    }, [
+      { account_id: dueToId, debit: amount, credit: 0, description: `${memberName} collected LLC platform cash personally` },
+      { account_id: arId, debit: 0, credit: amount, description: `Clear ${platform} AR` },
+    ])
+  }
 
   // Non-business charge on a business account: member owes the LLC back.
   // DR Due to/from Member · CR the business account that wrongly paid.
