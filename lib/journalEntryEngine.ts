@@ -289,6 +289,49 @@ export function generateEquityJE(eq: any, accounts: any[]): any | null {
 return null
 }
 
+export function generateInventoryPurchaseJE(inv: any, accounts: any[]): any | null {
+  const totalCost = Number(inv.total_cost) || 0
+  if (totalCost <= 0) return null
+  const inventoryId = getAccountIdByNumber(accounts, '1200') // single Inventory asset
+  if (!inventoryId) return null
+  const paymentMethod = inv.payment_method || inv.account_paid || null
+  const creditAccountId = resolveBankOrCardId(accounts, paymentMethod)
+  if (!creditAccountId) return null
+
+  return buildJE({
+    entry_date: inv.date,
+    description: `Inventory purchase: ${inv.description || inv.inventory_type || 'inventory'} — $${totalCost.toFixed(2)}`,
+    source_type: 'cogs_inventory', source_id: inv.id, notes: inv.set_name || null,
+  }, [
+    { account_id: inventoryId, debit: totalCost, credit: 0, description: `Inventory: ${inv.description || inv.inventory_type || ''}`.trim() },
+    { account_id: creditAccountId, debit: 0, credit: totalCost, description: describePaymentSide(paymentMethod) },
+  ])
+}
+
+// Periodic COGS adjustment: move cost of sold inventory from Inventory(1200) to COGS(5000).
+// amount = Beginning + Purchases − Ending (computed by the caller).
+export function generatePeriodicCOGSJE(adj: any, accounts: any[]): any | null {
+  const amount = Number(adj.cogs_amount) || 0
+  if (amount === 0) return null
+  const inventoryId = getAccountIdByNumber(accounts, '1200')
+  const cogsId = getAccountIdByNumber(accounts, '5000')
+  if (!inventoryId || !cogsId) return null
+
+  // Positive COGS = inventory consumed (DR COGS / CR Inventory).
+  // Negative (rare, inventory grew beyond purchases) reverses.
+  const amt = Math.abs(amount)
+  const drId = amount > 0 ? cogsId : inventoryId
+  const crId = amount > 0 ? inventoryId : cogsId
+  return buildJE({
+    entry_date: adj.period_end,
+    description: `Periodic COGS adjustment (${adj.period_label || adj.period_end}): $${amount.toFixed(2)}`,
+    source_type: 'cogs_adjustment', source_id: adj.id, notes: adj.notes || null,
+  }, [
+    { account_id: drId, debit: amt, credit: 0, description: amount > 0 ? 'Cost of goods sold' : 'Inventory increase adj' },
+    { account_id: crId, debit: 0, credit: amt, description: amount > 0 ? 'Relieve inventory' : 'COGS reversal' },
+  ])
+}
+
 export function generateDisbursementJE(disb: any, accounts: any[]): any | null {
   const amount = Number(disb.amount) || 0
   if (amount <= 0) return null
@@ -402,6 +445,8 @@ async function runGenerator(sourceType: string, record: any, accounts: any[], su
     case 'disbursement': return generateDisbursementJE(record, accounts)
     case 'member_loan': return generateMemberLoanJE(record, accounts)
     case 'sales_tax_remittance': return generateSalesTaxRemittanceJE(record, accounts)
+    case 'cogs_inventory': return generateInventoryPurchaseJE(record, accounts)
+    case 'cogs_adjustment': return generatePeriodicCOGSJE(record, accounts)
     case 'member_loan_payment': {
       const { data: loans } = await supabase.from('member_loans').select('*')
       return generateLoanPaymentJE(record, accounts, loans || [])
