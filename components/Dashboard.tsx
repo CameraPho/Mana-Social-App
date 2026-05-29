@@ -209,7 +209,7 @@ export default function Dashboard() {
       }
     } else if (t === 'expenses') {
       if (!formData.amount) return alert('Missing amount')
-      payload = { category: formData.category, cost: Number(formData.amount), purchase_date: formData.date, notes: formData.label, entity: getEntity(formData.date), user_name: formData.userName || 'Cam', paid_by_company: formData.paidByCompany, payment_method: formData.expensePaidWith || 'Mana Social | WF Business Checking' }
+      payload = { category: formData.category, cost: Number(formData.amount), purchase_date: formData.date, notes: formData.label, entity: getEntity(formData.date), user_name: formData.userName || 'Cam', paid_by_company: formData.paidByCompany, payment_method: formData.paidByCompany ? 'Company' : 'Mana Social | WF Business Checking' }
     } else if (t === 'payroll') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
       payload = { employee_name: formData.label, amount: Number(formData.amount), pay_date: formData.date, hours_worked: Number(formData.hoursWorked || 0), hourly_rate: Number(formData.hourlyRate || 0), pay_period: formData.payPeriod || formData.date, roth_ira_eligible: Number(formData.rothEligible || 0), roth_ira_contributed: Number(formData.rothContributed || 0) }
