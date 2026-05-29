@@ -152,8 +152,10 @@ export function generateSaleJE(sale: any, accounts: any[]): any | null {
   const feesId = PLATFORM_TO_FEES_GL[platform] ? getAccountIdByNumber(accounts, PLATFORM_TO_FEES_GL[platform]) : null
 
   const grossAmount = Number(sale.amount) || 0
-  const tax = Number(sale.sales_tax_collected) || 0
-  const fees = Number(sale.fees) || 0
+  // Sum the 3 sales-tax columns; fall back to legacy single column if present.
+  const tax = (Number(sale.ca_sales_tax || 0) + Number(sale.other_domestic_sales_tax || 0) + Number(sale.international_sales_tax || 0)) || Number(sale.sales_tax_collected || 0)
+  // Defensive: fees should always be positive (a deduction). Some legacy imports stored fees as negative.
+  const fees = Math.abs(Number(sale.fees) || 0)
   if (grossAmount <= 0) return null
 
   const netRevenue = grossAmount - tax
@@ -434,7 +436,8 @@ export function generateSalesTaxRemittanceJE(remit: any, accounts: any[]): any |
 }
 
 export function generateBillPaymentJE(payment: any, accounts: any[], accountsPayable: any[]): any | null {
-  const amount = Number(payment.amount_paid) || 0
+  // bill_payments uses 'amount' (not 'amount_paid'); fall back to amount_paid for any legacy callers.
+  const amount = Number(payment.amount ?? payment.amount_paid) || 0
   if (amount <= 0) return null
   const bill = accountsPayable.find(ap => ap.id === payment.bill_id)
   if (!bill) return null
