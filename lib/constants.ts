@@ -1,4 +1,4 @@
-export const FONT = "'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif"
+export const FONT = "var(--font-space-grotesk), 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif"
 
 export const LIGHT_COLORS = {
   navy: '#1B2A4A', navyDark: '#111D33', teal: '#2DBFB8',
