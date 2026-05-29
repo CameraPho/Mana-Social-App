@@ -223,8 +223,15 @@ export function generateEquityJE(eq: any, accounts: any[]): any | null {
   // The owner and the business were the same tax entity, so member-clearing
   // entries don't apply. Skip generating a JE for member-clearing types.
   const txnDate = eq.transaction_date ? new Date(eq.transaction_date) : null
+  // LLC was formed 2026-03-18. Most entries flip to LLC on that date.
+  // EXCEPTION: platform payouts (TCGplayer/eBay/ManaPool) lag the actual sale by 1–4 weeks.
+  // Deposits in the first 8 days of the LLC era (through 2026-03-25 inclusive)
+  // represent sole-prop sales being collected — keep them as sole prop (no inter-entity entry).
   const LLC_START = new Date('2026-03-18')
-  const isSoleProp = txnDate ? txnDate < LLC_START : false
+  const PLATFORM_PAYOUT_CUTOVER = new Date('2026-03-26')
+  const isPlatformPayout = type === 'platform_payout_to_personal'
+  const effectiveCutoff = isPlatformPayout ? PLATFORM_PAYOUT_CUTOVER : LLC_START
+  const isSoleProp = txnDate ? txnDate < effectiveCutoff : false
   const memberClearingTypes = ['owner_payable', 'non_business', 'platform_payout_to_personal']
   if (isSoleProp && memberClearingTypes.includes(type)) return null
 
