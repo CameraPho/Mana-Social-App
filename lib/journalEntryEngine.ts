@@ -73,8 +73,9 @@ const EXPENSE_CATEGORY_TO_GL: Record<string, string> = {
   'Insurance': '6080',
   'Professional Services': '6090', 'Legal': '6090', 'Accounting': '6090',
   'Rent': '6100', 'Utilities': '6110', 'Bank Fees': '6120',
-  'Shipping': '7300', 'Postage': '7300',
+  'Shipping': '7300', 'Postage': '7300', 'Shipping & Postage': '7300',
   'Interest': '7400', 'Other': '6130',
+  'Inventory Purchase': '1200', 'Inventory': '1200',
 }
 
 // ============================================================
