@@ -223,7 +223,7 @@ export default function Dashboard() {
       if (!formData.cogsCost || !formData.label) return alert('Missing fields')
       const cost = parseFloat(formData.cogsCost) || 0, qty = parseInt(formData.cogsQty) || 1, totalCost = cost * qty
       const totalUnits = formData.cogsType === 'collection' ? parseInt(formData.cogsCards) || 0 : ['booster_box','precon'].includes(formData.cogsType) ? (parseInt(formData.cogsCardsPerBox) || 0) * qty : qty
-      payload = { date: formData.date, inventory_type: formData.cogsType, description: formData.label, set_name: formData.cogsSet || null, purchase_price: cost, quantity: qty, card_count: parseInt(formData.cogsCards) || 0, cards_per_box: parseInt(formData.cogsCardsPerBox) || 0, total_cost: totalCost, cost_per_unit: totalUnits > 0 ? totalCost / totalUnits : 0, total_units: totalUnits, sold_units: 0, est_sell_value: parseFloat(formData.cogsEstValue) || 0, entity: getEntity(formData.date) }
+      payload = { date: formData.date, inventory_type: formData.cogsType, desc
     } else if (t === 'assets') {
       if (!formData.amount || !formData.label) return alert('Missing fields')
       payload = { purchase_date: formData.date, description: formData.label, category: formData.assetCategory, cost: Number(formData.amount), tax_paid: Number(formData.fees || 0), useful_life_yrs: parseInt(formData.assetLife) || USEFUL_LIFE[formData.assetCategory] || 5, depreciation_method: 'both', entity: getEntity(formData.date), notes: formData.notes, user_name: formData.userName || 'Cam' }
@@ -252,7 +252,7 @@ export default function Dashboard() {
         sales: 'sale', expenses: 'expense', disbursements: 'disbursement',
         equity_transactions: 'equity_transaction', member_loans: 'member_loan',
         member_loan_payments: 'member_loan_payment', sales_tax_remittances: 'sales_tax_remittance',
-        bill_payments: 'bill_payment',
+        bill_payments: 'bill_payment', cogs_inventory: 'cogs_inventory',
       }
       if (inserted && STAGE_MAP[t]) {
         const r = await stageJEForRecord(STAGE_MAP[t], inserted, supabase)
