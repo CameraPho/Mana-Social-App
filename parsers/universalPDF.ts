@@ -12,12 +12,16 @@ const CREDIT_CARD_NAMES = [
 
 function detectBankFromText(text: string): { accountName: string; isCreditCard: boolean } {
   const t = text.toLowerCase()
-  if (/wells\s*fargo/.test(t)) return { accountName: 'Wells Fargo', isCreditCard: false }
-  if (/barclays/.test(t)) return { accountName: 'Barclays View Mastercard', isCreditCard: true }
-  if (/costco\s*anywhere\s*visa|costco.*citi/.test(t)) return { accountName: 'Costco Citi Visa', isCreditCard: true }
-  if (/diamond\s*preferred/.test(t)) return { accountName: 'Citi Diamond Preferred', isCreditCard: true }
-  if (/amazon.*chase|chase.*amazon|prime\s*visa/.test(t)) return { accountName: 'Amazon Chase Prime Visa', isCreditCard: true }
-  if (/sapphire/.test(t)) return { accountName: 'Chase Sapphire Preferred', isCreditCard: true }
+  // Wells Fargo: disambiguate Business vs Personal by sniffing business-product keywords.
+  if (/wells\s*fargo/.test(t)) {
+    const isBusiness = /business\s+(checking|market|advantage|choice|platinum)|initiate\s+business|optimize\s+business/.test(t)
+    return { accountName: isBusiness ? 'Mana Social | WF Business Checking' : 'Cam | WF Personal Checking', isCreditCard: false }
+  }
+  if (/barclays/.test(t)) return { accountName: 'Cam | Barclays View Mastercard', isCreditCard: true }
+  if (/costco\s*anywhere\s*visa|costco.*citi/.test(t)) return { accountName: 'Cam | Costco Citi Visa', isCreditCard: true }
+  if (/diamond\s*preferred/.test(t)) return { accountName: 'Cam | Citi Diamond Preferred', isCreditCard: true }
+  if (/amazon.*chase|chase.*amazon|prime\s*visa/.test(t)) return { accountName: 'Cam | Amazon Chase Prime Visa', isCreditCard: true }
+  if (/sapphire/.test(t)) return { accountName: 'Cam | Chase Sapphire Preferred', isCreditCard: true }
   if (/chase/.test(t)) return { accountName: 'Cam | Chase Personal Checking', isCreditCard: false }
   return { accountName: 'Unknown', isCreditCard: false }
 }
