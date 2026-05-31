@@ -1,6 +1,7 @@
 'use client'
 import React from 'react'
-import { FONT, type Palette, EXPENSE_CATEGORIES, ASSET_CATEGORIES, USEFUL_LIFE, MILEAGE_RATE, CHECKING_ACCOUNTS, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
+import { FONT, type Palette, EXPENSE_CATEGORIES, ASSET_CATEGORIES, USEFUL_LIFE, MILEAGE_RATE } from '@/lib/constants'
+import { useAccounts } from '@/lib/useAccounts'
 import { fmt, getEntity } from '@/lib/format'
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, C, vendors = [] }: Props) {
+  const { checking: CHECKING_ACCOUNTS, cards: CREDIT_CARD_ACCOUNTS } = useAccounts()
   const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: C.inputBg, boxSizing: 'border-box', fontFamily: FONT, color: C.text }
   const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: FONT }
   const set = (patch: any) => setFormData({ ...formData, ...patch })
