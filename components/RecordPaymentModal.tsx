@@ -1,6 +1,7 @@
 'use client'
 import React, { useState } from 'react'
-import { FONT, CHECKING_ACCOUNTS, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
+import { FONT } from '@/lib/constants'
+import { useAccounts } from '@/lib/useAccounts'
 import { fmt } from '@/lib/format'
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export default function RecordPaymentModal({ bill, C, supabase, fetchData, onClose }: Props) {
+  const { checking: CHECKING_ACCOUNTS, cards: CREDIT_CARD_ACCOUNTS } = useAccounts()
   const total = Number(bill.total_amount) || 0
   const paid = Number(bill.amount_paid) || 0
   const owed = total - paid
