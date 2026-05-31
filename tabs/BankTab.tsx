@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useRef } from 'react'
-import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS, CHECKING_ACCOUNTS, CREDIT_CARD_ACCOUNTS } from '@/lib/constants'
+import { FONT, EXPENSE_CATEGORIES, BANK_ACCOUNTS } from '@/lib/constants'
+import { useAccounts } from '@/lib/useAccounts'
 import { fmt, getEntity, today } from '@/lib/format'
 import { parsePDF } from '@/parsers/universalPDF'
 import { stageJEForRecord } from '@/lib/journalEntryEngine'
@@ -146,6 +147,7 @@ type FilterMode = 'unreconciled' | 'reconciled' | 'all'
 const MEMBERS = ['Cam', 'Kenny']
 
 export default function BankTab(p: any) {
+  const { checking: CHECKING_ACCOUNTS, cards: CREDIT_CARD_ACCOUNTS } = useAccounts()
   const { C, reconTransactions, bankAccounts, fetchData, expenses, sales, vendorMappings,
     collections, equityTransactions, memberLoans, memberLoanPayments,
     accountsPayable, supabase } = p
@@ -175,7 +177,7 @@ export default function BankTab(p: any) {
   const [splitLinesByTxn, setSplitLinesByTxn] = useState<Record<string, { amount: string, category: string, notes: string }[]>>({})
 
   const [newTxn, setNewTxn] = useState({
-    account_name: 'Chase Business Checking',
+    account_name: 'Mana Social | WF Business Checking',
     transaction_date: today(),
     description: '',
     amount: '',
@@ -224,7 +226,7 @@ export default function BankTab(p: any) {
     setUploadStatus('Parsing statement...')
 
     try {
-      const result = await parsePDF(file, 'Chase Business Checking')
+      const result = await parsePDF(file, 'Mana Social | WF Business Checking')
       const { records, meta } = result as any
 
       if (records.length === 0) {
@@ -1047,7 +1049,7 @@ export default function BankTab(p: any) {
               const { error } = await supabase.from('bank_statement_transactions').insert([{ ...newTxn, amount: parseFloat(newTxn.amount), is_reconciled: false, entity: getEntity(newTxn.transaction_date) }])
               if (error) return alert(error.message)
               setShowAddForm(false)
-              setNewTxn({ account_name: 'Chase Business Checking', transaction_date: today(), description: '', amount: '', category: 'Other', is_business: true, notes: '' })
+              setNewTxn({ account_name: 'Mana Social | WF Business Checking', transaction_date: today(), description: '', amount: '', category: 'Other', is_business: true, notes: '' })
               fetchData()
             }} style={{ padding: '12px', background: C.green, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 900, cursor: 'pointer', fontFamily: FONT }}>Save Transaction</button>
           </div>
