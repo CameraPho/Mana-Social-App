@@ -6,6 +6,7 @@ import { today } from '@/lib/format'
 import { stageJEForRecord } from '@/lib/journalEntryEngine'
 import Nav from '@/components/Nav'
 import QuickAddModal from '@/components/QuickAddModal'
+import AccountManagerModal from '@/components/AccountManagerModal'
 import RecordForm from '@/components/RecordForm'
 import HomeTab from '@/tabs/HomeTab'
 import MoneyInTab from '@/tabs/MoneyInTab'
@@ -46,6 +47,7 @@ export default function Dashboard() {
   const [selectedYear, setSelectedYear] = useState(2026)
   const [selectedMonth, setSelectedMonth] = useState(0)
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false)
+  const [isAccountMgrOpen, setIsAccountMgrOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<{ table: string, data?: any } | null>(null)
   const [formData, setFormData] = useState(emptyForm)
 
@@ -287,6 +289,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <div style={{ fontWeight: 900, color: C.navy, fontSize: '17px', fontFamily: FONT }}>MANA SOCIAL LLC</div>
             <div style={{ display: 'flex', gap: '6px' }}>
+              <button onClick={() => setIsAccountMgrOpen(true)} title="Manage Accounts" style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 10px', fontSize: '13px', cursor: 'pointer', color: C.muted, fontFamily: FONT, fontWeight: 'bold' }}>ACCOUNTS</button>
               <button onClick={cycleTheme} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 10px', fontSize: '15px', cursor: 'pointer' }}>{themeIcon}</button>
               <button onClick={() => supabase.auth.signOut()} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '6px 14px', fontSize: '13px', color: C.muted, cursor: 'pointer', fontFamily: FONT }}>Sign out</button>
             </div>
@@ -319,6 +322,7 @@ export default function Dashboard() {
         )}
 
         <QuickAddModal open={isQuickAddOpen} onClose={() => setIsQuickAddOpen(false)} onPick={(table) => setEditingItem({ table })} onBulk={() => setEditingItem({ table: 'expenses' })} onDraw={() => setEditingItem({ table: 'disbursements' })} C={C} />
+        {isAccountMgrOpen && <AccountManagerModal C={C} onClose={() => setIsAccountMgrOpen(false)} />}
       </div>
       <Nav activeTab={activeTab} setActiveTab={setActiveTab} C={C} isDark={isDark} />
     </div>
