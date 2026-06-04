@@ -11,6 +11,7 @@
 type AccountOwner =
   | { type: 'llc_bank' | 'llc_card'; gl: string }
   | { type: 'personal_cam' | 'personal_kenny' }
+  | { type: 'personal_cam_card' | 'personal_kenny_card'; subGl: string }
 
 const ACCOUNT_OWNERSHIP: Record<string, AccountOwner> = {
   // ===== NEW uniform names (Owner | Bank Type) =====
@@ -18,13 +19,17 @@ const ACCOUNT_OWNERSHIP: Record<string, AccountOwner> = {
   'Mana Social | WF Business Checking': { type: 'llc_bank', gl: '1020' },
   'Mana Social | WF Signify Mastercard': { type: 'llc_card', gl: '2160' },
   // Personal — Cam
-  'Cam | Chase Personal Checking': { type: 'personal_cam' },
+  // Chase Personal is treated as an LLC asset (de facto business account per CPA)
+  'Cam | Chase Personal Checking': { type: 'llc_bank', gl: '1030' },
+  // WF Personal stays as personal — still Cam's personal account
   'Cam | WF Personal Checking': { type: 'personal_cam' },
-  'Cam | Costco Citi Visa': { type: 'personal_cam' },
-  'Cam | Citi Diamond Preferred': { type: 'personal_cam' },
-  'Cam | Amazon Chase Prime Visa': { type: 'personal_cam' },
-  'Cam | Chase Sapphire Preferred': { type: 'personal_cam' },
-  'Cam | Barclays View Mastercard': { type: 'personal_cam' },
+  // Personal credit cards route to specific sub-accounts of 2610
+  'Cam | Costco Citi Visa': { type: 'personal_cam_card', subGl: '2610.01' },
+  'Cam | Citi Diamond Preferred': { type: 'personal_cam_card', subGl: '2610.02' },
+  'Cam | Amazon Chase Prime Visa': { type: 'personal_cam_card', subGl: '2610.03' },
+  'Cam | Chase Sapphire Preferred': { type: 'personal_cam_card', subGl: '2610.04' },
+  'Cam | Barclays View Mastercard': { type: 'personal_cam_card', subGl: '2610.05' },
+  'Cam | Apple Card': { type: 'personal_cam_card', subGl: '2610.06' },
   // Personal — Kenny
   'Kenny | WF Personal Checking': { type: 'personal_kenny' },
 
@@ -33,14 +38,16 @@ const ACCOUNT_OWNERSHIP: Record<string, AccountOwner> = {
   'Wells Fargo': { type: 'llc_bank', gl: '1020' },
   'Wells Fargo Signify Mastercard': { type: 'llc_card', gl: '2160' },
   'WF Signify': { type: 'llc_card', gl: '2160' },
-  'Chase Business Checking': { type: 'personal_cam' },
-  'Chase Checking': { type: 'personal_cam' },
+  // Legacy Chase Business/Checking aliases — now route as LLC bank (Chase Personal is business per CPA)
+  'Chase Business Checking': { type: 'llc_bank', gl: '1030' },
+  'Chase Checking': { type: 'llc_bank', gl: '1030' },
+  // Chase Ink legacy: route to parent 2610 since we don't have a sub-GL for it
   'Chase Ink': { type: 'personal_cam' },
-  'Costco Citi Visa': { type: 'personal_cam' },
-  'Citi Diamond Preferred': { type: 'personal_cam' },
-  'Amazon Chase Prime Visa': { type: 'personal_cam' },
-  'Chase Sapphire Preferred': { type: 'personal_cam' },
-  'Barclays View Mastercard': { type: 'personal_cam' },
+  'Costco Citi Visa': { type: 'personal_cam_card', subGl: '2610.01' },
+  'Citi Diamond Preferred': { type: 'personal_cam_card', subGl: '2610.02' },
+  'Amazon Chase Prime Visa': { type: 'personal_cam_card', subGl: '2610.03' },
+  'Chase Sapphire Preferred': { type: 'personal_cam_card', subGl: '2610.04' },
+  'Barclays View Mastercard': { type: 'personal_cam_card', subGl: '2610.05' },
   'Wells Fargo Preferred Checking': { type: 'personal_cam' },
   'Wells Fargo Preferred': { type: 'personal_cam' },
 }
@@ -94,6 +101,7 @@ function resolveBankOrCardId(accounts: any[], paymentMethod: string | null | und
   if (owner.type === 'llc_bank' || owner.type === 'llc_card') return getAccountIdByNumber(accounts, owner.gl)
   if (owner.type === 'personal_cam') return getAccountIdByNumber(accounts, DUE_TO_CAM_GL)
   if (owner.type === 'personal_kenny') return getAccountIdByNumber(accounts, DUE_TO_KENNY_GL)
+  if (owner.type === 'personal_cam_card' || owner.type === 'personal_kenny_card') return getAccountIdByNumber(accounts, owner.subGl)
   return getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
 }
 
@@ -105,6 +113,8 @@ function describePaymentSide(paymentMethod: string | null | undefined): string {
   if (owner.type === 'llc_card') return `Paid via ${paymentMethod} (LLC card)`
   if (owner.type === 'personal_cam') return `Paid via ${paymentMethod} — owed to Cam`
   if (owner.type === 'personal_kenny') return `Paid via ${paymentMethod} — owed to Kenny`
+  if (owner.type === 'personal_cam_card') return `Paid via ${paymentMethod} — sub-acct ${owner.subGl}`
+  if (owner.type === 'personal_kenny_card') return `Paid via ${paymentMethod} — sub-acct ${owner.subGl}`
   return `Paid via ${paymentMethod}`
 }
 
