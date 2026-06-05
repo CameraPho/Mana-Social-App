@@ -17,148 +17,123 @@ interface Props {
 
 export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, C, vendors = [] }: Props) {
   const { checking: CHECKING_ACCOUNTS, cards: CREDIT_CARD_ACCOUNTS } = useAccounts()
-  const inp: React.CSSProperties = { padding: '13px 14px', borderRadius: '10px', border: `1px solid ${C.border}`, fontSize: '15px', width: '100%', background: C.inputBg, boxSizing: 'border-box', fontFamily: FONT, color: C.text }
-  const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: FONT }
-  const set = (patch: any) => setFormData({ ...formData, ...patch })
-
-  const cogsPreview = () => {
-    const cost = parseFloat(formData.cogsCost) || 0, qty = parseInt(formData.cogsQty) || 1, total = cost * qty
-    const units = formData.cogsType === 'collection' ? parseInt(formData.cogsCards) || 0 : ['booster_box','precon'].includes(formData.cogsType) ? (parseInt(formData.cogsCardsPerBox) || 0) * qty : qty
-    return { total, units, cpu: units > 0 ? total / units : 0 }
+  // Display labels per table - uniform with QuickAddModal naming
+  const FORM_LABEL: Record<string, string> = {
+    sales: 'SALE',
+    expenses: 'EXPENSE',
+    accounts_payable: 'BILL',
+    payroll: 'PAYROLL',
+    cogs_inventory: 'INVENTORY',
+    mileage_log: 'MILEAGE',
+    assets: 'ASSET',
+    supply_costs: 'SUPPLY COST',
+    disbursements: 'OWNER DRAW',
   }
+  const formLabel = FORM_LABEL[t] || t.replace(/_/g, ' ').toUpperCase()
+  const set = (changes: any) => setFormData({ ...formData, ...changes })
+
+  const lbl: React.CSSProperties = { fontSize: '11px', fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', marginBottom: '4px', display: 'block', fontFamily: FONT, letterSpacing: '0.06em' }
+  const inp: React.CSSProperties = { padding: '11px 13px', borderRadius: '9px', border: `1px solid ${C.border}`, fontSize: '14px', width: '100%', background: C.inputBg, boxSizing: 'border-box', fontFamily: FONT, color: C.text }
+  const ent = getEntity(formData.date)
 
   return (
-    <div style={{ background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.teal}`, marginBottom: '12px', fontFamily: FONT }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h2 style={{ fontWeight: 900, color: C.navy, fontSize: '16px', fontFamily: FONT }}>{isEditing ? 'EDIT' : 'ADD'} {t.replace(/_/g,' ').toUpperCase()}</h2>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.muted, fontSize: '24px', cursor: 'pointer' }}>×</button>
+    <div style={{ marginBottom: '14px', background: C.cardBg, borderRadius: '16px', padding: '18px', border: `1px solid ${C.teal}`, fontFamily: FONT }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+        <h2 style={{ fontWeight: 900, color: C.navy, fontSize: '16px', fontFamily: FONT }}>{isEditing ? 'EDIT' : 'ADD'} {formLabel}</h2>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.muted, fontSize: '20px', cursor: 'pointer' }}>×</button>
       </div>
+
       <div style={{ display: 'grid', gap: '10px' }}>
-        {t !== 'bank_accounts' && <div><span style={lbl}>Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>}
+        <div><span style={lbl}>Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
+        <div style={{ padding: '7px 13px', background: 'rgba(45,191,184,0.08)', borderRadius: '7px', border: `1px solid ${C.teal}40`, fontSize: '12px', color: C.teal, fontWeight: 'bold' }}>{ent}</div>
 
-        {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable','supply_costs'].includes(t) && (
-          <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', fontFamily: FONT, background: getEntity(formData.date) === 'sole_prop' ? 'rgba(240,192,64,0.12)' : 'rgba(45,191,184,0.1)', color: getEntity(formData.date) === 'sole_prop' ? '#7A5A00' : '#1A7A75' }}>
-            {getEntity(formData.date) === 'sole_prop' ? 'Camera Pho (Sole Prop)' : 'Mana Social LLC'}
-          </div>
-        )}
-
-        {t === 'supply_costs' && <>
-          <div><span style={lbl}>Supply Item Name</span><input value={formData.supplyItem} onChange={e => set({ supplyItem: e.target.value })} placeholder="e.g. Penny Sleeve, Forever Stamp" style={inp} /></div>
-          <div><span style={lbl}>Unit Description</span><input value={formData.supplyUnit} onChange={e => set({ supplyUnit: e.target.value })} placeholder="e.g. per sleeve, per stamp" style={inp} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Total Cost ($)</span><input type="number" step="0.01" value={formData.supplyTotalCost || ''} onChange={e => { const tc = e.target.value; const qty = parseFloat(formData.supplyQty || '1') || 1; set({ supplyTotalCost: tc, supplyCost: tc ? (parseFloat(tc)/qty).toFixed(4) : '' }) }} placeholder="0.00" style={inp} /></div>
-            <div><span style={lbl}>Quantity</span><input type="number" step="1" value={formData.supplyQty || ''} onChange={e => { const qty = e.target.value; const tc = parseFloat(formData.supplyTotalCost || '0'); set({ supplyQty: qty, supplyCost: tc && qty ? (tc/parseFloat(qty)).toFixed(4) : '' }) }} placeholder="1" style={inp} /></div>
-          </div>
-          <div><span style={lbl}>Cost Per Unit ($)</span><input type="number" step="0.0001" value={formData.supplyCost} onChange={e => set({ supplyCost: e.target.value })} placeholder="0.0100" style={inp} /></div>
-          <div><span style={lbl}>Vendor / Source</span><input value={formData.supplyVendor || ''} onChange={e => set({ supplyVendor: e.target.value })} placeholder="e.g. BCW, Amazon, Costco" style={inp} /></div>
-          <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Order #, etc." style={inp} /></div>
-        </>}
-
-        {t === 'assets' && <>
-          <div><span style={lbl}>Category</span>
-            <select value={formData.assetCategory} onChange={e => set({ assetCategory: e.target.value, assetLife: String(USEFUL_LIFE[e.target.value] || 5) })} style={inp}>
-              {ASSET_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        {t === 'sales' && <>
+          <div><span style={lbl}>Platform</span>
+            <select value={formData.platform} onChange={e => set({ platform: e.target.value })} style={inp}>
+              <option value="tcgplayer">TCGplayer</option><option value="ebay">eBay</option><option value="manapool">ManaPool</option><option value="in_person">In-Person</option><option value="other">Other</option>
             </select>
           </div>
-          <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Epson DS-530 II Scanner" style={inp} /></div>
+          <div><span style={lbl}>Item</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Black Lotus Beta" style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Cost ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-            <div><span style={lbl}>Tax Paid ($)</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Useful Life (yrs)</span><input type="number" value={formData.assetLife} onChange={e => set({ assetLife: e.target.value })} style={inp} /></div>
-            <div><span style={lbl}>Purchased By</span>
-              <select value={formData.userName} onChange={e => set({ userName: e.target.value })} style={inp}>
-                <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
-              </select>
-            </div>
-          </div>
-          {formData.amount && (() => { const cost = parseFloat(formData.amount)||0, life = parseInt(formData.assetLife)||5; return (<div style={{ padding:'10px', borderRadius:'8px', background:'rgba(45,191,184,0.08)', fontSize:'13px', color:'#1A7A75', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}><span>Sec 179: <strong>{fmt(cost)}</strong></span><span>SL/yr: <strong>{fmt(cost/life)}</strong></span></div>) })()}
-          <div><span style={lbl}>Notes / PO#</span><input value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Order number or notes" style={inp} /></div>
-        </>}
-
-        {t === 'bank_accounts' && <>
-          <div><span style={lbl}>Bank</span>
-            <select value={formData.bankName} onChange={e => set({ bankName: e.target.value })} style={inp}>
-              <option value="Chase">Chase</option><option value="Wells Fargo">Wells Fargo</option>
-            </select>
-          </div>
-          <div><span style={lbl}>Account Type</span>
-            <select value={formData.accountType} onChange={e => set({ accountType: e.target.value })} style={inp}>
-              <option value="Checking">Checking</option><option value="Savings">Savings</option><option value="Credit">Credit Card</option>
-            </select>
+            <div><span style={lbl}>Amount</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Fees</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Last 4</span><input value={formData.accountLast4} onChange={e => set({ accountLast4: e.target.value })} placeholder="2035" style={inp} /></div>
-            <div><span style={lbl}>As of Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
+            <div><span style={lbl}>Shipping</span><input type="number" step="0.01" value={formData.shipping} onChange={e => set({ shipping: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>CA Tax</span><input type="number" step="0.01" value={formData.caTax} onChange={e => set({ caTax: e.target.value })} placeholder="0.00" style={inp} /></div>
           </div>
-          <div><span style={lbl}>Current Balance ($)</span><input type="number" step="0.01" value={formData.bankBalance} onChange={e => set({ bankBalance: e.target.value })} placeholder="0.00" style={inp} /></div>
-          <div><span style={lbl}>Notes</span><input value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="e.g. Chase Ink Business" style={inp} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Other Domestic Tax</span><input type="number" step="0.01" value={formData.otherTax} onChange={e => set({ otherTax: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Int'l Tax</span><input type="number" step="0.01" value={formData.intlTax} onChange={e => set({ intlTax: e.target.value })} placeholder="0.00" style={inp} /></div>
+          </div>
         </>}
 
         {t === 'accounts_payable' && <>
-          <div><span style={lbl}>Vendor / Seller Name</span><input value={formData.apVendor} onChange={e => set({ apVendor: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} /></div>
+          <div><span style={lbl}>Vendor / Seller Name</span>
+            <input list="vendor-list" value={formData.vendorName || ''} onChange={e => set({ vendorName: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} />
+            <datalist id="vendor-list">{vendors.map(v => <option key={v.id} value={v.name} />)}</datalist>
+          </div>
           <div><span style={lbl}>Transaction Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
-            <div><span style={lbl}>Due Date</span><input type="date" value={formData.apDue} onChange={e => set({ apDue: e.target.value })} style={inp} /></div>
+            <div><span style={lbl}>Due Date</span><input type="date" value={formData.dueDate || ''} onChange={e => set({ dueDate: e.target.value })} style={inp} /></div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => set({ apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
-            <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid} onChange={e => set({ amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid || ''} onChange={e => set({ amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
           </div>
-          <div><span style={lbl}>Card Count (optional)</span>
-            <input type="number" value={formData.apCardCount || ''} onChange={e => set({ apCardCount: e.target.value })} placeholder="e.g. 5000" style={inp} />
-            {formData.apCardCount && formData.apTotal && (
-              <div style={{ marginTop: '4px', fontSize: '13px', color: C.teal, fontWeight: 700 }}>Cost per card: ${(parseFloat(formData.apTotal) / parseInt(formData.apCardCount)).toFixed(4)}</div>
-            )}
-          </div>
-          <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Payment terms, card types, condition, context" style={{ ...inp, height: '60px', resize: 'vertical' }} /></div>
+          <div><span style={lbl}>Card Count (optional)</span><input type="number" value={formData.cardCount || ''} onChange={e => set({ cardCount: e.target.value })} placeholder="e.g. 5000" style={inp} /></div>
+          <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Payment terms, card types, condition, context" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>
         </>}
 
-        {t === 'mileage_log' && <>
-          <div><span style={lbl}>Business Purpose</span><input value={formData.milePurpose} onChange={e => set({ milePurpose: e.target.value })} placeholder="e.g. USPS drop-off" style={inp} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>From</span><input value={formData.mileFrom} onChange={e => set({ mileFrom: e.target.value })} placeholder="Home" style={inp} /></div>
-            <div><span style={lbl}>To</span><input value={formData.mileTo} onChange={e => set({ mileTo: e.target.value })} placeholder="USPS Moreno Valley" style={inp} /></div>
+        {t === 'expenses' && <>
+          <div><span style={lbl}>Category</span>
+            <select value={formData.category} onChange={e => set({ category: e.target.value })} style={inp}>
+              {Object.keys(EXPENSE_CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
           </div>
+          <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Pirateship postage" style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Miles</span><input type="number" step="0.1" value={formData.miles} onChange={e => set({ miles: e.target.value })} placeholder="0.0" style={inp} /></div>
-            <div><span style={lbl}>Logged By</span>
-              <select value={formData.userName} onChange={e => set({ userName: e.target.value })} style={inp}>
+            <div><span style={lbl}>Paid By</span>
+              <select value={formData.userName || 'Cam'} onChange={e => set({ userName: e.target.value })} style={inp}>
                 <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
               </select>
             </div>
+            <div><span style={lbl}>Paid From</span>
+              <select value={formData.expensePaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ expensePaidWith: e.target.value })} style={inp}>
+                <optgroup label="Checking">
+                  {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+                </optgroup>
+                <optgroup label="Credit Cards">
+                  {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+                </optgroup>
+              </select>
+            </div>
           </div>
-          {formData.miles && <div style={{ padding: '10px', borderRadius: '8px', background: 'rgba(45,191,184,0.08)', fontSize: '14px', color: '#1A7A75' }}>Deduction: <strong>{fmt(parseFloat(formData.miles) * MILEAGE_RATE)}</strong></div>}
+          <div><span style={lbl}>Amount ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
         </>}
 
         {t === 'cogs_inventory' && <>
           <div><span style={lbl}>Inventory Type</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
-              {[['collection','Collection'],['booster_box','Box'],['precon','Precon'],['sealed','Sealed'],['singles','Singles']].map(([id,l]) => (
-                <button key={id} onClick={() => set({ cogsType: id })} style={{ padding: '8px', borderRadius: '8px', border: `1px solid ${formData.cogsType===id?C.teal:C.border}`, background: formData.cogsType===id?'rgba(45,191,184,0.1)':C.inputBg, fontSize: '12px', fontWeight: formData.cogsType===id?'bold':'normal', cursor: 'pointer', color: formData.cogsType===id?'#1A7A75':C.text, fontFamily: FONT }}>{l}</button>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+              {['collection', 'box', 'precon', 'sealed', 'singles'].map(k => (
+                <button key={k} onClick={() => set({ cogsType: k })} type="button" style={{ padding: '10px', background: formData.cogsType === k ? `linear-gradient(135deg,${C.teal},#1A7A75)` : 'transparent', color: formData.cogsType === k ? '#fff' : C.muted, border: `1px solid ${formData.cogsType === k ? C.teal : C.border}`, borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT, textTransform: 'capitalize' }}>{k}</button>
               ))}
             </div>
           </div>
           <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Renly's collection" style={inp} /></div>
-          <div><span style={lbl}>Set / Product</span><input value={formData.cogsSet} onChange={e => set({ cogsSet: e.target.value })} placeholder="e.g. Edge of Eternities" style={inp} /></div>
+          <div><span style={lbl}>Set / Product</span><input value={formData.cogsSet || ''} onChange={e => set({ cogsSet: e.target.value })} placeholder="e.g. Final Fantasy Commander" style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Purchase Price ($)</span><input type="number" step="0.01" value={formData.cogsCost} onChange={e => set({ cogsCost: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Quantity</span><input type="number" value={formData.cogsQty} onChange={e => set({ cogsQty: e.target.value })} placeholder="1" style={inp} /></div>
           </div>
-          {formData.cogsType==='collection' && <div><span style={lbl}>Total Card Count</span><input type="number" value={formData.cogsCards} onChange={e => set({ cogsCards: e.target.value })} placeholder="e.g. 200" style={inp} /></div>}
-          {['booster_box','precon'].includes(formData.cogsType) && (
-            <div><span style={lbl}>Cards Per Unit</span>
-              <select value={formData.cogsCardsPerBox} onChange={e => set({ cogsCardsPerBox: e.target.value })} style={inp}>
-                <option value="">Select...</option>
-                <option value="540">MTG Draft Box (540)</option><option value="360">MTG Set/Play Box (360)</option>
-                <option value="150">MTG Collector Box (150)</option><option value="100">MTG Commander Precon (100)</option>
-                <option value="60">Pokemon Starter (60)</option><option value="240">YGO Box (240)</option>
-              </select>
-            </div>
+          {(formData.cogsType === 'collection' || formData.cogsType === 'singles') && (
+            <div><span style={lbl}>Card Count (total)</span><input type="number" value={formData.cogsCards} onChange={e => set({ cogsCards: e.target.value })} placeholder="e.g. 5000" style={inp} /></div>
           )}
-          <div><span style={lbl}>Est. Sell Value ($)</span><input type="number" step="0.01" value={formData.cogsEstValue} onChange={e => set({ cogsEstValue: e.target.value })} placeholder="0.00" style={inp} /></div>
+          {formData.cogsType === 'box' && (
+            <div><span style={lbl}>Cards Per Box</span><input type="number" value={formData.cogsCardsPerBox} onChange={e => set({ cogsCardsPerBox: e.target.value })} placeholder="e.g. 360" style={inp} /></div>
+          )}
+          <div><span style={lbl}>Est. Total Sell Value ($, optional)</span><input type="number" step="0.01" value={formData.cogsEstValue} onChange={e => set({ cogsEstValue: e.target.value })} placeholder="0.00" style={inp} /></div>
           <div><span style={lbl}>Paid With</span>
             <select value={formData.cogsPaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ cogsPaidWith: e.target.value })} style={inp}>
               <optgroup label="Checking">
@@ -169,89 +144,61 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
               </optgroup>
             </select>
           </div>
-          {formData.cogsCost && (() => { const p = cogsPreview(); return (<div style={{ padding:'10px', borderRadius:'8px', background:'rgba(45,191,184,0.08)', fontSize:'14px', color:'#1A7A75', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px' }}><span>Total: <strong>{fmt(p.total)}</strong></span><span>Units: <strong>{p.units.toLocaleString()}</strong></span><span>Per unit: <strong>${p.cpu.toFixed(3)}</strong></span>{formData.cogsEstValue&&<span>Margin: <strong>{p.total>0?(((parseFloat(formData.cogsEstValue)-p.total)/p.total)*100).toFixed(1)+'%':'—'}</strong></span>}</div>) })()}
         </>}
 
-        {!['mileage_log','cogs_inventory','assets','bank_accounts','accounts_payable','supply_costs'].includes(t) && <>
-          {t==='expenses' ? <>
-            <div><span style={lbl}>Category</span>
-              <select value={formData.category} onChange={e => set({ category: e.target.value })} style={inp}>
-                {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="Vendor / item purchased" style={inp} /></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <div><span style={lbl}>Paid By</span>
-                <select value={formData.userName} onChange={e => set({ userName: e.target.value })} style={inp}>
-                  <option value="Cam">Cam</option><option value="Kenny">Kenny</option>
-                </select>
-              </div>
-              <div><span style={lbl}>Paid From</span>
-                <select value={formData.expensePaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ expensePaidWith: e.target.value })} style={inp}>
-                  <optgroup label="Checking">
-                    {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
-                  </optgroup>
-                  <optgroup label="Credit Cards">
-                    {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
-                  </optgroup>
-                </select>
-              </div>
-            </div>
-          </> : <div><span style={lbl}>{t==='sales'?'Platform':t==='payroll'?'Employee':'Recipient'}</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="..." style={inp} /></div>}
-          <div><span style={lbl}>{t==='sales' ? 'Item Revenue ($)' : 'Amount ($)'}</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-          {t==='sales' && <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <div><span style={lbl}>Fees ($)</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
-              <div><span style={lbl}>Shipping Income ($)</span><input type="number" step="0.01" value={formData.shipping} onChange={e => set({ shipping: e.target.value })} placeholder="0.00" style={inp} /></div>
-            </div>
-            <div style={{ padding: '12px', borderRadius: '10px', background: C.inputBg, border: `1px solid ${C.border}` }}>
-              <div style={{ fontSize: '11px', fontWeight: 'bold', color: C.muted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '6px', fontFamily: FONT }}>Sales Tax Collected</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
-                <div>
-                  <span style={{ ...lbl, fontSize: '10px', textTransform: 'none' }}>California</span>
-                  <input type="number" step="0.01" value={formData.caSalesTax || ''} onChange={e => set({ caSalesTax: e.target.value })} placeholder="0.00" style={{ ...inp, fontSize: '13px', padding: '10px 12px' }} />
-                </div>
-                <div>
-                  <span style={{ ...lbl, fontSize: '10px', textTransform: 'none' }}>Other US</span>
-                  <input type="number" step="0.01" value={formData.otherDomesticSalesTax || ''} onChange={e => set({ otherDomesticSalesTax: e.target.value })} placeholder="0.00" style={{ ...inp, fontSize: '13px', padding: '10px 12px' }} />
-                </div>
-                <div>
-                  <span style={{ ...lbl, fontSize: '10px', textTransform: 'none' }}>International</span>
-                  <input type="number" step="0.01" value={formData.internationalSalesTax || ''} onChange={e => set({ internationalSalesTax: e.target.value })} placeholder="0.00" style={{ ...inp, fontSize: '13px', padding: '10px 12px' }} />
-                </div>
-              </div>
-              <div style={{ fontSize: '10px', color: C.muted, marginTop: '6px', fontStyle: 'italic', lineHeight: '1.4' }}>
-                Shipping is what the customer paid you (income). Marketplace platforms (TCGplayer/eBay/ManaPool) remit tax directly — these fields are for tracking only.
-              </div>
-            </div>
-          </>}
-          {t==='payroll' && <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <div><span style={lbl}>Hours Worked</span><input type="number" step="0.5" value={formData.hoursWorked} onChange={e => set({ hoursWorked: e.target.value })} placeholder="10" style={inp} /></div>
-              <div><span style={lbl}>Hourly Rate ($)</span><input type="number" step="0.01" value={formData.hourlyRate} onChange={e => set({ hourlyRate: e.target.value })} placeholder="16.00" style={inp} /></div>
-            </div>
-            <div><span style={lbl}>Pay Period End Date</span><input type="date" value={formData.payPeriod} onChange={e => set({ payPeriod: e.target.value })} style={inp} /></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <div><span style={lbl}>Roth IRA Eligible ($)</span><input type="number" step="0.01" value={formData.rothEligible} onChange={e => set({ rothEligible: e.target.value })} placeholder="0.00" style={inp} /></div>
-              <div><span style={lbl}>Roth IRA Contributed ($)</span><input type="number" step="0.01" value={formData.rothContributed} onChange={e => set({ rothContributed: e.target.value })} placeholder="0.00" style={inp} /></div>
-            </div>
-          </>}
-          {t==='disbursements' && <>
-            <div><span style={lbl}>Paid From</span>
-              <select value={formData.disbursementPaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ disbursementPaidWith: e.target.value })} style={inp}>
-                <optgroup label="Checking">
-                  {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
-                </optgroup>
-                <optgroup label="Credit Cards">
-                  {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
-                </optgroup>
-              </select>
-            </div>
-            <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>
-          </>}
+        {t === 'payroll' && <>
+          <div><span style={lbl}>Employee</span>
+            <select value={formData.userName || 'Kiedan'} onChange={e => set({ userName: e.target.value })} style={inp}>
+              <option value="Kiedan">Kiedan</option><option value="Kayliana">Kayliana</option><option value="Other">Other</option>
+            </select>
+          </div>
+          <div><span style={lbl}>Pay Period</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. May 1–15 2026" style={inp} /></div>
+          <div><span style={lbl}>Gross Pay ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
         </>}
 
-        <button onClick={onSave} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '16px', borderRadius: '12px', fontWeight: 900, border: 'none', fontSize: '16px', cursor: 'pointer', marginTop: '4px', fontFamily: FONT }}>
+        {t === 'mileage_log' && <>
+          <div><span style={lbl}>Trip Purpose</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Post office run" style={inp} /></div>
+          <div><span style={lbl}>Miles</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+          {Number(formData.amount) > 0 && (
+            <div style={{ padding: '8px', background: 'rgba(45,191,184,0.08)', borderRadius: '7px', fontSize: '12px', color: C.teal }}>≈ {fmt(Number(formData.amount) * MILEAGE_RATE)} deduction (${MILEAGE_RATE}/mi)</div>
+          )}
+        </>}
+
+        {t === 'assets' && <>
+          <div><span style={lbl}>Category</span>
+            <select value={formData.category} onChange={e => set({ category: e.target.value })} style={inp}>
+              {ASSET_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div><span style={lbl}>Asset Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Epson DS-530 II scanner" style={inp} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div><span style={lbl}>Cost ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Useful Life (yrs)</span><input type="number" value={formData.usefulLife || USEFUL_LIFE[formData.category as keyof typeof USEFUL_LIFE] || 5} onChange={e => set({ usefulLife: e.target.value })} style={inp} /></div>
+          </div>
+        </>}
+
+        {t === 'supply_costs' && <>
+          <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. BCW penny sleeves x 1000" style={inp} /></div>
+          <div><span style={lbl}>Cost ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+        </>}
+
+        {t === 'disbursements' && <>
+          <div><span style={lbl}>Recipient (Member)</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Cam or Kenny" style={inp} /></div>
+          <div><span style={lbl}>Amount ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+          <div><span style={lbl}>Paid From</span>
+            <select value={formData.disbursementPaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ disbursementPaidWith: e.target.value })} style={inp}>
+              <optgroup label="Checking">
+                {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+              </optgroup>
+              <optgroup label="Credit Cards">
+                {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
+              </optgroup>
+            </select>
+          </div>
+          <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>
+        </>}
+
+        <button onClick={onSave} style={{ marginTop: '6px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '13px', borderRadius: '11px', fontWeight: 900, border: 'none', fontSize: '14px', cursor: 'pointer', fontFamily: FONT }}>
           {isEditing ? 'UPDATE RECORD' : 'SAVE RECORD'}
         </button>
       </div>
