@@ -23,7 +23,6 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
   const [expandedApBucket, setExpandedApBucket] = useState<string | null>(null)
   const [showVendorManager, setShowVendorManager] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState<any>(null)
-  const [vendorForm, setVendorForm] = useState<{ name: string; contact: string; phone: string; email: string; notes: string }>({ name: '', contact: '', phone: '', email: '', notes: '' })
 
   const today = new Date().toISOString().slice(0, 10)
 
@@ -100,7 +99,7 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
             <div style={{ fontSize: '24px', fontWeight: 'bold', color: C.pink }}>{fmt(totalExpenses + totalAPOwed)}</div>
           </div>
 
-          {/* Accounts Payable section */}
+          {/* Bills (A/P) section */}
           <div style={{ background: C.cardBg, border: `1px solid ${C.gold}`, borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
               <div>
@@ -109,4 +108,112 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
               </div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button onClick={() => setShowVendorManager(!showVendorManager)} style={{ background: 'none', border: `1px solid ${C.gold}`, borderRadius: '6px', padding: '6px 10px', fontSize: '11px', color: '#7A5A00', cursor: 'pointer', fontFamily: FONT, fontWeight: 'bold' }}>{showVendorManager ? 'Hide' : 'Vendors'}</button>
-                <button onClick={() => setEditingItem({ table: 'accounts_payable' })} style={{ background: C.gold, color: '#7A5A00', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Bill</button
+                <button onClick={() => setEditingItem({ table: 'accounts_payable' })} style={{ background: C.gold, color: '#7A5A00', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ Bill</button>
+              </div>
+            </div>
+
+            {/* Aging vs List view toggle */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
+              <button onClick={() => setApView('aging')} style={{ padding: '8px', background: apView === 'aging' ? `${C.teal}20` : 'transparent', color: apView === 'aging' ? C.teal : C.muted, border: `1px solid ${apView === 'aging' ? C.teal : C.border}`, borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Aging Buckets</button>
+              <button onClick={() => setApView('list')} style={{ padding: '8px', background: apView === 'list' ? `${C.teal}20` : 'transparent', color: apView === 'list' ? C.teal : C.muted, border: `1px solid ${apView === 'list' ? C.teal : C.border}`, borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>List View</button>
+            </div>
+
+            {apView === 'aging' && (
+              <div>
+                {(['Overdue', 'Due Soon (≤7d)', 'Not Due Yet', 'Paid'] as const).map(bucket => {
+                  const bills = apByBucket[bucket]
+                  if (bills.length === 0) return null
+                  const bucketTotal = bills.reduce((s: number, b: any) => s + (Number(b.amount || 0) - Number(b.amount_paid || 0)), 0)
+                  const isExpanded = expandedApBucket === bucket
+                  const bColor = bucket === 'Overdue' ? '#ef4444' : bucket === 'Due Soon (≤7d)' ? C.gold : bucket === 'Paid' ? C.teal : C.muted
+                  return (
+                    <div key={bucket} style={{ marginBottom: '6px', background: C.inputBg, borderRadius: '8px', borderLeft: `3px solid ${bColor}`, overflow: 'hidden' }}>
+                      <button onClick={() => setExpandedApBucket(isExpanded ? null : bucket)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 13px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: FONT }}>
+                        <div style={{ textAlign: 'left' }}>
+                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: bColor }}>{bucket}</div>
+                          <div style={{ fontSize: '11px', color: C.muted }}>{bills.length} bill{bills.length !== 1 ? 's' : ''}</div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: bColor }}>{fmt(bucketTotal)}</span>
+                          <span style={{ color: C.muted, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
+                        </div>
+                      </button>
+                      {isExpanded && bills.map((b: any) => <APRow key={b.id} b={b} />)}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {apView === 'list' && (
+              <div style={{ background: C.inputBg, borderRadius: '8px', overflow: 'hidden' }}>
+                {accountsPayable.length === 0 ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: C.muted, fontSize: '12px' }}>No bills.</div>
+                ) : accountsPayable.map(b => <APRow key={b.id} b={b} />)}
+              </div>
+            )}
+          </div>
+
+          {/* Expenses by category */}
+          {Object.keys(expensesByCategory).sort((a, b) => {
+            const aT = expensesByCategory[a].reduce((s: number, e: any) => s + Number(e.cost || 0), 0)
+            const bT = expensesByCategory[b].reduce((s: number, e: any) => s + Number(e.cost || 0), 0)
+            return bT - aT
+          }).map(cat => {
+            const items = expensesByCategory[cat]
+            const total = items.reduce((s: number, e: any) => s + Number(e.cost || 0), 0)
+            const isExpanded = expandedCategory === cat
+            const catMeta = EXPENSE_CATEGORIES[cat] || { label: '', line: '' }
+            return (
+              <div key={cat} style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: '10px', marginBottom: '8px', overflow: 'hidden' }}>
+                <button onClick={() => setExpandedCategory(isExpanded ? null : cat)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: FONT }}>
+                  <div style={{ textAlign: 'left', flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: C.text }}>{cat}</div>
+                    <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{items.length} item{items.length !== 1 ? 's' : ''} {catMeta.label && `· ${catMeta.label}`}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: C.pink }}>-{fmt(total)}</span>
+                    <span style={{ color: C.muted, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+                {isExpanded && items.map((e: any) => (
+                  <div key={e.id} onClick={() => setEditingItem({ table: 'expenses', row: e })} style={{ padding: '10px 14px', borderTop: `1px solid ${C.border}`, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '12px', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.notes || '(no description)'}</div>
+                      <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>{e.purchase_date} · {e.user_name || ''}</div>
+                    </div>
+                    <span style={{ fontSize: '13px', fontWeight: 'bold', color: C.pink, marginLeft: '8px' }}>-{fmt(Number(e.cost || 0))}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </>
+      )}
+
+      {view === 'payroll' && (
+        <>
+          <div style={{ padding: '16px', background: C.cardBg, borderRadius: '12px', marginBottom: '14px', border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: '12px', color: C.muted, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Total Payroll YTD</div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: C.text }}>{fmt(totalPayroll)}</div>
+          </div>
+          {payroll.length === 0 ? (
+            <div style={{ padding: '24px', textAlign: 'center', color: C.muted, fontSize: '13px', background: C.cardBg, borderRadius: '12px', border: `1px solid ${C.border}` }}>No payroll entries yet. Tap + to add one.</div>
+          ) : payroll.map(p => (
+            <div key={p.id} onClick={() => setEditingItem({ table: 'payroll', row: p })} style={{ padding: '12px 14px', background: C.cardBg, borderRadius: '10px', marginBottom: '6px', border: `1px solid ${C.border}`, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: C.text }}>{p.user_name}</div>
+                <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{p.pay_period_label || ''} · {p.pay_date}</div>
+              </div>
+              <span style={{ fontSize: '14px', fontWeight: 'bold', color: C.pink }}>-{fmt(Number(p.gross_pay || 0))}</span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {showPaymentModal && (
+        <RecordPaymentModal bill={showPaymentModal} C={C} supabase={supabase} fetchData={fetchData} onClose={() => setShowPaymentModal(null)} />
+      )}
+    </div>
+  )
+}
