@@ -1,7 +1,7 @@
 'use client'
 import React, { useState, useMemo } from 'react'
 import { FONT, EXPENSE_CATEGORIES, type Palette } from '@/lib/constants'
-import { fmt, dayDiff } from '@/lib/format'
+import { fmt } from '@/lib/format'
 import RecordPaymentModal from '@/components/RecordPaymentModal'
 
 interface Props {
@@ -15,6 +15,8 @@ interface Props {
   fetchData: () => void
   C: Palette
 }
+
+const dayDiff = (target: string, from: string) => Math.floor((new Date(from).getTime() - new Date(target).getTime()) / 86400000)
 
 export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendors, billPayments, setEditingItem, supabase, fetchData, C }: Props) {
   const [view, setView] = useState<'expenses' | 'payroll'>('expenses')
