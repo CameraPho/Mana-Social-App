@@ -450,6 +450,36 @@ export function generateSalesTaxRemittanceJE(remit: any, accounts: any[]): any |
   ])
 }
 
+export function generateTaxPaymentJE(payment: any, accounts: any[]): any | null {
+  const amount = Number(payment.amount_paid) || 0
+  if (amount <= 0) return null
+  if (!payment.payment_date) return null
+
+  const taxType = (payment.tax_type || '').toLowerCase()
+  let glNumber = '6160'
+  let drDescription = 'Tax payment'
+  if (taxType.includes('pte')) { glNumber = '6160'; drDescription = 'PTE Tax - California' }
+  else if (taxType.includes('franchise')) { glNumber = '6170'; drDescription = 'CA LLC Franchise Tax' }
+  else if (taxType.includes('payroll')) { glNumber = '6180'; drDescription = 'Payroll Tax Expense' }
+  else if (taxType.includes('sales tax')) { glNumber = '2200'; drDescription = 'Sales tax liability cleared' }
+
+  const drAccountId = getAccountIdByNumber(accounts, glNumber)
+  if (!drAccountId) return null
+
+  const paymentMethod = payment.payment_method || ''
+  const crAccountId = resolveBankOrCardId(accounts, paymentMethod) || getAccountIdByNumber(accounts, DEFAULT_LLC_BANK_GL)
+  if (!crAccountId) return null
+
+  return buildJE({
+    entry_date: payment.payment_date,
+    description: `${payment.tax_type} payment to ${payment.tax_authority || 'tax authority'}: $${amount.toFixed(2)}`,
+    source_type: 'tax_payment', source_id: payment.id, notes: payment.notes || null,
+  }, [
+    { account_id: drAccountId, debit: amount, credit: 0, description: drDescription },
+    { account_id: crAccountId, debit: 0, credit: amount, description: describePaymentSide(paymentMethod) || 'Paid from LLC checking' },
+  ])
+}
+
 export function generateBillPaymentJE(payment: any, accounts: any[], accountsPayable: any[]): any | null {
   // bill_payments uses 'amount' (not 'amount_paid'); fall back to amount_paid for any legacy callers.
   const amount = Number(payment.amount ?? payment.amount_paid) || 0
@@ -485,6 +515,7 @@ async function runGenerator(sourceType: string, record: any, accounts: any[], su
     case 'disbursement': return generateDisbursementJE(record, accounts)
     case 'member_loan': return generateMemberLoanJE(record, accounts)
     case 'sales_tax_remittance': return generateSalesTaxRemittanceJE(record, accounts)
+    case 'tax_payment': return generateTaxPaymentJE(record, accounts)
     case 'cogs_inventory': return generateInventoryPurchaseJE(record, accounts)
     case 'cogs_adjustment': return generatePeriodicCOGSJE(record, accounts)
     case 'member_loan_payment': {
