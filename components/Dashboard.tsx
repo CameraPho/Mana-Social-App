@@ -20,7 +20,7 @@ export const emptyForm = {
   isTaxable: false, taxRate: '7.75',
   miles: '', mileFrom: '', mileTo: '', milePurpose: '',
   cogsType: 'collection', cogsSet: '', cogsCost: '', cogsQty: '1',
-  cogsCards: '', cogsCardsPerBox: '', cogsEstValue: '', cogsPaidWith: '', amountPaid: '',
+  cogsCards: '', cogsCardsPerBox: '', cogsEstValue: '', cogsPaidWith: '', expensePaidWith: '', disbursementPaidWith: '', amountPaid: '',
   userName: 'Cam', paidByCompany: true, assetCategory: 'Equipment', assetLife: '5',
   payPeriod: '', hoursWorked: '', hourlyRate: '16', rothEligible: '', rothContributed: '',
   bankName: 'Chase', accountType: 'Checking', accountLast4: '', bankBalance: '',
