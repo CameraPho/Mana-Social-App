@@ -372,7 +372,7 @@ export default function BankTab(p: any) {
         // If deposited to LLC bank: reconcile-only (sales were already booked at import).
         // If deposited to a member's personal account: post DR 2610 / CR AR-Platform.
         const acctName = txn.account_name || ''
-        const isLLCBank = acctName.startsWith('Mana Social |')
+        const isLLCBank = acctName.startsWith('Mana Social |') || acctName === 'Cam | Chase Personal Checking'
         if (!isLLCBank) {
           const memberName = acctName.includes('Kenny') ? 'Kenny' : 'Cam'
           const platform = f.platform || detectPlatformFromDescription(txn.description) || 'tcgplayer'
