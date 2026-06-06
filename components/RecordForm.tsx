@@ -45,7 +45,7 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
 
       <div style={{ display: 'grid', gap: '10px' }}>
         <div><span style={lbl}>Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
-        <div style={{ padding: '7px 13px', background: 'rgba(45,191,184,0.08)', borderRadius: '7px', border: `1px solid ${C.teal}40`, fontSize: '12px', color: C.teal, fontWeight: 'bold' }}>{ent}</div>
+        <div style={{ padding: '7px 13px', background: 'rgba(45,191,184,0.08)', borderRadius: '7px', border: `1px solid ${C.teal}40`, fontSize: '12px', color: C.teal, fontWeight: 'bold' }}>{ent === 'llc' ? 'Mana Social LLC' : 'Cam (Sole Prop)'}</div>
 
         {t === 'sales' && <>
           <div><span style={lbl}>Platform</span>
@@ -89,7 +89,7 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
         {t === 'expenses' && <>
           <div><span style={lbl}>Category</span>
             <select value={formData.category} onChange={e => set({ category: e.target.value })} style={inp}>
-              {Object.keys(EXPENSE_CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
+              {EXPENSE_CATEGORIES.map((c: string) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
           <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Pirateship postage" style={inp} /></div>
