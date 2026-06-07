@@ -17,6 +17,7 @@ import ReportsTab from '@/tabs/ReportsTab'
 export const emptyForm = {
   label: '', amount: '', date: today(),
   fees: '', shipping: '', notes: '', itemCount: '', category: 'Supplies & Packaging',
+     platform: 'tcgplayer', caTax: '', otherTax: '', intlTax: '',
   isTaxable: false, taxRate: '7.75',
   miles: '', mileFrom: '', mileTo: '', milePurpose: '',
   cogsType: 'collection', cogsSet: '', cogsCost: '', cogsQty: '1',
