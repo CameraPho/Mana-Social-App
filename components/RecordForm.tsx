@@ -71,19 +71,18 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
 
         {t === 'accounts_payable' && <>
           <div><span style={lbl}>Vendor / Seller Name</span>
-            <input list="vendor-list" value={formData.vendorName || ''} onChange={e => set({ vendorName: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} />
+            <input list="vendor-list" value={formData.apVendor || ''} onChange={e => set({ apVendor: e.target.value })} placeholder="e.g. Oscar Espinosa" style={inp} />
             <datalist id="vendor-list">{vendors.map(v => <option key={v.id} value={v.name} />)}</datalist>
           </div>
           <div><span style={lbl}>Transaction Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Collection purchase — 5,000 MTG cards" style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Invoice Date</span><input type="date" value={formData.date} onChange={e => set({ date: e.target.value })} style={inp} /></div>
-            <div><span style={lbl}>Due Date</span><input type="date" value={formData.dueDate || ''} onChange={e => set({ dueDate: e.target.value })} style={inp} /></div>
+            <div><span style={lbl}>Due Date</span><input type="date" value={formData.apDue || ''} onChange={e => set({ apDue: e.target.value })} style={inp} /></div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
+            <div><span style={lbl}>Total Amount ($)</span><input type="number" step="0.01" value={formData.apTotal} onChange={e => set({ apTotal: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Amount Paid ($)</span><input type="number" step="0.01" value={formData.amountPaid || ''} onChange={e => set({ amountPaid: e.target.value })} placeholder="0.00" style={inp} /></div>
           </div>
-          <div><span style={lbl}>Card Count (optional)</span><input type="number" value={formData.cardCount || ''} onChange={e => set({ cardCount: e.target.value })} placeholder="e.g. 5000" style={inp} /></div>
           <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Payment terms, card types, condition, context" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>
         </>}
 
