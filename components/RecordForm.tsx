@@ -11,11 +11,12 @@ interface Props {
   setFormData: (d: any) => void
   onSave: () => void
   onClose: () => void
+  onDelete?: () => void
   C: Palette
   vendors?: { id: string; name: string }[]
 }
 
-export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, C, vendors = [] }: Props) {
+export default function RecordForm({ table: t, isEditing, formData, setFormData, onSave, onClose, onDelete, C, vendors = [] }: Props) {
   const { checking: CHECKING_ACCOUNTS, cards: CREDIT_CARD_ACCOUNTS } = useAccounts()
   // Display labels per table - uniform with QuickAddModal naming
   const FORM_LABEL: Record<string, string> = {
@@ -201,6 +202,11 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
         <button onClick={onSave} style={{ marginTop: '6px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '13px', borderRadius: '11px', fontWeight: 900, border: 'none', fontSize: '14px', cursor: 'pointer', fontFamily: FONT }}>
           {isEditing ? 'UPDATE RECORD' : 'SAVE RECORD'}
         </button>
+        {isEditing && onDelete && (
+          <button onClick={onDelete} style={{ marginTop: '2px', background: 'transparent', color: '#DC2626', padding: '12px', borderRadius: '11px', fontWeight: 'bold', border: `1px solid #DC2626`, fontSize: '13px', cursor: 'pointer', fontFamily: FONT }}>
+            DELETE RECORD
+          </button>
+        )}
       </div>
     </div>
   )
