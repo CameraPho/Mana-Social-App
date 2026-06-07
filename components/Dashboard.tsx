@@ -265,8 +265,31 @@ export default function Dashboard() {
   }
 
   const handleDelete = async (table: string, id: string) => {
-    if (!confirm('Delete?')) return
+    if (!confirm('Delete this record? This also removes any journal entry it generated. This cannot be undone.')) return
+    // Map source table -> JE source_type so we can clean up generated journal entries.
+    const TABLE_TO_SOURCE_TYPE: Record<string, string> = {
+      sales: 'sale',
+      expenses: 'expense',
+      disbursements: 'disbursement',
+      cogs_inventory: 'cogs_inventory',
+      equity_transactions: 'equity_transaction',
+      member_loans: 'member_loan',
+      member_loan_payments: 'member_loan_payment',
+      sales_tax_remittances: 'sales_tax_remittance',
+      tax_payments: 'tax_payment',
+      bill_payments: 'bill_payment',
+    }
+    const sourceType = TABLE_TO_SOURCE_TYPE[table]
+    if (sourceType) {
+      const { data: jes } = await supabase.from('journal_entries').select('id').eq('source_type', sourceType).eq('source_id', id)
+      const jeIds = (jes || []).map((j: any) => j.id)
+      if (jeIds.length > 0) {
+        await supabase.from('journal_entry_lines').delete().in('entry_id', jeIds)
+        await supabase.from('journal_entries').delete().in('id', jeIds)
+      }
+    }
     await supabase.from(table).delete().eq('id', id)
+    setEditingItem(null); setFormData(emptyForm)
     fetchData()
   }
 
@@ -306,7 +329,7 @@ export default function Dashboard() {
         </header>
 
         {editingItem ? (
-          <RecordForm table={editingItem.table} isEditing={!!editingItem.data?.id} formData={formData} setFormData={setFormData} onSave={handleSave} onClose={() => { setEditingItem(null); setFormData(emptyForm) }} C={C} vendors={vendors} />
+          <RecordForm table={editingItem.table} isEditing={!!editingItem.data?.id} formData={formData} setFormData={setFormData} onSave={handleSave} onClose={() => { setEditingItem(null); setFormData(emptyForm) }} onDelete={editingItem.data?.id ? () => handleDelete(editingItem.table, editingItem.data.id) : undefined} C={C} vendors={vendors} />
         ) : (
           <>
             {activeTab === 'home'    && <HomeTab {...shared} setActiveTab={setActiveTab} />}
