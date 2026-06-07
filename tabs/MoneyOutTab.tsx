@@ -11,6 +11,7 @@ interface Props {
   vendors: { id: string; name: string; contact?: string; phone?: string; email?: string; notes?: string }[]
   billPayments: any[]
   setEditingItem: (item: { table: string; row?: any }) => void
+  startEdit: (table: string, row: any) => void
   supabase: any
   fetchData: () => void
   C: Palette
@@ -18,7 +19,7 @@ interface Props {
 
 const dayDiff = (target: string, from: string) => Math.floor((new Date(from).getTime() - new Date(target).getTime()) / 86400000)
 
-export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendors, billPayments, setEditingItem, supabase, fetchData, C }: Props) {
+export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendors, billPayments, setEditingItem, startEdit, supabase, fetchData, C }: Props) {
   const [view, setView] = useState<'expenses' | 'payroll'>('expenses')
   const [apView, setApView] = useState<'aging' | 'list'>('aging')
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null)
@@ -29,7 +30,7 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
   const today = new Date().toISOString().slice(0, 10)
 
   const totalExpenses = useMemo(() => expenses.reduce((s, e) => s + Number(e.cost || 0), 0), [expenses])
-  const totalAPOwed = useMemo(() => accountsPayable.reduce((s, b) => s + (Number(b.amount || 0) - Number(b.amount_paid || 0)), 0), [accountsPayable])
+  const totalAPOwed = useMemo(() => accountsPayable.reduce((s, b) => s + (Number(b.total_amount || 0) - Number(b.amount_paid || 0)), 0), [accountsPayable])
   const totalPayroll = useMemo(() => payroll.reduce((s, p) => s + Number(p.gross_pay || 0), 0), [payroll])
 
   const expensesByCategory = useMemo(() => {
@@ -45,7 +46,7 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
   const apByBucket = useMemo(() => {
     const buckets: Record<string, any[]> = { 'Overdue': [], 'Due Soon (≤7d)': [], 'Not Due Yet': [], 'Paid': [] }
     accountsPayable.forEach(b => {
-      const total = Number(b.amount || 0)
+      const total = Number(b.total_amount || 0)
       const paid = Number(b.amount_paid || 0)
       const owed = total - paid
       if (owed <= 0) { buckets['Paid'].push(b); return }
@@ -59,12 +60,12 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
   }, [accountsPayable, today])
 
   const APRow = ({ b }: { b: any }) => {
-    const total = Number(b.amount || 0)
+    const total = Number(b.total_amount || 0)
     const paid = Number(b.amount_paid || 0)
     const owed = total - paid
     const days = b.due_date ? dayDiff(b.due_date, today) : null
     return (
-      <div onClick={() => setEditingItem({ table: 'accounts_payable', row: b })} style={{ padding: '11px 13px', borderTop: `1px solid ${C.border}`, cursor: 'pointer' }}>
+      <div onClick={() => startEdit('accounts_payable', b)} style={{ padding: '11px 13px', borderTop: `1px solid ${C.border}`, cursor: 'pointer' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: '13px', fontWeight: 'bold', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.vendor_name || 'Vendor'}</div>
@@ -125,7 +126,7 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
                 {(['Overdue', 'Due Soon (≤7d)', 'Not Due Yet', 'Paid'] as const).map(bucket => {
                   const bills = apByBucket[bucket]
                   if (bills.length === 0) return null
-                  const bucketTotal = bills.reduce((s: number, b: any) => s + (Number(b.amount || 0) - Number(b.amount_paid || 0)), 0)
+                  const bucketTotal = bills.reduce((s: number, b: any) => s + (Number(b.total_amount || 0) - Number(b.amount_paid || 0)), 0)
                   const isExpanded = expandedApBucket === bucket
                   const bColor = bucket === 'Overdue' ? '#ef4444' : bucket === 'Due Soon (≤7d)' ? C.gold : bucket === 'Paid' ? C.teal : C.muted
                   return (
@@ -179,7 +180,7 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
                   </div>
                 </button>
                 {isExpanded && items.map((e: any) => (
-                  <div key={e.id} onClick={() => setEditingItem({ table: 'expenses', row: e })} style={{ padding: '10px 14px', borderTop: `1px solid ${C.border}`, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div key={e.id} onClick={() => startEdit('expenses', e)} style={{ padding: '10px 14px', borderTop: `1px solid ${C.border}`, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '12px', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.notes || '(no description)'}</div>
                       <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>{e.purchase_date} · {e.user_name || ''}</div>
@@ -202,7 +203,7 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
           {payroll.length === 0 ? (
             <div style={{ padding: '24px', textAlign: 'center', color: C.muted, fontSize: '13px', background: C.cardBg, borderRadius: '12px', border: `1px solid ${C.border}` }}>No payroll entries yet. Tap + to add one.</div>
           ) : payroll.map(p => (
-            <div key={p.id} onClick={() => setEditingItem({ table: 'payroll', row: p })} style={{ padding: '12px 14px', background: C.cardBg, borderRadius: '10px', marginBottom: '6px', border: `1px solid ${C.border}`, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div key={p.id} onClick={() => startEdit('payroll', p)} style={{ padding: '12px 14px', background: C.cardBg, borderRadius: '10px', marginBottom: '6px', border: `1px solid ${C.border}`, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 'bold', color: C.text }}>{p.user_name}</div>
                 <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>{p.pay_period_label || ''} · {p.pay_date}</div>
