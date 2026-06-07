@@ -137,7 +137,7 @@ export default function Dashboard() {
 
   const startEdit = (table: string, row: any) => {
     const pre: any = { ...emptyForm, date: row.invoice_date || row.sale_date || row.purchase_date || row.due_date || row.pay_date || row.disbursement_date || row.date || emptyForm.date }
-    if (table === 'sales') { pre.label = row.platform; pre.amount = String(row.amount); pre.fees = String(row.fees || 0); pre.shipping = String(row.shipping || 0); pre.isTaxable = !!row.is_taxable; pre.taxRate = String(row.tax_rate_applied ? (Number(row.tax_rate_applied) * 100).toFixed(2) : '7.75') }
+    if (table === 'sales') { pre.platform = row.platform; pre.amount = String(row.amount); pre.fees = String(row.fees || 0); pre.shipping = String(row.shipping || 0); pre.caTax = String(row.ca_sales_tax || 0); pre.otherTax = String(row.other_domestic_sales_tax || 0); pre.intlTax = String(row.international_sales_tax || 0) }
     else if (table === 'accounts_payable') { 
       pre.apVendor = row.vendor_name; 
       pre.label = row.description || ''; 
@@ -170,18 +170,21 @@ export default function Dashboard() {
     const { calculateDueDate } = await import('@/lib/paymentTerms')
     let payload: any = {}
     if (t === 'sales') {
-      if (!formData.amount || !formData.label) return alert('Missing fields')
+      if (!formData.amount || !formData.platform) return alert('Missing fields')
       const gross = Number(formData.amount)
-      const rate = formData.isTaxable ? (Number(formData.taxRate) || 0) / 100 : 0
-      const tax = rate > 0 ? gross - (gross / (1 + rate)) : 0
+      const caTax = Number(formData.caTax || 0)
+      const otherTax = Number(formData.otherTax || 0)
+      const intlTax = Number(formData.intlTax || 0)
+      const totalTax = Math.round((caTax + otherTax + intlTax) * 100) / 100
       payload = { 
-        platform: formData.label, amount: gross, 
+        platform: formData.platform, amount: gross, 
         fees: Number(formData.fees || 0), shipping: Number(formData.shipping || 0), 
         sale_date: formData.date, period_start: formData.date, period_end: formData.date, 
         entity: getEntity(formData.date), net_sales: gross - Number(formData.fees || 0), 
         num_orders: editingItem!.data?.num_orders ?? 1,
-        is_taxable: !!formData.isTaxable, tax_rate_applied: rate,
-        sales_tax_collected: Math.round(tax * 100) / 100,
+        is_taxable: totalTax > 0, tax_rate_applied: 0,
+        sales_tax_collected: totalTax,
+        ca_sales_tax: caTax, other_domestic_sales_tax: otherTax, international_sales_tax: intlTax,
       }
     } else if (t === 'accounts_payable') {
       if (!formData.apTotal || !formData.apVendor) return alert('Missing fields')
