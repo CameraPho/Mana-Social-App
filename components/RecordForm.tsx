@@ -54,7 +54,6 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
               <option value="tcgplayer">TCGplayer</option><option value="ebay">eBay</option><option value="manapool">ManaPool</option><option value="in_person">In-Person</option><option value="other">Other</option>
             </select>
           </div>
-          <div><span style={lbl}>Item</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Black Lotus Beta" style={inp} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div><span style={lbl}>Amount</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
             <div><span style={lbl}>Fees</span><input type="number" step="0.01" value={formData.fees} onChange={e => set({ fees: e.target.value })} placeholder="0.00" style={inp} /></div>
@@ -135,78 +134,4 @@ export default function RecordForm({ table: t, isEditing, formData, setFormData,
           )}
           <div><span style={lbl}>Est. Total Sell Value ($, optional)</span><input type="number" step="0.01" value={formData.cogsEstValue} onChange={e => set({ cogsEstValue: e.target.value })} placeholder="0.00" style={inp} /></div>
           <div><span style={lbl}>Paid With</span>
-            <select value={formData.cogsPaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ cogsPaidWith: e.target.value })} style={inp}>
-              <optgroup label="Checking">
-                {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
-              </optgroup>
-              <optgroup label="Credit Cards">
-                {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
-              </optgroup>
-            </select>
-          </div>
-        </>}
-
-        {t === 'payroll' && <>
-          <div><span style={lbl}>Employee</span>
-            <select value={formData.userName || 'Kiedan'} onChange={e => set({ userName: e.target.value })} style={inp}>
-              <option value="Kiedan">Kiedan</option><option value="Kayliana">Kayliana</option><option value="Other">Other</option>
-            </select>
-          </div>
-          <div><span style={lbl}>Pay Period</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. May 1–15 2026" style={inp} /></div>
-          <div><span style={lbl}>Gross Pay ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-        </>}
-
-        {t === 'mileage_log' && <>
-          <div><span style={lbl}>Trip Purpose</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Post office run" style={inp} /></div>
-          <div><span style={lbl}>Miles</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-          {Number(formData.amount) > 0 && (
-            <div style={{ padding: '8px', background: 'rgba(45,191,184,0.08)', borderRadius: '7px', fontSize: '12px', color: C.teal }}>≈ {fmt(Number(formData.amount) * MILEAGE_RATE)} deduction (${MILEAGE_RATE}/mi)</div>
-          )}
-        </>}
-
-        {t === 'assets' && <>
-          <div><span style={lbl}>Category</span>
-            <select value={formData.category} onChange={e => set({ category: e.target.value })} style={inp}>
-              {ASSET_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div><span style={lbl}>Asset Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Epson DS-530 II scanner" style={inp} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div><span style={lbl}>Cost ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-            <div><span style={lbl}>Useful Life (yrs)</span><input type="number" value={formData.usefulLife || USEFUL_LIFE[formData.category as keyof typeof USEFUL_LIFE] || 5} onChange={e => set({ usefulLife: e.target.value })} style={inp} /></div>
-          </div>
-        </>}
-
-        {t === 'supply_costs' && <>
-          <div><span style={lbl}>Description</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. BCW penny sleeves x 1000" style={inp} /></div>
-          <div><span style={lbl}>Cost ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-        </>}
-
-        {t === 'disbursements' && <>
-          <div><span style={lbl}>Recipient (Member)</span><input value={formData.label} onChange={e => set({ label: e.target.value })} placeholder="e.g. Cam or Kenny" style={inp} /></div>
-          <div><span style={lbl}>Amount ($)</span><input type="number" step="0.01" value={formData.amount} onChange={e => set({ amount: e.target.value })} placeholder="0.00" style={inp} /></div>
-          <div><span style={lbl}>Paid From</span>
-            <select value={formData.disbursementPaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ disbursementPaidWith: e.target.value })} style={inp}>
-              <optgroup label="Checking">
-                {CHECKING_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
-              </optgroup>
-              <optgroup label="Credit Cards">
-                {CREDIT_CARD_ACCOUNTS.map((a: string) => <option key={a} value={a}>{a}</option>)}
-              </optgroup>
-            </select>
-          </div>
-          <div><span style={lbl}>Notes</span><textarea value={formData.notes} onChange={e => set({ notes: e.target.value })} placeholder="Internal notes" style={{ ...inp, height: '70px', resize: 'vertical' }} /></div>
-        </>}
-
-        <button onClick={onSave} style={{ marginTop: '6px', background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', padding: '13px', borderRadius: '11px', fontWeight: 900, border: 'none', fontSize: '14px', cursor: 'pointer', fontFamily: FONT }}>
-          {isEditing ? 'UPDATE RECORD' : 'SAVE RECORD'}
-        </button>
-        {isEditing && onDelete && (
-          <button onClick={onDelete} style={{ marginTop: '2px', background: 'transparent', color: '#DC2626', padding: '12px', borderRadius: '11px', fontWeight: 'bold', border: `1px solid #DC2626`, fontSize: '13px', cursor: 'pointer', fontFamily: FONT }}>
-            DELETE RECORD
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
+            <select value={formData.cogsPaidWith || 'Mana Social | WF Business Checking'} onChange={e => set({ cogsPaidWith
