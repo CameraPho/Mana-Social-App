@@ -5,6 +5,7 @@ import { useAccounts } from '@/lib/useAccounts'
 import { fmt, getEntity, today } from '@/lib/format'
 import { parsePDF } from '@/parsers/universalPDF'
 import { stageJEForRecord } from '@/lib/journalEntryEngine'
+import PasteTransactionsModal from '@/components/PasteTransactionsModal'
 import { findVendorMatch, buildLedgerPayloadFromMatch } from '@/lib/vendorMatch'
 import {
   ActionType, ACTION_LABELS, ACTION_HINTS, getValidActions, suggestActionType,
@@ -156,6 +157,7 @@ export default function BankTab(p: any) {
   const [filterMode, setFilterMode] = useState<FilterMode>('unreconciled')
   const [searchText, setSearchText] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
+  const [showPasteModal, setShowPasteModal] = useState(false)
   const [uploadPreview, setUploadPreview] = useState<any[]>([])
   const [uploadStatus, setUploadStatus] = useState('')
   const [statementEndBal, setStatementEndBal] = useState('')
@@ -1021,9 +1023,15 @@ export default function BankTab(p: any) {
             </button>
           )}
         </div>
-        <button onClick={() => setShowAddForm(!showAddForm)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
-          {showAddForm ? 'Cancel' : '+ Add Transaction'}
-        </button>
+                <div style={{ display: 'flex', gap: '6px' }}>
+          <button onClick={() => setShowPasteModal(true)} style={{ background: 'transparent', color: C.teal, border: `1px solid ${C.teal}`, borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>Paste CSV</button>
+          <button onClick={() => setShowAddForm(!showAddForm)} style={{ background: `linear-gradient(135deg,${C.teal},#1A7A75)`, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>
+            {showAddForm ? 'Cancel' : '+ Add Transaction'}
+          </button>
+        </div>
+        {showPasteModal && (
+          <PasteTransactionsModal C={C} accountOptions={{ checking: CHECKING_ACCOUNTS, cards: CREDIT_CARD_ACCOUNTS }} supabase={supabase} fetchData={fetchData} onClose={() => setShowPasteModal(false)} />
+        )}
       </div>
 
       {showAddForm && (
