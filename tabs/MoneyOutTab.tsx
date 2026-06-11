@@ -26,6 +26,7 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
   const [expandedApBucket, setExpandedApBucket] = useState<string | null>(null)
   const [showVendorManager, setShowVendorManager] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState<any>(null)
+  const [expandedBill, setExpandedBill] = useState<string | null>(null)
 
   const today = new Date().toISOString().slice(0, 10)
 
@@ -64,23 +65,49 @@ export default function MoneyOutTab({ expenses, accountsPayable, payroll, vendor
     const paid = Number(b.amount_paid || 0)
     const owed = total - paid
     const days = b.due_date ? dayDiff(b.due_date, today) : null
+    const isOpen = expandedBill === b.id
+    const payments = (billPayments || []).filter((p: any) => p.bill_id === b.id).sort((a: any, c: any) => (c.payment_date || '').localeCompare(a.payment_date || ''))
     return (
-      <div onClick={() => startEdit('accounts_payable', b)} style={{ padding: '11px 13px', borderTop: `1px solid ${C.border}`, cursor: 'pointer' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '13px', fontWeight: 'bold', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.vendor_name || 'Vendor'}</div>
-            <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>
-              {b.description || ''} {b.due_date && <>· Due {b.due_date}</>}
-              {days !== null && days > 0 && owed > 0 && <span style={{ color: '#ef4444', fontWeight: 'bold' }}> · {days} days late</span>}
+      <div style={{ borderTop: `1px solid ${C.border}` }}>
+        <div onClick={() => setExpandedBill(isOpen ? null : b.id)} style={{ padding: '11px 13px', cursor: 'pointer' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '13px', fontWeight: 'bold', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.vendor_name || 'Vendor'}</div>
+              <div style={{ fontSize: '11px', color: C.muted, marginTop: '2px' }}>
+                {b.description || ''} {b.due_date && <>· Due {b.due_date}</>}
+                {days !== null && days > 0 && owed > 0 && <span style={{ color: '#ef4444', fontWeight: 'bold' }}> · {days} days late</span>}
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: owed > 0 ? C.pink : C.teal }}>{fmt(owed)} {owed <= 0 ? '✓' : ''}</div>
+                {paid > 0 && <div style={{ fontSize: '10px', color: C.muted }}>{fmt(paid)} paid of {fmt(total)}</div>}
+              </div>
+              <span style={{ color: C.muted, fontSize: '10px' }}>{isOpen ? '▲' : '▼'}</span>
             </div>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: owed > 0 ? C.pink : C.teal }}>{fmt(owed)} {owed <= 0 ? '✓' : ''}</div>
-            {paid > 0 && <div style={{ fontSize: '10px', color: C.muted }}>{fmt(paid)} paid of {fmt(total)}</div>}
-          </div>
         </div>
-        {owed > 0 && (
-          <button onClick={e => { e.stopPropagation(); setShowPaymentModal(b) }} style={{ marginTop: '8px', padding: '6px 12px', background: 'transparent', color: C.teal, border: `1px solid ${C.teal}`, borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ RECORD PAYMENT</button>
+        {isOpen && (
+          <div style={{ padding: '0 13px 12px', background: C.inputBg }}>
+            <div style={{ fontSize: '10px', fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '8px 0 4px' }}>Payment History</div>
+            {payments.length === 0 ? (
+              <div style={{ fontSize: '12px', color: C.muted, paddingBottom: '6px' }}>No payments recorded yet.</div>
+            ) : payments.map((p: any) => (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', padding: '6px 0', borderTop: `1px solid ${C.border}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '12px', color: C.text }}>{p.payment_date}</div>
+                  <div style={{ fontSize: '10px', color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.payment_method || ''}{p.notes ? ` · ${p.notes}` : ''}</div>
+                </div>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: C.teal, whiteSpace: 'nowrap' }}>{fmt(Number(p.amount || 0))}</span>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+              {owed > 0 && (
+                <button onClick={e => { e.stopPropagation(); setShowPaymentModal(b) }} style={{ flex: 1, padding: '8px', background: 'transparent', color: C.teal, border: `1px solid ${C.teal}`, borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>+ RECORD PAYMENT</button>
+              )}
+              <button onClick={e => { e.stopPropagation(); startEdit('accounts_payable', b) }} style={{ flex: 1, padding: '8px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', fontFamily: FONT }}>EDIT BILL</button>
+            </div>
+          </div>
         )}
       </div>
     )
