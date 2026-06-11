@@ -5,9 +5,10 @@ const PDFJS_CDN_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/p
 const XLSX_CDN_SCRIPT  = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
 
 const CREDIT_CARD_NAMES = [
-  'Costco Citi Visa', 'Citi Diamond Preferred',
-  'Amazon Chase Prime Visa', 'Chase Sapphire Preferred',
-  'Barclays View Mastercard',
+  'Cam | Costco Citi Visa', 'Cam | Citi Diamond Preferred',
+  'Cam | Amazon Chase Prime Visa', 'Cam | Chase Sapphire Preferred',
+  'Cam | Barclays View Mastercard', 'Cam | Apple Card',
+  'Mana Social | WF Signify Mastercard',
 ]
 
 function detectBankFromText(text: string): { accountName: string; isCreditCard: boolean } {
