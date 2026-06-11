@@ -1,11 +1,15 @@
-export const fmt = (n: number) => {
-  if (n < 0) return '-$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+export const fmt = (n: number | null | undefined) => {
+  const num = Number(n)
+  if (!Number.isFinite(num)) return '$0.00'
+  if (num < 0) return '-$' + Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-export const fmtK = (n: number) => {
-  if (Math.abs(n) >= 1000) return (n < 0 ? '-$' : '$') + (Math.abs(n) / 1000).toFixed(1) + 'k'
-  return fmt(n)
+export const fmtK = (n: number | null | undefined) => {
+  const num = Number(n)
+  if (!Number.isFinite(num)) return '$0.00'
+  if (Math.abs(num) >= 1000) return (num < 0 ? '-$' : '$') + (Math.abs(num) / 1000).toFixed(1) + 'k'
+  return fmt(num)
 }
 
 export const pctFmt = (n: number, d: number) => d === 0 ? '—' : (n / d * 100).toFixed(1) + '%'
