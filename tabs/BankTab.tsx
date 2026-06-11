@@ -298,7 +298,8 @@ export default function BankTab(p: any) {
       fetchData()
       alert(`Imported ${selected.length} transactions ✓`)
     } catch (err: any) {
-      alert('Import error: ' + err.message)
+      console.error('[confirmImport] full error:', err)
+      alert('Import error: ' + (err?.message || JSON.stringify(err)))
     } finally {
       setImporting(false)
     }
