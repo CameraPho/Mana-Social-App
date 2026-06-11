@@ -327,6 +327,8 @@ export function generateEquityJE(eq: any, accounts: any[]): any | null {
       { account_id: payFromId, debit: 0, credit: amount, description: `Cash paid from ${paidFrom}` },
     ])
   }
+return null
+}
 
 export function generateInventoryPurchaseJE(inv: any, accounts: any[]): any | null {
   const totalCost = Number(inv.total_cost) || 0
