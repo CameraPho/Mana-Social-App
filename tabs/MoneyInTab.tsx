@@ -38,7 +38,7 @@ export default function MoneyInTab(p: any) {
       const isEbayListings = /^ebay[-_]listings/i.test(name) || /ebay.*listings.*sales.*report/i.test(name)
       const isTcgTax = /^sellertaxreport/i.test(name) || /tcgplayer.*tax/i.test(name)
       const isTcgSummary = /^sales-report/i.test(name) && name.endsWith('.csv')
-      const isManaPool = /manapool|mana[-_ ]pool/i.test(name)
+      const isManaPool = /^sales-report/i.test(name) || /manapool|mana[-_ ]pool/i.test(name)
 
       if (isEbayListings) {
         setUploadStatus('Parsing eBay listings report...')
