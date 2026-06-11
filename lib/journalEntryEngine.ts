@@ -316,17 +316,17 @@ export function generateEquityJE(eq: any, accounts: any[]): any | null {
     // Only the LLC reimbursing you from LLC cash hits the books.
     // Personal-account-pays-personal-card is your own money movement → no JE (return null).
     if (!isLLCBank) return null
+    const payFromId = resolveBankOrCardId(accounts, paidFrom)
+    if (!payFromId) return null
     return buildJE({
       entry_date: eq.transaction_date,
       description: `Owner payable reimbursed (LLC cash) — ${memberName}: $${amount.toFixed(2)}`,
       source_type: 'equity_transaction', source_id: eq.id, notes: eq.notes || null,
     }, [
       { account_id: dueToId, debit: amount, credit: 0, description: `Reduce Due to ${memberName}` },
-      { account_id: bankId, debit: 0, credit: amount, description: 'Cash paid from LLC checking' },
+      { account_id: payFromId, debit: 0, credit: amount, description: `Cash paid from ${paidFrom}` },
     ])
   }
-return null
-}
 
 export function generateInventoryPurchaseJE(inv: any, accounts: any[]): any | null {
   const totalCost = Number(inv.total_cost) || 0
