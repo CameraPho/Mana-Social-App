@@ -34,30 +34,52 @@ export default function MoneyInTab(p: any) {
     setUploadPreview([])
     const name = file.name.toLowerCase()
     try {
-      if ((name.endsWith('.xlsx') || name.endsWith('.xls')) && !name.includes('ebay')) {
-        setUploadStatus('Parsing TCGplayer report...')
-        const { records, meta } = await parsePDF(file, 'TCGplayer')
-        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'TCGplayer', _label: `TCGplayer · ${meta.periodStart} – ${meta.periodEnd}` })))
-        setUploadStatus(`TCGplayer: ${meta.numOrders} orders · Gross ${fmt(meta.grossSales)}`)
+      // Detect by filename signature (most specific first)
+      const isEbayListings = /^ebay[-_]listings/i.test(name) || /ebay.*listings.*sales.*report/i.test(name)
+      const isTcgTax = /^sellertaxreport/i.test(name) || /tcgplayer.*tax/i.test(name)
+      const isTcgSummary = /^sales-report/i.test(name) && name.endsWith('.csv')
+      const isManaPool = /manapool|mana[-_ ]pool/i.test(name)
+
+      if (isEbayListings) {
+        setUploadStatus('Parsing eBay listings report...')
+        const { records, meta } = await parsePDF(file, 'eBay')
+        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'eBay', _label: `eBay · ${meta.rows ?? records.length} listings` })))
+        setUploadStatus(`eBay: ${meta.rows ?? records.length} listings · Gross ${fmt(meta.totalGross ?? 0)}`)
         return
       }
-      if (name.endsWith('.csv') && (name.includes('manapool') || name.includes('mana_pool') || name.includes('mana pool'))) {
+      if (isManaPool) {
         setUploadStatus('Parsing ManaPool report...')
         const { records, meta } = await parsePDF(file, 'ManaPool')
-        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'ManaPool', _label: `ManaPool · ${meta.totalOrders} orders` })))
-        setUploadStatus(`ManaPool: Gross ${fmt(meta.totalGross)}`)
+        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'ManaPool', _label: `ManaPool · ${meta.totalOrders ?? records.length} orders` })))
+        setUploadStatus(`ManaPool: Gross ${fmt(meta.totalGross ?? 0)}`)
         return
       }
-      if (name.endsWith('.csv')) {
-        setUploadStatus('Parsing eBay report...')
-        const { records, meta } = await parsePDF(file, 'eBay')
-        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'eBay', _label: `eBay · ${meta.rows} listings` })))
-        setUploadStatus(`eBay: Gross ${fmt(meta.totalGross)}`)
+      if (isTcgTax) {
+        setUploadStatus('Parsing TCGplayer tax report...')
+        const { records, meta } = await parsePDF(file, 'TCGplayer-tax')
+        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'TCGplayer', _label: `TCGplayer tax · ${meta.periodStart ?? ''} – ${meta.periodEnd ?? ''}` })))
+        setUploadStatus(`TCGplayer tax: ${meta.numStates ?? records.length} states · Gross ${fmt(meta.totalGross ?? 0)}`)
         return
       }
-      setUploadStatus('Unrecognized file — use TCGplayer .xlsx, eBay .csv, or ManaPool .csv')
+      if (isTcgSummary) {
+        setUploadStatus('Parsing TCGplayer summary report...')
+        const { records, meta } = await parsePDF(file, 'TCGplayer')
+        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'TCGplayer', _label: `TCGplayer · ${meta.periodStart ?? ''} – ${meta.periodEnd ?? ''}` })))
+        setUploadStatus(`TCGplayer: ${meta.numOrders ?? 0} orders · Gross ${fmt(meta.grossSales ?? 0)}`)
+        return
+      }
+      // Fallbacks: XLSX → assume TCGplayer tax; bare CSV → ambiguous
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        setUploadStatus('Parsing as TCGplayer tax report (filename did not match a known pattern)...')
+        const { records, meta } = await parsePDF(file, 'TCGplayer-tax')
+        setUploadPreview(records.map((r: any) => ({ ...r, platform: 'TCGplayer', _label: `TCGplayer tax · ${meta.periodStart ?? ''} – ${meta.periodEnd ?? ''}` })))
+        setUploadStatus(`TCGplayer tax: ${meta.numStates ?? records.length} states · Gross ${fmt(meta.totalGross ?? 0)}`)
+        return
+      }
+      setUploadStatus('Unrecognized file. Expected filenames: eBay-Listings*.csv · sales-report*.csv (TCGplayer) · SellerTaxReport*.xlsx (TCGplayer tax) · *manapool*.csv')
     } catch (err: any) {
-      setUploadStatus('Error: ' + err.message)
+      console.error('[handleUpload] full error:', err)
+      setUploadStatus('Error: ' + (err?.message || JSON.stringify(err)))
     }
   }
 
