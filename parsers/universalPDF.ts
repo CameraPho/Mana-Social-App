@@ -29,17 +29,28 @@ const MONTH_MAP: Record<string, string> = {
 const PLATFORM_HINTS = new Set(['eBay', 'TCGplayer', 'TCGplayer-tax', 'ManaPool'])
 
 function detectBankFromText(text: string): { accountName: string; isCreditCard: boolean } {
-  const t = text.toLowerCase()
-  if (/wells\s*fargo/.test(t)) {
-    const isBusiness = /business\s+(checking|market|advantage|choice|platinum)|initiate\s+business|optimize\s+business/.test(t)
-    return { accountName: isBusiness ? 'Mana Social | WF Business Checking' : 'Cam | WF Personal Checking', isCreditCard: false }
-  }
-  if (/barclays/.test(t)) return { accountName: 'Cam | Barclays View Mastercard', isCreditCard: true }
-  if (/costco\s*anywhere\s*visa|costco.*citi/.test(t)) return { accountName: 'Cam | Costco Citi Visa', isCreditCard: true }
-  if (/diamond\s*preferred/.test(t)) return { accountName: 'Cam | Citi Diamond Preferred', isCreditCard: true }
-  if (/amazon.*chase|chase.*amazon|prime\s*visa/.test(t)) return { accountName: 'Cam | Amazon Chase Prime Visa', isCreditCard: true }
-  if (/sapphire/.test(t)) return { accountName: 'Cam | Chase Sapphire Preferred', isCreditCard: true }
-  if (/chase/.test(t)) return { accountName: 'Cam | Chase Personal Checking', isCreditCard: false }
+  // Use only first ~600 chars (≈top of page 1) for bank detection.
+  // Transaction descriptions further down can falsely trigger vendor matches.
+  const t = text.toLowerCase().slice(0, 600)
+
+  // Specific product strings, most-specific first
+  if (/chase\s+(total|premier\s*plus|college|sapphire|secure)\s+checking/.test(t)) return { accountName: 'Cam | Chase Personal Checking', isCreditCard: false }
+  if (/(initiate|navigate|optimize|analyzed)\s+business\s+checking/.test(t)) return { accountName: 'Mana Social | WF Business Checking', isCreditCard: false }
+  if (/wells\s+fargo.*everyday\s+checking|everyday\s+checking.*wells\s+fargo/.test(t)) return { accountName: 'Cam | WF Personal Checking', isCreditCard: false }
+
+  // Credit cards — these typically have very distinctive headers
+  if (/barclays.*view|view.*mastercard/.test(t)) return { accountName: 'Cam | Barclays View Mastercard', isCreditCard: true }
+  if (/costco\s+anywhere|costco.*citi/.test(t)) return { accountName: 'Cam | Costco Citi Visa', isCreditCard: true }
+  if (/citi.*diamond\s+preferred|diamond\s+preferred.*citi/.test(t)) return { accountName: 'Cam | Citi Diamond Preferred', isCreditCard: true }
+  if (/amazon.*visa|prime\s+visa|amazon\.com\s+chase/.test(t)) return { accountName: 'Cam | Amazon Chase Prime Visa', isCreditCard: true }
+  if (/sapphire\s+preferred/.test(t)) return { accountName: 'Cam | Chase Sapphire Preferred', isCreditCard: true }
+  if (/signify\s+business|wells\s+fargo.*signify/.test(t)) return { accountName: 'Mana Social | WF Signify Mastercard', isCreditCard: true }
+
+  // Generic fallbacks — only if no specific product matched
+  if (/wells\s+fargo\s+bank/.test(t) && /business/.test(t)) return { accountName: 'Mana Social | WF Business Checking', isCreditCard: false }
+  if (/wells\s+fargo\s+bank/.test(t)) return { accountName: 'Cam | WF Personal Checking', isCreditCard: false }
+  if (/jpmorgan\s+chase|chase\s+bank/.test(t)) return { accountName: 'Cam | Chase Personal Checking', isCreditCard: false }
+
   return { accountName: 'Unknown', isCreditCard: false }
 }
 
