@@ -625,12 +625,14 @@ function parseManaPool(lines: string[], fileName: string): ParseResult {
     const total = cTotal >= 0 ? moneyParse(cols[cTotal]) : 0
     const sub = cSub >= 0 ? moneyParse(cols[cSub]) : total
     const shipVal = cShip >= 0 ? moneyParse(cols[cShip]) : 0
-    const feesVal = cFees >= 0 ? moneyParse(cols[cFees]) : 0
     let orders = 1
     if (cOrders >= 0) {
       const o = parseInt(cols[cOrders], 10)
       if (!isNaN(o) && o > 0) orders = o
     }
+    // Auto-compute fees when CSV lacks an explicit fees column.
+    // Mkt Fee: 5% × Subtotal; CC Fee: 2.9% × (Subtotal + Shipping) + $0.30/order
+    const feesVal = cFees >= 0 ? moneyParse(cols[cFees]) : (0.05 * sub + 0.029 * (sub + shipVal) + 0.30 * orders)
     if (sub === 0 && shipVal === 0) continue
 
     records.push({
