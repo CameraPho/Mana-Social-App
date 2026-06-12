@@ -263,8 +263,8 @@ export default function BankTab(p: any) {
         .from('bank_statements')
         .insert({
           account_name: stmtMeta.detectedAccount,
-          statement_period_start: stmtMeta.periodStart || selected[selected.length - 1].transaction_date,
-          statement_period_end: stmtMeta.periodEnd || selected[0].transaction_date,
+          statement_period_start: stmtMeta.periodStart || selected.map((s: any) => s.transaction_date).sort()[0],
+          statement_period_end: stmtMeta.periodEnd || selected.map((s: any) => s.transaction_date).sort().slice(-1)[0],
           starting_balance: stmtMeta.startingBalance ? parseFloat(stmtMeta.startingBalance) : null,
           ending_balance: stmtMeta.endingBalance ? parseFloat(stmtMeta.endingBalance) : null,
           transaction_count: selected.length,
