@@ -7,7 +7,7 @@ const XLSX_CDN_SCRIPT  = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xls
 const CREDIT_CARD_NAMES = [
   'Cam | Costco Citi Visa', 'Cam | Citi Diamond Preferred',
   'Cam | Amazon Chase Prime Visa', 'Cam | Chase Sapphire Preferred',
-  'Cam | Barclays View Mastercard', 'Cam | Apple Card',
+  'Cam | Barclays View Mastercard', 'Cam | Apple Card', 'Cam | Chase Ink',
   'Mana Social | WF Signify Mastercard',
 ]
 
@@ -43,6 +43,7 @@ function detectBankFromText(text: string): { accountName: string; isCreditCard: 
   if (/costco\s+anywhere|costco.*citi/.test(t)) return { accountName: 'Cam | Costco Citi Visa', isCreditCard: true }
   if (/citi.*diamond\s+preferred|diamond\s+preferred.*citi/.test(t)) return { accountName: 'Cam | Citi Diamond Preferred', isCreditCard: true }
   if (/amazon.*visa|prime\s+visa|amazon\.com\s+chase/.test(t)) return { accountName: 'Cam | Amazon Chase Prime Visa', isCreditCard: true }
+  if (/chase\s+ink/.test(t)) return { accountName: 'Cam | Chase Ink', isCreditCard: true }
   if (/sapphire\s+preferred/.test(t)) return { accountName: 'Cam | Chase Sapphire Preferred', isCreditCard: true }
   if (/signify\s+business|wells\s+fargo.*signify/.test(t)) return { accountName: 'Mana Social | WF Signify Mastercard', isCreditCard: true }
 
