@@ -193,7 +193,7 @@ function parseCreditCard(lines: string[], stmtYear: string, accountName: string)
 
     let mm = '', dd = '', dateEndIndex = -1
 
-    // Pattern A: MM/DD (Chase, Citi, Amazon Chase)
+    // Pattern A: MM/DD (Chase, Citi, Amazon Chase). Lookbehind blocks year-portion of MM/DD/YY.
     const mmddMatch = line.match(/(?<![\/\d])(\d{2})\/(\d{2})(?!\d|\/)/)
     if (mmddMatch && mmddMatch.index !== undefined) {
       const monthNum = parseInt(mmddMatch[1])
@@ -285,11 +285,14 @@ function csvSplit(line: string): string[] {
   return result
 }
 
-function moneyParse(s: string | undefined): number {
-  if (!s) return 0
-  const cleaned = s.replace(/[$,\s]/g, '')
-  const n = parseFloat(cleaned)
-  return isFinite(n) ? n : 0
+function moneyParse(s: string | undefined | null): number {
+  if (s == null) return 0
+  const t = String(s).trim()
+  if (!t || t === '-' || t === '—' || t === '–') return 0
+  const isAccountingNeg = /^\(.+\)$/.test(t)
+  const n = parseFloat(t.replace(/[$,()\s]/g, ''))
+  if (!isFinite(n)) return 0
+  return isAccountingNeg ? -Math.abs(n) : n
 }
 
 function findHeaderRow(lines: string[], requiredCols: string[]): { idx: number; headers: string[] } {
@@ -304,12 +307,17 @@ function findHeaderRow(lines: string[], requiredCols: string[]): { idx: number; 
 
 function parseTcgSummary(lines: string[], fileName: string): ParseResult {
   const { idx, headers } = findHeaderRow(lines, ['period', 'subtotal'])
-  if (idx === -1) throw new Error('TCGplayer summary: expected columns Period, Total, Subtotal, Shipping, Order Count')
+  if (idx === -1) throw new Error('TCGplayer summary: expected columns Period, Total, Subtotal, Shipping, Order Count.')
 
-  const cPeriod = headers.findIndex(h => h === 'period')
-  const cSub = headers.findIndex(h => h === 'subtotal')
-  const cShip = headers.findIndex(h => h === 'shipping')
-  const cOrders = headers.findIndex(h => h === 'order count')
+  const find = (name: string) => headers.findIndex(h => h === name.toLowerCase())
+  const cPeriod = find('period')
+  const cSub = find('subtotal')
+  const cShip = find('shipping')
+  const cOrders = find('order count')
+
+  if (cPeriod < 0 || cSub < 0) throw new Error('TCGplayer summary: Period and Subtotal columns required.')
+
+  const round2 = (n: number) => Math.round(n * 100) / 100
 
   const records: any[] = []
   let grossSales = 0, totalShipping = 0, totalOrders = 0
@@ -322,13 +330,13 @@ function parseTcgSummary(lines: string[], fileName: string): ParseResult {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(period)) continue
     const amount = moneyParse(cols[cSub])
     const ship = cShip >= 0 ? moneyParse(cols[cShip]) : 0
-    const orders = cOrders >= 0 ? (parseInt(cols[cOrders]) || 0) : 0
+    const orders = cOrders >= 0 ? (parseInt(cols[cOrders], 10) || 0) : 0
     if (amount === 0 && ship === 0) continue
 
     records.push({
       platform: 'TCGplayer',
-      amount,
-      shipping: ship,
+      amount: round2(amount),
+      shipping: round2(ship),
       fees: 0,
       ca_sales_tax: 0,
       other_domestic_sales_tax: 0,
@@ -354,9 +362,9 @@ function parseTcgSummary(lines: string[], fileName: string): ParseResult {
       detectedAccount: 'TCGplayer',
       periodStart: minDate === '9999-12-31' ? null : minDate,
       periodEnd: maxDate === '0000-01-01' ? null : maxDate,
-      grossSales,
+      grossSales: round2(grossSales),
       numOrders: totalOrders,
-      totalShipping,
+      totalShipping: round2(totalShipping),
     } as any,
   }
 }
@@ -371,7 +379,7 @@ function parseTcgTax(lines: string[], fileName: string): ParseResult {
   }
 
   const { idx, headers } = findHeaderRow(lines, ['state', 'gross sales'])
-  if (idx === -1) throw new Error('TCGplayer tax: expected columns State, Channel, Gross Sales, Seller Tax Amt, TCG Tax Amt')
+  if (idx === -1) throw new Error('TCGplayer tax: expected columns State, Channel, Gross Sales, Seller Tax Amt, TCG Tax Amt.')
 
   const cState = headers.findIndex(h => h === 'state')
   const cGross = headers.findIndex(h => h === 'gross sales')
@@ -379,6 +387,8 @@ function parseTcgTax(lines: string[], fileName: string): ParseResult {
   const cSellerTax = headers.findIndex(h => h === 'seller tax amt')
   const cTcgTax = headers.findIndex(h => h === 'tcg tax amt')
   const cOrders = headers.findIndex(h => h === 'number of orders')
+
+  const round2 = (n: number) => Math.round(n * 100) / 100
 
   let totalGross = 0, totalShip = 0, totalOrders = 0, caTax = 0, otherTax = 0
   const statesSeen = new Set<string>()
@@ -392,7 +402,7 @@ function parseTcgTax(lines: string[], fileName: string): ParseResult {
     const ship = cShip >= 0 ? moneyParse(cols[cShip]) : 0
     const sellerTax = cSellerTax >= 0 ? moneyParse(cols[cSellerTax]) : 0
     const tcgTax = cTcgTax >= 0 ? moneyParse(cols[cTcgTax]) : 0
-    const orders = cOrders >= 0 ? (parseInt(cols[cOrders]) || 0) : 0
+    const orders = cOrders >= 0 ? (parseInt(cols[cOrders], 10) || 0) : 0
     const taxTotal = sellerTax + tcgTax
 
     totalGross += gross
@@ -406,11 +416,11 @@ function parseTcgTax(lines: string[], fileName: string): ParseResult {
   const recordDate = periodEnd ?? new Date().toISOString().split('T')[0]
   const records: any[] = totalGross > 0 ? [{
     platform: 'TCGplayer',
-    amount: totalGross,
-    shipping: totalShip,
+    amount: round2(totalGross),
+    shipping: round2(totalShip),
     fees: 0,
-    ca_sales_tax: caTax,
-    other_domestic_sales_tax: otherTax,
+    ca_sales_tax: round2(caTax),
+    other_domestic_sales_tax: round2(otherTax),
     international_sales_tax: 0,
     sale_date: recordDate,
     period_start: periodStart ?? recordDate,
@@ -427,7 +437,7 @@ function parseTcgTax(lines: string[], fileName: string): ParseResult {
       detectedAccount: 'TCGplayer',
       periodStart,
       periodEnd,
-      totalGross,
+      totalGross: round2(totalGross),
       numStates: statesSeen.size,
       numOrders: totalOrders,
     } as any,
@@ -436,7 +446,7 @@ function parseTcgTax(lines: string[], fileName: string): ParseResult {
 
 function parseEbayListings(lines: string[], fileName: string): ParseResult {
   const { idx, headers } = findHeaderRow(lines, ['listing title', 'item sales'])
-  if (idx === -1) throw new Error('eBay listings: expected columns Listing title, Item sales, Final value fees, etc.')
+  if (idx === -1) throw new Error('eBay listings: header row not found. Expected columns Listing title and Item sales.')
 
   const find = (name: string) => headers.findIndex(h => h === name.toLowerCase())
   const cQty = find('quantity sold')
@@ -452,8 +462,15 @@ function parseEbayListings(lines: string[], fileName: string): ParseResult {
   const cDeposit = find('deposit processing fees')
   const cFeeCredits = find('fee credits')
   const cLabels = find('shipping labels cost (amount you paid to buy shipping labels on ebay)')
+  const cTotalCosts = find('total selling costs')
+  const cNetSales = find('net sales (net of taxes and selling costs)')
+
+  if (cItem < 0) throw new Error('eBay listings: required column "Item sales" not found.')
+
+  const round2 = (n: number) => Math.round(n * 100) / 100
 
   let gross = 0, ship = 0, fees = 0, labels = 0, taxToEbay = 0, taxToYou = 0, qty = 0
+  let totalSellingCostsReported = 0, netSalesReported = 0
   let rowCount = 0
 
   for (let i = idx + 1; i < lines.length; i++) {
@@ -461,38 +478,57 @@ function parseEbayListings(lines: string[], fileName: string): ParseResult {
     if (cols.length < 5) continue
     const title = (cols[0] || '').trim()
     if (!title || title.toLowerCase().startsWith('total')) continue
-    qty += parseInt(cols[cQty]) || 0
+
+    if (cQty >= 0) qty += parseInt(cols[cQty], 10) || 0
     gross += moneyParse(cols[cItem])
     if (cShip >= 0) ship += moneyParse(cols[cShip])
     if (cTaxEbay >= 0) taxToEbay += moneyParse(cols[cTaxEbay])
     if (cTaxYou >= 0) taxToYou += moneyParse(cols[cTaxYou])
-    if (cLabels >= 0) labels += moneyParse(cols[cLabels])
+
+    const labelCost = cLabels >= 0 ? moneyParse(cols[cLabels]) : 0
+    labels += labelCost
+
     const fvf = cFvf >= 0 ? moneyParse(cols[cFvf]) : 0
     const promo = cPromoted >= 0 ? moneyParse(cols[cPromoted]) : 0
     const other = cOther >= 0 ? moneyParse(cols[cOther]) : 0
     const deposit = cDeposit >= 0 ? moneyParse(cols[cDeposit]) : 0
     const insertion = cInsertion >= 0 ? moneyParse(cols[cInsertion]) : 0
     const optional = cOptional >= 0 ? moneyParse(cols[cOptional]) : 0
-    const credits = cFeeCredits >= 0 ? moneyParse(cols[cFeeCredits]) : 0
-    fees += fvf + promo + other + deposit + insertion + optional - credits
+    const credits = cFeeCredits >= 0 ? Math.abs(moneyParse(cols[cFeeCredits])) : 0
+
+    fees += fvf + promo + other + deposit + insertion + optional - credits + labelCost
+
+    if (cTotalCosts >= 0) totalSellingCostsReported += moneyParse(cols[cTotalCosts])
+    if (cNetSales >= 0) netSalesReported += moneyParse(cols[cNetSales])
     rowCount++
   }
 
-  const today = new Date()
-  const todayStr = today.toISOString().split('T')[0]
-  const periodStart = new Date(today.getTime() - 30 * 86400000).toISOString().split('T')[0]
+  // Parse export date from filename: eBay-ListingsSalesReport-Mon-DD-YYYY-...
+  let saleDate = new Date().toISOString().split('T')[0]
+  const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+  const fnDate = fileName.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[-_](\d{1,2})[-_](\d{4})/i)
+  if (fnDate) {
+    const mm = String(monthNames.indexOf(fnDate[1].toLowerCase()) + 1).padStart(2, '0')
+    const dd = String(parseInt(fnDate[2], 10)).padStart(2, '0')
+    saleDate = `${fnDate[3]}-${mm}-${dd}`
+  }
+  const periodStart = saleDate.slice(0, 7) + '-01'
+
+  if (gross === 0 && rowCount === 0) {
+    throw new Error('eBay listings: 0 rows parsed. Check the file format.')
+  }
 
   const records: any[] = gross > 0 ? [{
     platform: 'eBay',
-    amount: gross,
-    shipping: ship,
-    fees,
+    amount: round2(gross),
+    shipping: round2(ship),
+    fees: round2(fees),
     ca_sales_tax: 0,
-    other_domestic_sales_tax: taxToYou,
+    other_domestic_sales_tax: round2(taxToYou),
     international_sales_tax: 0,
-    sale_date: todayStr,
+    sale_date: saleDate,
     period_start: periodStart,
-    period_end: todayStr,
+    period_end: saleDate,
     num_orders: qty,
     account_name: 'eBay',
   }] : []
@@ -504,13 +540,16 @@ function parseEbayListings(lines: string[], fileName: string): ParseResult {
       fileName,
       detectedAccount: 'eBay',
       periodStart,
-      periodEnd: todayStr,
-      totalGross: gross,
-      totalShipping: ship,
-      totalFees: fees,
-      totalLabelsCost: labels,
-      totalTaxRemittedByPlatform: taxToEbay,
-      totalTaxOwedByYou: taxToYou,
+      periodEnd: saleDate,
+      totalGross: round2(gross),
+      totalShipping: round2(ship),
+      totalFees: round2(fees),
+      totalLabelsCost: round2(labels),
+      totalTaxRemittedByPlatform: round2(taxToEbay),
+      totalTaxOwedByYou: round2(taxToYou),
+      totalSellingCostsReported: round2(totalSellingCostsReported),
+      netSalesReported: round2(netSalesReported),
+      feesVariance: round2(Math.abs(fees - totalSellingCostsReported)),
       numListings: rowCount,
     } as any,
   }
@@ -518,21 +557,32 @@ function parseEbayListings(lines: string[], fileName: string): ParseResult {
 
 function parseManaPool(lines: string[], fileName: string): ParseResult {
   const { idx, headers } = findHeaderRow(lines, ['total'])
-  if (idx === -1) throw new Error('ManaPool: header row not found. Expected a Total column.')
+  if (idx === -1) throw new Error('ManaPool: header row not found. Need at least a Total column.')
 
+  // Strict-first matcher: exact match wins over substring
   const find = (...names: string[]) => {
-    for (const n of names) {
-      const i = headers.findIndex(h => h === n.toLowerCase() || h.includes(n.toLowerCase()))
+    const lc = names.map(n => n.toLowerCase())
+    for (const n of lc) {
+      const i = headers.findIndex(h => h === n)
+      if (i >= 0) return i
+    }
+    for (const n of lc) {
+      const i = headers.findIndex(h => h === n || h.startsWith(n + ' ') || h.endsWith(' ' + n) || h.includes(' ' + n + ' '))
       if (i >= 0) return i
     }
     return -1
   }
-  const cDate = find('date', 'order date', 'sale date', 'period')
-  const cTotal = find('total', 'gross', 'amount')
+  const cDate = find('period', 'date', 'order date', 'sale date')
   const cSub = find('subtotal', 'item total', 'items')
+  const cTotal = find('total', 'gross', 'amount')
   const cShip = find('shipping', 'ship')
   const cFees = find('fees', 'fee', 'commission')
-  const cOrders = find('orders', 'order count', 'order id')
+  const cOrders = find('order count', 'orders', 'num orders', 'number of orders')
+
+  if (cTotal < 0 && cSub < 0) throw new Error('ManaPool: need a Subtotal or Total column.')
+  if (cDate < 0) throw new Error('ManaPool: need a Period or Date column.')
+
+  const round2 = (n: number) => Math.round(n * 100) / 100
 
   const records: any[] = []
   let totalGross = 0, totalShip = 0, totalFees = 0, totalOrders = 0
@@ -541,26 +591,41 @@ function parseManaPool(lines: string[], fileName: string): ParseResult {
   for (let i = idx + 1; i < lines.length; i++) {
     const cols = csvSplit(lines[i])
     if (cols.length < 2) continue
-    const rawDate = cDate >= 0 ? (cols[cDate] || '').trim() : ''
+    const rawDate = (cols[cDate] || '').trim()
     if (!rawDate) continue
-    let date = rawDate
-    const dMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/) || rawDate.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
-    if (!dMatch) continue
-    if (dMatch[0].includes('/')) date = `${dMatch[3]}-${dMatch[1]}-${dMatch[2]}`
-    else date = `${dMatch[1]}-${dMatch[2]}-${dMatch[3]}`
+
+    // Date normalization: ISO YYYY-MM-DD or MM/DD/YYYY
+    let date = ''
+    const iso = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    const us = rawDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+    if (iso) {
+      date = `${iso[1]}-${iso[2]}-${iso[3]}`
+    } else if (us) {
+      const mm = String(parseInt(us[1], 10)).padStart(2, '0')
+      const dd = String(parseInt(us[2], 10)).padStart(2, '0')
+      date = `${us[3]}-${mm}-${dd}`
+    } else {
+      continue
+    }
+    const year = parseInt(date.slice(0, 4), 10)
+    if (year < 2020 || year > 2099) continue
 
     const total = cTotal >= 0 ? moneyParse(cols[cTotal]) : 0
     const sub = cSub >= 0 ? moneyParse(cols[cSub]) : total
-    const ship = cShip >= 0 ? moneyParse(cols[cShip]) : 0
-    const fees = cFees >= 0 ? moneyParse(cols[cFees]) : 0
-    const orders = cOrders >= 0 ? (parseInt(cols[cOrders]) || 1) : 1
-    if (sub === 0 && ship === 0) continue
+    const shipVal = cShip >= 0 ? moneyParse(cols[cShip]) : 0
+    const feesVal = cFees >= 0 ? moneyParse(cols[cFees]) : 0
+    let orders = 1
+    if (cOrders >= 0) {
+      const o = parseInt(cols[cOrders], 10)
+      if (!isNaN(o) && o > 0) orders = o
+    }
+    if (sub === 0 && shipVal === 0) continue
 
     records.push({
       platform: 'ManaPool',
-      amount: sub,
-      shipping: ship,
-      fees,
+      amount: round2(sub),
+      shipping: round2(shipVal),
+      fees: round2(feesVal),
       ca_sales_tax: 0,
       other_domestic_sales_tax: 0,
       international_sales_tax: 0,
@@ -571,11 +636,15 @@ function parseManaPool(lines: string[], fileName: string): ParseResult {
       account_name: 'ManaPool',
     })
     totalGross += sub
-    totalShip += ship
-    totalFees += fees
+    totalShip += shipVal
+    totalFees += feesVal
     totalOrders += orders
     if (date < minDate) minDate = date
     if (date > maxDate) maxDate = date
+  }
+
+  if (records.length === 0) {
+    throw new Error('ManaPool: 0 rows parsed. Check date format (YYYY-MM-DD or MM/DD/YYYY) and column names.')
   }
 
   return {
@@ -586,9 +655,9 @@ function parseManaPool(lines: string[], fileName: string): ParseResult {
       detectedAccount: 'ManaPool',
       periodStart: minDate === '9999-12-31' ? null : minDate,
       periodEnd: maxDate === '0000-01-01' ? null : maxDate,
-      totalGross,
-      totalShipping: totalShip,
-      totalFees,
+      totalGross: round2(totalGross),
+      totalShipping: round2(totalShip),
+      totalFees: round2(totalFees),
       totalOrders,
     } as any,
   }
