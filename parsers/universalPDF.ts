@@ -137,9 +137,9 @@ function parseCheckingByBalanceDelta(lines: string[], stmtYear: string, accountN
     const twoNumMatch = restOfLine.match(/(.+?)\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s*$/)
     if (twoNumMatch) {
       const desc = cleanDesc(twoNumMatch[1])
-      const amount = parseFloat(twoNumMatch[2].replace(/,/g, ''))
       const newBalance = parseFloat(twoNumMatch[3].replace(/,/g, ''))
-      if (desc.length >= 3 && amount !== 0) {
+      const amount = parseFloat((newBalance - runningBalance).toFixed(2))
+      if (desc.length >= 3 && Math.abs(amount) > 0.001) {
         records.push({ transaction_date: `${stmtYear}-${mm}-${dd}`, description: desc.slice(0, 200), amount, account_name: accountName })
         runningBalance = newBalance
       }
