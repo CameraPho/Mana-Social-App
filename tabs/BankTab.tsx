@@ -359,7 +359,8 @@ export default function BankTab(p: any) {
         const isOutflow = txn.amount < 0
         if (isOutflow) {
           const category = f.category || 'Supplies & Packaging'
-          await supabase.from('expenses').insert({ category, cost: absAmt, purchase_date: txn.transaction_date, notes: f.notes || txn.description, entity, user_name: 'Cam', paid_by_company: true, bank_txn_id: txn.id })
+          const { data: expRow } = await supabase.from('expenses').insert({ category, cost: absAmt, purchase_date: txn.transaction_date, notes: f.notes || txn.description, entity, user_name: 'Cam', paid_by_company: true, payment_method: txn.account_name, bank_txn_id: txn.id }).select().single()
+          if (expRow) await stageJEForRecord('expense', expRow, supabase)
           if (f.saveAsRule) await learnVendor(txn, category, false)
         } else {
           const platform = (f.platform || 'other').toLowerCase()
@@ -370,7 +371,8 @@ export default function BankTab(p: any) {
         const lines = getSplitLines(txn.id)
         const total = lines.reduce((a, l) => a + (parseFloat(l.amount) || 0), 0)
         if (Math.abs(total - absAmt) > 0.01) { alert(`Split total ${fmt(total)} must equal ${fmt(absAmt)}`); return }
-        await supabase.from('expenses').insert(lines.map(l => ({ category: l.category, cost: parseFloat(l.amount) || 0, purchase_date: txn.transaction_date, notes: l.notes || `Split from: ${txn.description}`, entity, user_name: 'Cam', paid_by_company: true, bank_txn_id: txn.id })))
+        const { data: splitRows } = await supabase.from('expenses').insert(lines.map(l => ({ category: l.category, cost: parseFloat(l.amount) || 0, purchase_date: txn.transaction_date, notes: l.notes || `Split from: ${txn.description}`, entity, user_name: 'Cam', paid_by_company: true, payment_method: txn.account_name, bank_txn_id: txn.id }))).select()
+        if (splitRows) for (const row of splitRows) await stageJEForRecord('expense', row, supabase)
       } else if (action === 'platform_payout') {
         // If deposited to LLC bank: reconcile-only (sales were already booked at import).
         // If deposited to a member's personal account: post DR 2610 / CR AR-Platform.
