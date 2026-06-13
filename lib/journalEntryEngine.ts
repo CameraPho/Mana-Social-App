@@ -30,6 +30,7 @@ const ACCOUNT_OWNERSHIP: Record<string, AccountOwner> = {
   'Cam | Chase Sapphire Preferred': { type: 'personal_cam_card', subGl: '2610.04' },
   'Cam | Barclays View Mastercard': { type: 'personal_cam_card', subGl: '2610.05' },
   'Cam | Apple Card': { type: 'personal_cam_card', subGl: '2610.06' },
+  'Cam | Chase Ink': { type: 'personal_cam' },
   // Personal — Kenny
   'Kenny | WF Personal Checking': { type: 'personal_kenny' },
 
