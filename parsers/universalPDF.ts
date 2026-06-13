@@ -210,7 +210,7 @@ function parseCreditCard(lines: string[], stmtYear: string, accountName: string)
     let mm = '', dd = '', dateEndIndex = -1
 
     // Pattern A: MM/DD (Chase, Citi, Amazon Chase). Lookbehind blocks year-portion of MM/DD/YY.
-    const mmddMatch = line.match(/(?<![\/\d])(\d{2})\/(\d{2})(?!\d|\/)/)
+    const mmddMatch = line.match(/(?<![\/\d])(\d{2})\/(\d{2})(?:\/(\d{4}))?(?!\d|\/)/)
     if (mmddMatch && mmddMatch.index !== undefined) {
       const monthNum = parseInt(mmddMatch[1])
       const dayNum = parseInt(mmddMatch[2])
