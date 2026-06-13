@@ -10,11 +10,12 @@ import JournalEntryBackfill from '@/components/JournalEntryBackfill'
 import PendingJournalEntries from '@/components/PendingJournalEntries'
 import PeriodicCOGS from '@/components/PeriodicCOGS'
 import TaxPaymentsTracker from '@/components/TaxPaymentsTracker'
+import OwnerPayableView from '@/components/OwnerPayableView'
 
 export default function ReportsTab(p: any) {
   const { C, sales, expenses, accountsPayable, payroll, mileageLog, cogsInventory, allCogsInventory, assets, bankAccounts, selectedYear, bankStatements, reconTransactions, supabase, fetchData,
     equityTransactions, memberLoans, memberLoanPayments, salesTaxRemittances, disbursements, billPayments } = p
-  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'|'coa'|'journal'|'backfill'|'pending'|'cogs'|'taxpay'>('menu')
+  const [view, setView] = useState<'menu'|'pl'|'balance'|'tax'|'deductions'|'assets'|'reconciliation'|'inventory'|'coa'|'journal'|'backfill'|'pending'|'cogs'|'taxpay'|'owner'>('menu')
   const [expandedStmt, setExpandedStmt] = useState<Record<string, boolean>>({})
 
   const card: React.CSSProperties = { background: C.cardBg, borderRadius: '16px', padding: '20px', border: `1px solid ${C.border}`, marginBottom: '12px', fontFamily: FONT }
@@ -144,6 +145,7 @@ export default function ReportsTab(p: any) {
       ['cogs', 'Period-End COGS', 'Compute & post cost of goods sold from inventory count'],
       ['tax', 'Tax Estimates', 'Quarterly federal + CA PTE estimates'],
       ['taxpay', 'Tax Payments', 'Track & record PTE, CDTFA, EFTPS, EDD, franchise tax'],
+      ['owner', 'Owner Payables', 'Due-to-Cam, Due-to-Kenny, Member Loans — what the LLC owes members'],
       ['deductions', 'Deductions', 'Expense deductibility + mileage'],
       ['assets', 'Assets & Depreciation', 'Fixed assets and depreciation schedule'],
     ]
@@ -175,6 +177,10 @@ export default function ReportsTab(p: any) {
 
   if (view === 'taxpay') return (
     <TaxPaymentsTracker C={C} onBack={() => setView('menu')} />
+  )
+
+  if (view === 'owner') return (
+    <OwnerPayableView C={C} supabase={supabase} onBack={() => setView('menu')} />
   )
 
   if (view === 'cogs') return (
