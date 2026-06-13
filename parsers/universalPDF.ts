@@ -163,7 +163,7 @@ function parseCheckingByBalanceDelta(lines: string[], stmtYear: string, accountN
     }
 
     let description = restOfLine
-    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+    for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
       const nextLine = lines[j]
       const lineAmtBal = nextLine.match(/^\s*(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s*$/)
       if (lineAmtBal) {
