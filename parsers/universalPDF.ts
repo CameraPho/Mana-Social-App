@@ -31,7 +31,8 @@ const PLATFORM_HINTS = new Set(['eBay', 'TCGplayer', 'TCGplayer-tax', 'ManaPool'
 function detectBankFromText(text: string): { accountName: string; isCreditCard: boolean } {
   // Use only first ~600 chars (≈top of page 1) for bank detection.
   // Transaction descriptions further down can falsely trigger vendor matches.
-  const t = text.toLowerCase().slice(0, 600)
+  const fullT = text.toLowerCase()
+  const t = fullT.slice(0, 600)
 
   // Specific product strings, most-specific first
   if (/chase\s+(total|premier\s*plus|college|sapphire|secure)\s+checking/.test(t)) return { accountName: 'Cam | Chase Personal Checking', isCreditCard: false }
@@ -44,6 +45,9 @@ function detectBankFromText(text: string): { accountName: string; isCreditCard: 
   if (/citi.*diamond\s+preferred|diamond\s+preferred.*citi/.test(t)) return { accountName: 'Cam | Citi Diamond Preferred', isCreditCard: true }
   if (/amazon.*visa|prime\s+visa|amazon\.com\s+chase/.test(t)) return { accountName: 'Cam | Amazon Chase Prime Visa', isCreditCard: true }
   if (/chase\s+ink/.test(t)) return { accountName: 'Cam | Chase Ink', isCreditCard: true }
+  // Chase Ink fallback: "Chase Ink" rendered as logo image, often not in extracted text. Detect via Chase CC URL + Cam's card ending 0737.
+  if (/chase\.com\/paycard/.test(t) && /xxxx\s+xxxx\s+xxxx\s+0737/.test(fullT)) return { accountName: 'Cam | Chase Ink', isCreditCard: true }
+  if (/apple\s+card/.test(t)) return { accountName: 'Cam | Apple Card', isCreditCard: true }
   if (/sapphire\s+preferred/.test(t)) return { accountName: 'Cam | Chase Sapphire Preferred', isCreditCard: true }
   if (/signify\s+business|wells\s+fargo.*signify/.test(t)) return { accountName: 'Mana Social | WF Signify Mastercard', isCreditCard: true }
 
