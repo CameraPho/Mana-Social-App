@@ -45,6 +45,7 @@ function detectBankFromText(text: string): { accountName: string; isCreditCard: 
   if (/citi.*diamond\s+preferred|diamond\s+preferred.*citi/.test(t)) return { accountName: 'Cam | Citi Diamond Preferred', isCreditCard: true }
   if (/amazon.*visa|prime\s+visa|amazon\.com\s+chase/.test(t)) return { accountName: 'Cam | Amazon Chase Prime Visa', isCreditCard: true }
   if (/chase\s+ink/.test(t)) return { accountName: 'Cam | Chase Ink', isCreditCard: true }
+  if (/chase\.com\/amazon/.test(t)) return { accountName: 'Cam | Amazon Chase Prime Visa', isCreditCard: true }
   // Chase Ink fallback: "Chase Ink" rendered as logo image, often not in extracted text. Detect via Chase CC URL + Cam's card ending 0737.
   if (/chase\.com\/paycard/.test(t) && /xxxx\s+xxxx\s+xxxx\s+0737/.test(fullT)) return { accountName: 'Cam | Chase Ink', isCreditCard: true }
   if (/apple\s+card/.test(t)) return { accountName: 'Cam | Apple Card', isCreditCard: true }
